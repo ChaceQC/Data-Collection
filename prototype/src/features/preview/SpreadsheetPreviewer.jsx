@@ -1,0 +1,148 @@
+import { useEffect, useMemo, useState } from "react";
+import { normalizePreviewResourceUrl } from "./previewTypes";
+
+function columnLabel(index) {
+  let value = index + 1;
+  let label = "";
+  while (value > 0) {
+    const remainder = (value - 1) % 26;
+    label = String.fromCharCode(65 + remainder) + label;
+    value = Math.floor((value - 1) / 26);
+  }
+  return label;
+}
+
+export function SpreadsheetPreviewer({ content }) {
+  const [state, setState] = useState({ status: "loading", workbook: null, reason: "" });
+  const [selectedSheet, setSelectedSheet] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    const controller = new AbortController();
+    let worker;
+    try {
+      worker = new Worker(new URL("./xlsxWorker.js", import.meta.url), { type: "module" });
+    } catch {
+      setState({
+        status: "parse-error",
+        workbook: null,
+        reason: "当前 WebView2 无法启动工作簿解析器。",
+      });
+      return () => controller.abort();
+    }
+    const workerTimeout = window.setTimeout(() => {
+      worker.terminate();
+      if (!cancelled) {
+        setState({
+          status: "parse-error",
+          workbook: null,
+          reason: "工作簿解析超时，已终止解析任务。",
+        });
+      }
+    }, 30000);
+    setState({ status: "loading", workbook: null, reason: "" });
+    setSelectedSheet(0);
+    async function loadWorkbook() {
+      try {
+        const response = await fetch(normalizePreviewResourceUrl(content.resourceUrl), { signal: controller.signal });
+        if (!response.ok) throw new Error("resource unavailable");
+        const arrayBuffer = await response.arrayBuffer();
+        worker.postMessage(arrayBuffer, [arrayBuffer]);
+      } catch (error) {
+        if (cancelled || error?.name === "AbortError") return;
+        window.clearTimeout(workerTimeout);
+        worker.terminate();
+        setState({
+          status: "parse-error",
+          workbook: null,
+          reason: error?.message === "resource unavailable"
+            ? "工作簿资源读取失败，请重试。"
+            : "工作簿无法解析，请检查文件是否损坏、加密或超出限制。",
+        });
+      }
+    }
+    worker.onmessage = (event) => {
+      if (cancelled) return;
+      window.clearTimeout(workerTimeout);
+      if (event.data.type === "ready") {
+        setState({ status: "ready", workbook: event.data.workbook, reason: "" });
+      } else {
+        setState({
+          status: "parse-error",
+          workbook: null,
+          reason: "工作簿无法解析，请检查文件是否损坏、加密或超出限制。",
+        });
+      }
+    };
+    worker.onerror = () => {
+      if (!cancelled) {
+        window.clearTimeout(workerTimeout);
+        worker.terminate();
+        setState({
+          status: "parse-error",
+          workbook: null,
+          reason: "工作簿解析器未能完成，请重试。",
+        });
+      }
+    };
+    void loadWorkbook();
+    return () => {
+      cancelled = true;
+      window.clearTimeout(workerTimeout);
+      controller.abort();
+      worker.terminate();
+    };
+  }, [content.resourceUrl]);
+
+  const currentSheet = useMemo(
+    () => state.workbook?.sheets[selectedSheet] || null,
+    [selectedSheet, state.workbook],
+  );
+
+  if (state.status === "loading") return <div className="preview-loading-state">正在解析 Excel 工作簿...</div>;
+  if (state.status !== "ready" || !state.workbook) return <div className="preview-error-state">{state.reason}</div>;
+
+  return (
+    <div className="preview-spreadsheet-content">
+      <div className="preview-sheet-toolbar">
+        <label htmlFor="preview-sheet-select">工作表</label>
+        <select
+          id="preview-sheet-select"
+          value={selectedSheet}
+          onChange={(event) => setSelectedSheet(Number(event.target.value))}
+        >
+          {state.workbook.sheets.map((sheet, index) => (
+            <option value={index} key={sheet.name}>{sheet.name}</option>
+          ))}
+        </select>
+        <span>公式只显示缓存值，不执行宏、公式代码或外部链接。</span>
+      </div>
+      {state.workbook.truncatedSheets && <div className="preview-notice">工作表超过 100 个，仅显示前 100 个。</div>}
+      {currentSheet?.truncated && <div className="preview-notice">当前工作表超过首屏限制，仅显示前 500 行、50 列。</div>}
+      {!currentSheet || !currentSheet.rows.length ? (
+        <div className="preview-empty-table">当前工作表没有可显示的单元格。</div>
+      ) : (
+        <div className="preview-table-scroll">
+          <table className="preview-spreadsheet-table">
+            <thead>
+              <tr>
+                <th scope="col">#</th>
+                {Array.from({ length: currentSheet.columns }, (_, index) => (
+                  <th scope="col" key={index}>{columnLabel(currentSheet.startColumn + index)}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {currentSheet.rows.map((row, rowIndex) => (
+                <tr key={rowIndex}>
+                  <th scope="row">{rowIndex + 1}</th>
+                  {row.map((value, columnIndex) => <td key={columnIndex}>{value}</td>)}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}

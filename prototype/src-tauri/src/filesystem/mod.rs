@@ -1,0 +1,662 @@
+use std::{
+    cmp::Reverse,
+    collections::HashSet,
+    fs::{self, Metadata},
+    hash::{Hash, Hasher},
+    path::{Path, PathBuf},
+    time::{SystemTime, UNIX_EPOCH},
+};
+
+use serde::{Deserialize, Serialize};
+use thiserror::Error;
+
+pub(crate) mod clipboard;
+pub(crate) mod external;
+pub(crate) mod operations;
+
+pub const MAX_INDEX_ENTRIES: usize = 20_000;
+
+#[derive(Debug, Error)]
+pub enum FileSystemError {
+    #[error("请选择可访问的普通文件")]
+    InvalidFile,
+    #[error("请选择可访问的文件夹")]
+    InvalidDirectory,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct FileTypeInfo {
+    pub extension: &'static str,
+    pub kind: &'static str,
+    pub file_type: &'static str,
+    pub language: Option<&'static str>,
+    pub media_type: Option<&'static str>,
+    pub previewer: &'static str,
+    pub limit: &'static str,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum PreviewPathError {
+    Missing,
+    PermissionDenied,
+    Invalid,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum PathValidationError {
+    Missing,
+    PermissionDenied,
+    Invalid,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IndexEntry {
+    pub id: String,
+    pub path: String,
+    pub name: String,
+    pub kind: String,
+    #[serde(rename = "type")]
+    pub file_type: String,
+    pub size: u64,
+    pub modified_at: i64,
+    #[serde(default = "default_status")]
+    pub status: String,
+    #[serde(default)]
+    pub invalid: bool,
+    #[serde(default)]
+    pub favorite: bool,
+    #[serde(default = "default_added_at")]
+    pub added_at: i64,
+    #[serde(default = "default_preview_status")]
+    pub preview_status: String,
+}
+
+#[derive(Debug, Default)]
+pub struct ScanResult {
+    pub entries: Vec<IndexEntry>,
+    pub skipped_count: usize,
+    pub truncated: bool,
+}
+
+fn default_status() -> String {
+    "已登记".to_string()
+}
+
+fn default_preview_status() -> String {
+    "idle".to_string()
+}
+
+fn default_added_at() -> i64 {
+    0
+}
+
+pub fn scan_paths(paths: &[String]) -> ScanResult {
+    let mut result = ScanResult::default();
+    let mut seen_paths = HashSet::new();
+
+    for raw_path in paths {
+        if result.entries.len() >= MAX_INDEX_ENTRIES {
+            result.truncated = true;
+            break;
+        }
+
+        let path = match canonicalize_selected_path(raw_path) {
+            Ok(path) => path,
+            Err(_) => {
+                result.skipped_count += 1;
+                continue;
+            }
+        };
+
+        let metadata = match fs::symlink_metadata(&path) {
+            Ok(metadata) => metadata,
+            Err(_) => {
+                result.skipped_count += 1;
+                continue;
+            }
+        };
+
+        if is_unsafe_metadata(&metadata) {
+            result.skipped_count += 1;
+        } else if metadata.is_file() {
+            add_file_entry(path, metadata, &mut seen_paths, &mut result);
+        } else if metadata.is_dir() {
+            add_folder_entry(path, metadata, &mut seen_paths, &mut result);
+        } else {
+            result.skipped_count += 1;
+        }
+    }
+
+    result
+        .entries
+        .sort_by_key(|entry| Reverse(entry.modified_at));
+    result
+}
+
+pub fn list_directory(raw_path: &str) -> Result<Vec<IndexEntry>, FileSystemError> {
+    let path =
+        canonicalize_selected_path(raw_path).map_err(|_| FileSystemError::InvalidDirectory)?;
+    let metadata = fs::symlink_metadata(&path).map_err(|_| FileSystemError::InvalidDirectory)?;
+    if is_unsafe_metadata(&metadata) || !metadata.is_dir() {
+        return Err(FileSystemError::InvalidDirectory);
+    }
+
+    let mut entries = Vec::new();
+    for entry in fs::read_dir(path).map_err(|_| FileSystemError::InvalidDirectory)? {
+        let entry = entry.map_err(|_| FileSystemError::InvalidDirectory)?;
+        let child_path = entry.path();
+        let child_metadata =
+            fs::symlink_metadata(&child_path).map_err(|_| FileSystemError::InvalidDirectory)?;
+        if is_unsafe_metadata(&child_metadata) {
+            continue;
+        }
+        if child_metadata.is_file() {
+            if let Some(index_entry) = build_file_entry(child_path, &child_metadata) {
+                entries.push(index_entry);
+            }
+        } else if child_metadata.is_dir() {
+            if let Some(index_entry) = build_folder_entry(child_path, &child_metadata) {
+                entries.push(index_entry);
+            }
+        }
+        if entries.len() >= MAX_INDEX_ENTRIES {
+            break;
+        }
+    }
+    sort_entries(&mut entries);
+    Ok(entries)
+}
+
+pub fn index_selected_path(raw_path: &str) -> Result<IndexEntry, FileSystemError> {
+    let path = canonicalize_selected_path(raw_path)?;
+    let metadata = fs::symlink_metadata(&path).map_err(|_| FileSystemError::InvalidFile)?;
+    if is_unsafe_metadata(&metadata) {
+        return Err(FileSystemError::InvalidFile);
+    }
+    if metadata.is_file() {
+        return build_file_entry(path, &metadata).ok_or(FileSystemError::InvalidFile);
+    }
+    if metadata.is_dir() {
+        return build_folder_entry(path, &metadata).ok_or(FileSystemError::InvalidFile);
+    }
+    Err(FileSystemError::InvalidFile)
+}
+
+pub fn refresh_entry(entry: &mut IndexEntry) -> bool {
+    let path = Path::new(&entry.path);
+    let metadata = match fs::symlink_metadata(path) {
+        Ok(metadata)
+            if !is_unsafe_metadata(&metadata)
+                && ((entry.kind == "folder" && metadata.is_dir())
+                    || (entry.kind != "folder" && metadata.is_file())) =>
+        {
+            metadata
+        }
+        _ => {
+            let changed = !entry.invalid || entry.status != "路径失效";
+            entry.invalid = true;
+            entry.status = "路径失效".to_string();
+            return changed;
+        }
+    };
+
+    let updated = if entry.kind == "folder" {
+        build_folder_entry(path.to_path_buf(), &metadata)
+    } else {
+        build_file_entry(path.to_path_buf(), &metadata)
+    };
+    let Some(updated) = updated else {
+        let changed = !entry.invalid || entry.status != "路径失效";
+        entry.invalid = true;
+        entry.status = "路径失效".to_string();
+        return changed;
+    };
+
+    let changed = entry.invalid
+        || entry.status != "已登记"
+        || entry.name != updated.name
+        || entry.kind != updated.kind
+        || entry.file_type != updated.file_type
+        || entry.size != updated.size
+        || entry.modified_at != updated.modified_at;
+    entry.name = updated.name;
+    entry.kind = updated.kind;
+    entry.file_type = updated.file_type;
+    entry.size = updated.size;
+    entry.modified_at = updated.modified_at;
+    entry.invalid = false;
+    entry.status = "已登记".to_string();
+    changed
+}
+
+pub fn same_path(left: &str, right: &str) -> bool {
+    normalize_path_key(Path::new(left)) == normalize_path_key(Path::new(right))
+}
+
+pub(crate) fn validate_preview_file(
+    raw_path: &str,
+) -> Result<(PathBuf, Metadata), PreviewPathError> {
+    validate_regular_file_path(raw_path).map_err(map_path_validation_error)
+}
+
+pub(crate) fn validate_regular_file_path(
+    raw_path: &str,
+) -> Result<(PathBuf, Metadata), PathValidationError> {
+    let path = canonicalize_existing_path(raw_path)?;
+    let metadata = fs::symlink_metadata(&path).map_err(map_path_io_error)?;
+    if is_unsafe_metadata(&metadata) || !metadata.is_file() {
+        return Err(PathValidationError::Invalid);
+    }
+    Ok((path, metadata))
+}
+
+pub(crate) fn validate_directory_path(raw_path: &str) -> Result<PathBuf, PathValidationError> {
+    let path = canonicalize_existing_path(raw_path)?;
+    let metadata = fs::symlink_metadata(&path).map_err(map_path_io_error)?;
+    if is_unsafe_metadata(&metadata) || !metadata.is_dir() {
+        return Err(PathValidationError::Invalid);
+    }
+    Ok(path)
+}
+
+fn add_folder_entry(
+    path: PathBuf,
+    metadata: Metadata,
+    seen_paths: &mut HashSet<String>,
+    result: &mut ScanResult,
+) {
+    let key = normalize_path_key(&path);
+    if !seen_paths.insert(key) {
+        return;
+    }
+    if let Some(entry) = build_folder_entry(path, &metadata) {
+        result.entries.push(entry);
+    } else {
+        result.skipped_count += 1;
+    }
+}
+
+fn add_file_entry(
+    path: PathBuf,
+    metadata: Metadata,
+    seen_paths: &mut HashSet<String>,
+    result: &mut ScanResult,
+) {
+    let key = normalize_path_key(&path);
+    if !seen_paths.insert(key) {
+        return;
+    }
+    if let Some(entry) = build_file_entry(path, &metadata) {
+        result.entries.push(entry);
+    } else {
+        result.skipped_count += 1;
+    }
+}
+
+fn canonicalize_selected_path(raw_path: &str) -> Result<PathBuf, FileSystemError> {
+    canonicalize_existing_path(raw_path).map_err(|_| FileSystemError::InvalidFile)
+}
+
+fn build_file_entry(path: PathBuf, metadata: &Metadata) -> Option<IndexEntry> {
+    let (kind, file_type) = classify_path(&path);
+    build_entry(path, metadata, kind, file_type, metadata.len())
+}
+
+fn build_folder_entry(path: PathBuf, metadata: &Metadata) -> Option<IndexEntry> {
+    build_entry(path, metadata, "folder", "文件夹", 0)
+}
+
+fn build_entry(
+    path: PathBuf,
+    metadata: &Metadata,
+    kind: &str,
+    file_type: &str,
+    size: u64,
+) -> Option<IndexEntry> {
+    let name = path.file_name()?.to_string_lossy().into_owned();
+    Some(IndexEntry {
+        id: make_id(&path),
+        path: path.to_string_lossy().into_owned(),
+        name,
+        kind: kind.to_string(),
+        file_type: file_type.to_string(),
+        size,
+        modified_at: modified_timestamp(metadata),
+        status: "已登记".to_string(),
+        invalid: false,
+        favorite: false,
+        added_at: current_timestamp(),
+        preview_status: default_preview_status(),
+    })
+}
+
+fn sort_entries(entries: &mut [IndexEntry]) {
+    entries.sort_by(|left, right| {
+        right
+            .modified_at
+            .cmp(&left.modified_at)
+            .then_with(|| left.name.cmp(&right.name))
+            .then_with(|| left.id.cmp(&right.id))
+    });
+}
+
+pub(crate) fn type_info_for_path(path: &Path) -> Option<FileTypeInfo> {
+    let extension = path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    type_info_for_extension(&extension)
+}
+
+pub(crate) fn type_info_for_extension(extension: &str) -> Option<FileTypeInfo> {
+    let extension = extension.trim_start_matches('.').to_ascii_lowercase();
+    let info = match extension.as_str() {
+        "md" | "markdown" => FileTypeInfo {
+            extension: if extension == "md" { "md" } else { "markdown" },
+            kind: "markdown",
+            file_type: "Markdown",
+            language: Some("markdown"),
+            media_type: None,
+            previewer: "MarkdownPreviewer",
+            limit: "text",
+        },
+        "txt" | "text" => FileTypeInfo {
+            extension: if extension == "txt" { "txt" } else { "text" },
+            kind: "text",
+            file_type: "文本文件",
+            language: None,
+            media_type: None,
+            previewer: "TextPreviewer",
+            limit: "text",
+        },
+        "js" => text_info("js", "javascript"),
+        "jsx" => text_info("jsx", "javascript"),
+        "ts" => text_info("ts", "typescript"),
+        "tsx" => text_info("tsx", "typescript"),
+        "py" => text_info("py", "python"),
+        "c" => text_info("c", "c"),
+        "h" => text_info("h", "c"),
+        "cc" | "cpp" | "cxx" => text_info("cpp", "cpp"),
+        "hpp" => text_info("hpp", "cpp"),
+        "rs" => text_info("rs", "rust"),
+        "go" => text_info("go", "go"),
+        "java" => text_info("java", "java"),
+        "css" => text_info("css", "css"),
+        "html" => text_info("html", "html"),
+        "xml" => text_info("xml", "xml"),
+        "yaml" | "yml" => text_info("yaml", "yaml"),
+        "toml" => text_info("toml", "toml"),
+        "ini" | "conf" => text_info("ini", "ini"),
+        "sql" => text_info("sql", "sql"),
+        "json" | "jsonl" => text_info("json", "json"),
+        "doc" => FileTypeInfo {
+            extension: "doc",
+            kind: "doc",
+            file_type: "Word 文档",
+            language: None,
+            media_type: Some("application/msword"),
+            previewer: "DocPreviewer",
+            limit: "docx",
+        },
+        "docx" => FileTypeInfo {
+            extension: "docx",
+            kind: "docx",
+            file_type: "Word 文档",
+            language: None,
+            media_type: Some(
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            ),
+            previewer: "OfficePreviewer",
+            limit: "docx",
+        },
+        "xls" | "xlsx" => FileTypeInfo {
+            extension: if extension == "xls" { "xls" } else { "xlsx" },
+            kind: "xlsx",
+            file_type: "Excel 工作簿",
+            language: None,
+            media_type: Some("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
+            previewer: "SpreadsheetPreviewer",
+            limit: "xlsx",
+        },
+        "pdf" => FileTypeInfo {
+            extension: "pdf",
+            kind: "pdf",
+            file_type: "PDF 文档",
+            language: None,
+            media_type: Some("application/pdf"),
+            previewer: "PdfPreviewer",
+            limit: "pdf",
+        },
+        "png" => image_info("png", "image/png"),
+        "jpg" | "jpeg" => image_info("jpeg", "image/jpeg"),
+        "webp" => image_info("webp", "image/webp"),
+        "gif" => image_info("gif", "image/gif"),
+        "bmp" => image_info("bmp", "image/bmp"),
+        "mp4" => video_info("mp4", "video/mp4"),
+        "webm" => video_info("webm", "video/webm"),
+        _ => return None,
+    };
+    Some(info)
+}
+
+fn classify_path(path: &Path) -> (&'static str, &'static str) {
+    type_info_for_path(path)
+        .map(|info| (info.kind, info.file_type))
+        .unwrap_or(("other", "其他文件"))
+}
+
+fn text_info(extension: &'static str, language: &'static str) -> FileTypeInfo {
+    FileTypeInfo {
+        extension,
+        kind: "text",
+        file_type: "代码或配置",
+        language: Some(language),
+        media_type: None,
+        previewer: "TextPreviewer",
+        limit: "text",
+    }
+}
+
+fn image_info(extension: &'static str, media_type: &'static str) -> FileTypeInfo {
+    FileTypeInfo {
+        extension,
+        kind: "image",
+        file_type: "图片",
+        language: None,
+        media_type: Some(media_type),
+        previewer: "ImagePreviewer",
+        limit: "image",
+    }
+}
+
+fn video_info(extension: &'static str, media_type: &'static str) -> FileTypeInfo {
+    FileTypeInfo {
+        extension,
+        kind: "video",
+        file_type: "视频",
+        language: None,
+        media_type: Some(media_type),
+        previewer: "VideoPreviewer",
+        limit: "video",
+    }
+}
+
+fn modified_timestamp(metadata: &Metadata) -> i64 {
+    metadata
+        .modified()
+        .ok()
+        .and_then(|modified| modified.duration_since(UNIX_EPOCH).ok())
+        .map(|duration| duration.as_secs().min(i64::MAX as u64) as i64)
+        .unwrap_or(0)
+}
+
+fn make_id(path: &Path) -> String {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    normalize_path_key(path).hash(&mut hasher);
+    format!("file-{:016x}", hasher.finish())
+}
+
+fn normalize_path_key(path: &Path) -> String {
+    let path = path.to_string_lossy().replace('/', "\\");
+    #[cfg(windows)]
+    {
+        path.to_ascii_lowercase()
+    }
+    #[cfg(not(windows))]
+    {
+        path
+    }
+}
+
+pub(crate) fn is_unsafe_metadata(metadata: &Metadata) -> bool {
+    if metadata.file_type().is_symlink() {
+        return true;
+    }
+    is_reparse_point(metadata)
+}
+
+pub(crate) fn canonicalize_existing_path(raw_path: &str) -> Result<PathBuf, PathValidationError> {
+    let trimmed = raw_path.trim();
+    if trimmed.is_empty() {
+        return Err(PathValidationError::Invalid);
+    }
+
+    let input = PathBuf::from(trimmed);
+    let absolute = if input.is_absolute() {
+        input
+    } else {
+        std::env::current_dir()
+            .map_err(|_| PathValidationError::Invalid)?
+            .join(input)
+    };
+    reject_unsafe_components(&absolute)?;
+    let link_metadata = fs::symlink_metadata(&absolute).map_err(map_path_io_error)?;
+    if is_unsafe_metadata(&link_metadata) {
+        return Err(PathValidationError::Invalid);
+    }
+
+    let canonical = fs::canonicalize(&absolute).map_err(map_path_io_error)?;
+    reject_unsafe_components(&canonical)?;
+    let canonical_metadata = fs::symlink_metadata(&canonical).map_err(map_path_io_error)?;
+    if is_unsafe_metadata(&canonical_metadata) {
+        return Err(PathValidationError::Invalid);
+    }
+    Ok(canonical)
+}
+
+fn reject_unsafe_components(path: &Path) -> Result<(), PathValidationError> {
+    for ancestor in path.ancestors() {
+        if ancestor.as_os_str().is_empty() {
+            continue;
+        }
+        match fs::symlink_metadata(ancestor) {
+            Ok(metadata) if is_unsafe_metadata(&metadata) => {
+                return Err(PathValidationError::Invalid)
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => break,
+            Err(error) => return Err(map_path_io_error(error)),
+        }
+    }
+    Ok(())
+}
+
+fn map_path_io_error(error: std::io::Error) -> PathValidationError {
+    match error.kind() {
+        std::io::ErrorKind::NotFound => PathValidationError::Missing,
+        std::io::ErrorKind::PermissionDenied => PathValidationError::PermissionDenied,
+        _ => PathValidationError::Invalid,
+    }
+}
+
+fn map_path_validation_error(error: PathValidationError) -> PreviewPathError {
+    match error {
+        PathValidationError::Missing => PreviewPathError::Missing,
+        PathValidationError::PermissionDenied => PreviewPathError::PermissionDenied,
+        PathValidationError::Invalid => PreviewPathError::Invalid,
+    }
+}
+
+fn current_timestamp() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .ok()
+        .map(|duration| duration.as_secs().min(i64::MAX as u64) as i64)
+        .unwrap_or(0)
+}
+
+#[cfg(windows)]
+fn is_reparse_point(metadata: &Metadata) -> bool {
+    use std::os::windows::fs::MetadataExt;
+
+    const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
+    metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
+}
+
+#[cfg(not(windows))]
+fn is_reparse_point(_metadata: &Metadata) -> bool {
+    false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{list_directory, same_path, scan_paths};
+    use std::{fs, path::PathBuf, time::SystemTime};
+
+    #[test]
+    fn indexes_selected_directory_as_one_folder() {
+        let root = unique_temp_dir();
+        let nested = root.join("资料 子目录");
+        assert!(fs::create_dir_all(&nested).is_ok());
+        let file = nested.join("研究 计划.md");
+        assert!(fs::write(&file, "# 资料").is_ok());
+
+        let result = scan_paths(&[root.to_string_lossy().into_owned()]);
+
+        assert_eq!(result.entries.len(), 1);
+        assert_eq!(
+            result.entries[0].name,
+            root.file_name().unwrap().to_string_lossy()
+        );
+        assert_eq!(result.entries[0].kind, "folder");
+        assert_eq!(result.entries[0].file_type, "文件夹");
+        assert!(!result.entries[0].invalid);
+        assert!(fs::remove_dir_all(root).is_ok());
+    }
+
+    #[test]
+    fn lists_direct_children_for_folder_navigation() {
+        let root = unique_temp_dir();
+        let nested = root.join("子目录");
+        assert!(fs::create_dir_all(&nested).is_ok());
+        assert!(fs::write(root.join("研究 计划.md"), "# 资料").is_ok());
+        assert!(fs::write(nested.join("访谈 记录.txt"), "记录").is_ok());
+
+        let result = list_directory(&root.to_string_lossy()).expect("directory should list");
+
+        assert_eq!(result.len(), 2);
+        assert!(result
+            .iter()
+            .any(|entry| entry.name == "子目录" && entry.kind == "folder"));
+        assert!(result
+            .iter()
+            .any(|entry| entry.name == "研究 计划.md" && entry.kind == "markdown"));
+        assert!(fs::remove_dir_all(root).is_ok());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn compares_windows_style_paths_without_case_differences() {
+        assert!(same_path("C:\\资料\\计划.md", "c:/资料/计划.md"));
+    }
+
+    fn unique_temp_dir() -> PathBuf {
+        let timestamp = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .map(|duration| duration.as_nanos())
+            .unwrap_or_default();
+        std::env::temp_dir().join(format!("local-material-workbench-{timestamp}"))
+    }
+}

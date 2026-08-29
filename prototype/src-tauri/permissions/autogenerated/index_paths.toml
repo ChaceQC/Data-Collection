@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-index-paths"
+description = "Enables the index_paths command without any pre-configured scope."
+commands.allow = ["index_paths"]
+
+[[permission]]
+identifier = "deny-index-paths"
+description = "Denies the index_paths command without any pre-configured scope."
+commands.deny = ["index_paths"]

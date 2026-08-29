@@ -1,0 +1,20 @@
+use tauri_build::{AppManifest, Attributes};
+
+fn main() {
+    let attributes = Attributes::new().app_manifest(AppManifest::new().commands(&[
+        "load_file_index",
+        "list_directory",
+        "index_paths",
+        "reposition_file",
+        "set_favorite",
+        "remove_index_entry",
+        "copy_indexed_file",
+        "open_indexed_file",
+        "reveal_indexed_file",
+        "rename_indexed_file",
+        "delete_original_file",
+        "load_settings",
+        "update_settings",
+    ]));
+    tauri_build::try_build(attributes).expect("failed to run Tauri build script");
+}

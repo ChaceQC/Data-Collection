@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-dispose-preview"
+description = "Enables the dispose_preview command without any pre-configured scope."
+commands.allow = ["dispose_preview"]
+
+[[permission]]
+identifier = "deny-dispose-preview"
+description = "Denies the dispose_preview command."
+commands.deny = ["dispose_preview"]

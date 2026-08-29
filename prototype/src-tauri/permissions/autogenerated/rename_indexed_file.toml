@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-rename-indexed-file"
+description = "Enables the rename_indexed_file command without any pre-configured scope."
+commands.allow = ["rename_indexed_file"]
+
+[[permission]]
+identifier = "deny-rename-indexed-file"
+description = "Denies the rename_indexed_file command without any pre-configured scope."
+commands.deny = ["rename_indexed_file"]

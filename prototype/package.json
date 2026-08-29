@@ -1,0 +1,35 @@
+{
+  "name": "local-material-workbench",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build && node scripts/prepare-sites-build.mjs",
+    "preview": "vite preview",
+    "test:library": "node --test tests/library-model.test.mjs",
+    "test:settings": "node --test tests/settings-model.test.mjs",
+    "test:preview": "node --test tests/preview-registry.test.mjs",
+    "test:sites": "node --test tests/sites-worker.test.mjs",
+    "tauri": "tauri",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build"
+  },
+  "dependencies": {
+    "@phosphor-icons/react": "^2.1.10",
+    "@tauri-apps/api": "2.11.1",
+    "@tauri-apps/plugin-dialog": "2.7.2",
+    "dompurify": "^3.4.14",
+    "mammoth": "^1.12.2",
+    "marked": "^15.0.12",
+    "pdfjs-dist": "^4.10.38",
+    "react": "19.2.0",
+    "react-dom": "19.2.0",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "2.11.4",
+    "@vitejs/plugin-react": "5.0.4",
+    "vite": "6.4.3"
+  }
+}

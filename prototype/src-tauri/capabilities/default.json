@@ -1,0 +1,30 @@
+{
+  "$schema": "https://schema.tauri.app/capability/2",
+  "identifier": "main-capability",
+  "description": "本地资料工作台主窗口的最小桌面能力",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "core:window:allow-close",
+    "core:window:allow-minimize",
+    "core:window:allow-toggle-maximize",
+    "core:window:allow-start-dragging",
+    "dialog:allow-open",
+    "allow-load-file-index",
+    "allow-list-directory",
+    "allow-index-paths",
+    "allow-reposition-file",
+    "allow-set-favorite",
+    "allow-remove-index-entry",
+    "allow-copy-indexed-file",
+    "allow-open-indexed-file",
+    "allow-reveal-indexed-file",
+    "allow-rename-indexed-file",
+    "allow-delete-original-file",
+    "allow-load-settings",
+    "allow-update-settings",
+    "allow-can-preview",
+    "allow-load-preview",
+    "allow-dispose-preview"
+  ]
+}

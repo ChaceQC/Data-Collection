@@ -1,0 +1,40 @@
+use std::path::Path;
+
+use image::{ImageFormat, ImageReader};
+
+use crate::config::MAX_IMAGE_PIXELS;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum ImageValidationError {
+    Invalid,
+    TooLarge,
+}
+
+pub(crate) fn dimensions(path: &Path, extension: &str) -> Result<(u32, u32), ImageValidationError> {
+    let reader = ImageReader::open(path).map_err(|_| ImageValidationError::Invalid)?;
+    let reader = reader
+        .with_guessed_format()
+        .map_err(|_| ImageValidationError::Invalid)?;
+    let format = reader.format().ok_or(ImageValidationError::Invalid)?;
+    if !matches_extension(extension, format) {
+        return Err(ImageValidationError::Invalid);
+    }
+    let (width, height) = reader
+        .into_dimensions()
+        .map_err(|_| ImageValidationError::Invalid)?;
+    if u64::from(width) * u64::from(height) > MAX_IMAGE_PIXELS {
+        return Err(ImageValidationError::TooLarge);
+    }
+    Ok((width, height))
+}
+
+fn matches_extension(extension: &str, format: ImageFormat) -> bool {
+    match extension {
+        "png" => format == ImageFormat::Png,
+        "jpeg" => format == ImageFormat::Jpeg,
+        "webp" => format == ImageFormat::WebP,
+        "gif" => format == ImageFormat::Gif,
+        "bmp" => format == ImageFormat::Bmp,
+        _ => false,
+    }
+}
