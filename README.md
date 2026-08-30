@@ -6,7 +6,7 @@
 
 本地资料工作台用于把分散在电脑中的文件和文件夹集中登记，提供统一的检索、排序、收藏、目录浏览和预览入口。应用遵循 local-first 原则：导入资料时默认只保存路径和文件元数据，不复制原文件，不上传用户内容，也不依赖后端服务或在线账号。
 
-当前版本为 `0.3.0`，Windows 11 桌面端的系统托盘、关闭行为、悬浮窗、跨窗口同步和 NSIS 构建流程已经完成阶段验收。项目源码位于 [`prototype/`](prototype/)，根目录的计划和进度记录分别见 [`PROJECT_PLAN.md`](PROJECT_PLAN.md) 与 [`PROJECT_PROGRESS.md`](PROJECT_PROGRESS.md)。
+当前版本为 `0.3.6`，已完成悬浮球悬停状态机、工作区几何、边缘方向回退、面板命中和多显示器/DPI 优化；用户已确认 Windows 11 桌面端全部验收场景通过，当前进入正式发布流程。项目源码位于 [`prototype/`](prototype/)，根目录的计划和进度记录分别见 [`PROJECT_PLAN.md`](PROJECT_PLAN.md) 与 [`PROJECT_PROGRESS.md`](PROJECT_PROGRESS.md)。
 
 ## 功能概览
 
@@ -16,6 +16,7 @@
 - 浏览已登记的文件夹和子目录；失效路径可以由用户选择同类型的新路径重新定位。
 - 支持文本、Markdown、图片、视频、XLS/XLSX、DOCX、PDF 和 DOC 的受控只读预览。
 - 提供悬浮球和系统托盘，悬浮球可记录最近拖入的资料，托盘和主窗口共享最近记录与收藏状态。
+- 悬浮球面板使用统一的悬停状态机和工作区几何模型，覆盖球体到面板的连续命中、按水平位置向左/右展开、面板内部滚动和键盘收起。
 - 在桌面端提供明确触发的复制、重命名、回收站删除、默认程序打开和资源管理器定位操作，并在执行前进行必要确认。
 - 提供默认排序、分页数量、关闭时隐藏到托盘和悬浮窗可见性等设置。
 
@@ -121,8 +122,8 @@ npm.cmd run verify:loader
 发布流程由 [`release.yml`](.github/workflows/release.yml) 管理。将与项目版本一致的 `vX.Y.Z` 标签推送到 GitHub 后，Action 会在 Windows 2022 runner 上执行依赖安装、Tauri 构建和版本校验，并自动创建或更新对应的 GitHub Release：
 
 ```powershell
-git tag v0.3.0
-git push origin v0.3.0
+git tag v0.3.6
+git push origin v0.3.6
 ```
 
 每个 Release 包含两个资源：
@@ -184,7 +185,7 @@ prototype/
 - 不把用户文件内容、真实路径、密钥、令牌或私钥写入日志、测试夹具和提交记录。
 - 新增代码、测试、构建或架构变化时同步更新 `PROJECT_PROGRESS.md`；计划性工作遵循 `PROJECT_PLAN.md`。
 - 提交前检查 `git status`、改动内容和 `git diff --check`，不要提交构建产物、缓存、真实资料或本地配置。
-- 版本号在前端 package、Tauri 配置和 Rust crate 入口保持一致，当前版本为 `0.3.0`。
+- 版本号在前端 package、Tauri 配置和 Rust crate 入口保持一致，当前发布版本为 `0.3.6`；用户 Windows 11 手工验收已全部通过。
 
 ## 参考文档
 

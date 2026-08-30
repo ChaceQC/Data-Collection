@@ -1,15 +1,17 @@
-export const FLOATING_BALL_CONSTANTS = Object.freeze({
-  ballSizeDip: 64,
-  panelWidthDip: 320,
-  panelHeightDip: 322,
-  recentLimit: 5,
-  enterNearDip: 28,
-  leaveNearDip: 16,
-  openDelayMs: 120,
-  closeDelayMs: 250,
-  snapThresholdDip: 24,
-  placementSaveDebounceMs: 220,
-});
+import {
+  FLOATING_BALL_CONSTANTS,
+  FLOATING_DIRECTIONS,
+  getExpandedWindowGeometry,
+  getPanelDirection,
+  normalizeWorkArea,
+} from "./floatingBallGeometryModel.js";
+
+export {
+  FLOATING_BALL_CONSTANTS,
+  FLOATING_DIRECTIONS,
+  getExpandedWindowGeometry,
+  getPanelDirection,
+} from "./floatingBallGeometryModel.js";
 
 export const DEFAULT_FLOATING_PLACEMENT = Object.freeze({
   mode: "edge",
@@ -85,75 +87,6 @@ export function getNearState(cursor, bounds, wasNear = false) {
   return distance <= leaveThreshold || (distance > leaveThreshold && distance <= enterThreshold);
 }
 
-export function getPanelDirection(placement, workArea, ballPosition, panelSize = {}) {
-  const edgeDirection = {
-    left: "right",
-    right: "left",
-    top: "down",
-    bottom: "up",
-  };
-  if (placement?.mode === "edge" && edgeDirection[placement.edge]) {
-    return edgeDirection[placement.edge];
-  }
-  if (!workArea || !ballPosition) return "left";
-
-  const width = Number(panelSize.width) || FLOATING_BALL_CONSTANTS.panelWidthDip;
-  const height = Number(panelSize.height) || FLOATING_BALL_CONSTANTS.panelHeightDip;
-  const available = {
-    left: ballPosition.x - workArea.x,
-    right: workArea.x + workArea.width - (ballPosition.x + FLOATING_BALL_CONSTANTS.ballSizeDip),
-    up: ballPosition.y - workArea.y,
-    down: workArea.y + workArea.height - (ballPosition.y + FLOATING_BALL_CONSTANTS.ballSizeDip),
-  };
-  const options = [
-    ["left", available.left >= width],
-    ["right", available.right >= width],
-    ["up", available.up >= height],
-    ["down", available.down >= height],
-  ];
-  return options
-    .filter(([, fits]) => fits)
-    .sort((left, right) => available[right[0]] - available[left[0]])[0]?.[0]
-    || Object.entries(available).sort((left, right) => right[1] - left[1])[0][0];
-}
-
-export function getExpandedWindowGeometry(ballPosition, direction, panelSize = {}, workArea = null) {
-  const ballSize = FLOATING_BALL_CONSTANTS.ballSizeDip;
-  const panelWidth = Number(panelSize.width) || FLOATING_BALL_CONSTANTS.panelWidthDip;
-  const panelHeight = Number(panelSize.height) || FLOATING_BALL_CONSTANTS.panelHeightDip;
-  const area = workArea ? normalizeWorkArea(workArea) : null;
-  const width = direction === "left" || direction === "right"
-    ? ballSize + panelWidth
-    : Math.max(ballSize, panelWidth);
-  const height = direction === "up" || direction === "down"
-    ? ballSize + panelHeight
-    : Math.max(ballSize, panelHeight);
-  const desiredRootX = direction === "left" ? ballPosition.x - panelWidth : ballPosition.x;
-  const rootX = area
-    ? clamp(desiredRootX, area.x, area.x + area.width - width)
-    : desiredRootX;
-  const rootY = area
-    ? clamp(
-      direction === "up" ? ballPosition.y - panelHeight : ballPosition.y,
-      area.y,
-      area.y + area.height - height,
-    )
-    : direction === "up" ? ballPosition.y - panelHeight : ballPosition.y;
-  const normalBallPosition = {
-    x: direction === "left" ? rootX + panelWidth : rootX,
-    y: direction === "up" ? rootY + panelHeight : rootY,
-  };
-  const geometry = {
-    x: rootX,
-    y: rootY,
-    width,
-    height,
-    ballOffsetX: ballPosition.x - normalBallPosition.x,
-    ballOffsetY: ballPosition.y - normalBallPosition.y,
-  };
-  return geometry;
-}
-
 export function getSnapPlacement(windowPosition, workArea, monitorKey, options = {}) {
   const ballSize = Number(options.ballSize) || FLOATING_BALL_CONSTANTS.ballSizeDip;
   const threshold = Number(options.threshold) || FLOATING_BALL_CONSTANTS.snapThresholdDip;
@@ -209,8 +142,8 @@ export function getPlacementPosition(placement, workArea, ballSize = FLOATING_BA
   return { x: area.x + maxX, y: area.y + clamp(offset, 0, maxY) };
 }
 
-export function monitorToWorkArea(monitor) {
-  const scaleFactor = normalizeScaleFactor(monitor?.scaleFactor);
+export function monitorToWorkArea(monitor, scaleFactorOverride = null) {
+  const scaleFactor = normalizeScaleFactor(scaleFactorOverride ?? monitor?.scaleFactor);
   const position = monitor?.workArea?.position || {};
   const size = monitor?.workArea?.size || {};
   return {
@@ -252,19 +185,11 @@ function distanceToRect(cursor, bounds) {
   return Math.hypot(horizontal, vertical);
 }
 
-function normalizeWorkArea(workArea) {
-  return {
-    x: Number(workArea?.x) || 0,
-    y: Number(workArea?.y) || 0,
-    width: Math.max(0, Number(workArea?.width) || 0),
-    height: Math.max(0, Number(workArea?.height) || 0),
-  };
-}
-
 function normalizeScaleFactor(scaleFactor) {
   return Number(scaleFactor) > 0 ? Number(scaleFactor) : 1;
 }
 
 function clamp(value, minimum, maximum) {
+  if (maximum < minimum) return minimum;
   return Math.max(minimum, Math.min(maximum, Number.isFinite(value) ? value : minimum));
 }

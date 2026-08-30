@@ -47,35 +47,29 @@ test("uses hysteresis thresholds for near and leave transitions", () => {
 
 test("selects panel directions from edge placements and free-space availability", () => {
   assert.equal(getPanelDirection({ mode: "edge", edge: "right" }, workArea, { x: 1100, y: 200 }), "left");
-  assert.equal(getPanelDirection({ mode: "edge", edge: "top" }, workArea, { x: 200, y: 0 }), "down");
+  assert.equal(getPanelDirection({ mode: "edge", edge: "top" }, workArea, { x: 200, y: 0 }), "right");
   assert.equal(getPanelDirection({ mode: "free" }, workArea, { x: 20, y: 20 }, { width: 320, height: 322 }), "right");
+  assert.equal(getPanelDirection({ mode: "free" }, workArea, { x: 1100, y: 20 }), "left");
 });
 
-test("keeps the ball anchor when expanding in every direction", () => {
-  assert.deepEqual(getExpandedWindowGeometry({ x: 900, y: 100 }, "left"), {
-    x: 580,
-    y: 100,
-    width: 384,
-    height: 322,
-    ballOffsetX: 0,
-    ballOffsetY: 0,
-  });
-  assert.deepEqual(getExpandedWindowGeometry({ x: 100, y: 700 }, "up"), {
-    x: 100,
-    y: 378,
-    width: 320,
-    height: 386,
-    ballOffsetX: 0,
-    ballOffsetY: 0,
-  });
-  assert.deepEqual(getExpandedWindowGeometry({ x: 100, y: 20 }, "down"), {
-    x: 100,
-    y: 20,
-    width: 320,
-    height: 386,
-    ballOffsetX: 0,
-    ballOffsetY: 0,
-  });
+test("keeps the ball anchor and exposes host, ball, and panel rectangles", () => {
+  const left = getExpandedWindowGeometry({ x: 900, y: 100 }, "left");
+  assert.deepEqual(left.hostRect, { x: 580, y: 100, width: 384, height: 322 });
+  assert.deepEqual(left.ballRect, { x: 900, y: 100, width: 64, height: 64 });
+  assert.deepEqual(left.panelRect, { x: 580, y: 100, width: 320, height: 322 });
+  assert.equal(left.ballOffsetX, 320);
+  assert.equal(left.ballOffsetY, 0);
+
+  const right = getExpandedWindowGeometry({ x: 100, y: 700 }, "right");
+  assert.deepEqual(right.hostRect, { x: 100, y: 700, width: 384, height: 322 });
+  assert.deepEqual(right.panelRect, { x: 164, y: 700, width: 320, height: 322 });
+  assert.equal(right.ballOffsetX, 0);
+  assert.equal(right.ballOffsetY, 0);
+
+  const leftAtBottom = getExpandedWindowGeometry({ x: 900, y: 700 }, "left");
+  assert.deepEqual(leftAtBottom.hostRect, { x: 580, y: 700, width: 384, height: 322 });
+  assert.equal(leftAtBottom.ballOffsetX, 320);
+  assert.equal(leftAtBottom.ballOffsetY, 0);
 });
 
 test("clamps an expanded host to the work area while preserving the ball anchor", () => {
@@ -88,6 +82,45 @@ test("clamps an expanded host to the work area while preserving the ball anchor"
   assert.equal(geometry.y, 478);
   assert.equal(geometry.ballOffsetY, 258);
   assert.equal(geometry.x, 816);
+  assert.deepEqual(geometry.panelRect, { x: 816, y: 478, width: 320, height: 322 });
+});
+
+test("expands inward from all four corners and keeps every rectangle in the work area", () => {
+  const area = { x: -1280, y: -90, width: 1200, height: 800 };
+  const cases = [
+    [{ x: -1280, y: -90 }, "left", "right"],
+    [{ x: -144, y: -90 }, "top", "left"],
+    [{ x: -1280, y: 646 }, "bottom", "right"],
+    [{ x: -144, y: 646 }, "right", "left"],
+  ];
+  for (const [position, edge, expectedDirection] of cases) {
+    const direction = getPanelDirection({ mode: "edge", edge }, area, position);
+    assert.equal(direction, expectedDirection);
+    const geometry = getExpandedWindowGeometry(position, direction, {}, area);
+    assertRectWithin(geometry.ballRect, area);
+    assertRectWithin(geometry.panelRect, area);
+    assertRectWithin(geometry.hostRect, area);
+    assert.deepEqual(
+      { x: geometry.ballRect.x, y: geometry.ballRect.y },
+      {
+        x: geometry.hostRect.x + geometry.ballOffsetX,
+        y: geometry.hostRect.y + geometry.ballOffsetY,
+      },
+    );
+  }
+});
+
+test("falls back and compresses the panel when the work area is smaller than the default host", () => {
+  const area = { x: -900, y: -200, width: 300, height: 180 };
+  const position = { x: -900, y: -200 };
+  const direction = getPanelDirection({ mode: "edge", edge: "left" }, area, position);
+  assert.equal(direction, "right");
+  const geometry = getExpandedWindowGeometry(position, direction, {}, area);
+  assert.ok(geometry.panelRect.width < FLOATING_BALL_CONSTANTS.panelWidthDip);
+  assert.ok(geometry.panelRect.height < FLOATING_BALL_CONSTANTS.panelHeightDip);
+  assertRectWithin(geometry.ballRect, area);
+  assertRectWithin(geometry.panelRect, area);
+  assertRectWithin(geometry.hostRect, area);
 });
 
 test("snaps close-to-edge positions and clamps free positions to the work area", () => {
@@ -127,6 +160,23 @@ test("keeps monitor geometry stable when converting between DIP and physical pix
   assert.deepEqual(dipToPhysicalSize({ width: 384, height: 322 }, 1.5), { width: 576, height: 483 });
 });
 
+test("uses the window DPI override for monitor work-area conversion", () => {
+  const monitor = {
+    scaleFactor: 1,
+    workArea: {
+      position: { x: 1920, y: -90 },
+      size: { width: 2560, height: 1350 },
+    },
+  };
+  assert.deepEqual(monitorToWorkArea(monitor, 1.5), {
+    x: 1280,
+    y: -60,
+    width: 1706.6666666666667,
+    height: 900,
+    scaleFactor: 1.5,
+  });
+});
+
 test("maps successful, partial, and failed records to explicit feedback states", () => {
   assert.equal(getRecordStatus({ recordedCount: 2, skippedCount: 0 }), "recorded");
   assert.equal(getRecordStatus({ recordedCount: 1, skippedCount: 1 }), "partial-error");
@@ -137,3 +187,10 @@ test("maps successful, partial, and failed records to explicit feedback states",
 test("queues rapid drop paths without duplicating already queued values", () => {
   assert.deepEqual(mergePendingPaths(["a", "b"], ["b", "c", "a", "d"]), ["a", "b", "c", "d"]);
 });
+
+function assertRectWithin(rect, area) {
+  assert.ok(rect.x >= area.x - 0.0001);
+  assert.ok(rect.y >= area.y - 0.0001);
+  assert.ok(rect.x + rect.width <= area.x + area.width + 0.0001);
+  assert.ok(rect.y + rect.height <= area.y + area.height + 0.0001);
+}

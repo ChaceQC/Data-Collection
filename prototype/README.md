@@ -1,6 +1,6 @@
 # 本地资料工作台原型
 
-这是基于 `AGENT.md` 方案 3“收纳入口”实现的本地资料工作台。当前版本 `0.3.0` 包含 Tauri 2 桌面外壳、真实文件索引、统一预览适配器、悬浮球和系统托盘生命周期代码；阶段 H 的 Windows 11 桌面验收已完成，浏览器运行时仍只保留安全的原型回退。
+这是基于 `AGENT.md` 方案 3“收纳入口”实现的本地资料工作台。当前版本 `0.3.6` 为悬浮球优化正式发布版本，包含 Tauri 2 桌面外壳、真实文件索引、统一预览适配器、悬浮球和系统托盘生命周期代码；阶段 A-F 的实现、自动验证和 Windows 11 桌面手工验收均已完成，浏览器运行时仍只保留安全的原型回退。
 
 ## 启动
 
@@ -45,6 +45,7 @@ npm.cmd run tauri:build
 - 桌面应用启动时创建独立的 `floating-ball` 悬浮球窗口。用户可以从资源管理器把普通文件或文件夹拖到球体，Rust 端只登记路径和元数据；重复路径保留原索引 ID、收藏、添加时间和预览状态，并更新悬浮球专用的毫秒级 `lastRecordedAt`。
 - 悬浮球最近面板只显示最近 5 条通过悬浮球成功记录的资料，主窗口导入不会自动进入该列表；每条记录提供收藏/取消收藏按钮，路径失效、索引移除、重命名、重新定位和原文件操作通过 `index-changed` 事件同步。
 - 悬浮球使用受控的低频光标位置轮询、阈值滞回和延迟展开；用户可以拖动球体到工作区内自由位置或在 `24 DIP` 范围内贴到边缘。位置独立保存于 app data 目录的 `floating-ball.json` v1，保存的是显示器标识和逻辑坐标，不保存文件路径。
+- 悬浮球悬停优化使用 `floatingBallGeometryModel` 的 `ballRect`、`panelRect`、`hostRect` 和 `workArea` 纯模型，以及单一 `floatingBallHoverController` 状态机；面板从球体到面板的交互区域连续，打开前按水平位置选择左/右，空间不足时压缩面板并保留内部滚动。
 - 桌面端在启动后创建唯一的“本地资料工作台”系统托盘图标，菜单提供打开主窗口、打开设置、显示/隐藏悬浮窗、最近任务和真正退出入口；托盘创建失败时主窗口保持可用并显示安全错误。
 - 设置面板提供“关闭窗口时隐藏到系统托盘”和“显示悬浮窗”。前者只拦截普通主窗口关闭请求，托盘退出会绕过隐藏逻辑；后者会持久化并在运行时创建/销毁悬浮球，默认值分别为 `false` 和 `true`。
 - 无装饰主窗口使用明确的标题栏拖动区域；窗口顶部拖动带和页面标题使用 Tauri `data-tauri-drag-region="deep"`，窗口控制、搜索、排序、资料列表、拖放区和模态对话框均标记为非拖动区域。
@@ -71,7 +72,7 @@ Windows WebView2 使用 `http://preview.localhost/<previewId>` 访问受控资�
 
 PDF 的初始无范围请求返回完整 `200` 响应，客户端明确发起的范围请求仍按 `Content-Range` 分段返回，以兼容 PDF.js 的文件长度探测和分页读取。
 
-预览、资料库核心功能、阶段 F 的设置和显式外部操作，以及悬浮球阶段 A-E 的代码接入和用户验收均已完成。`0.2.8` 的主窗口标题栏拖动修复已合入 `0.3.0`；用户已完成系统托盘、关闭隐藏、悬浮窗运行时切换、主窗口拖动、托盘收藏和 NSIS 安装后 loader 的 Windows 11 手工验收。不把所有格式写成无条件“已支持”，视频编码、LibreOffice 和 WebView2 Runtime 仍按各自外部依赖边界处理。
+预览、资料库核心功能、阶段 F 的设置和显式外部操作，以及悬浮球阶段 A-F 的实现、自动验证和 Windows 11 桌面手工验收均已完成；`0.3.6` 正在按发布流程同步到 `main` 并创建 GitHub Release。`0.2.8` 的主窗口标题栏拖动修复已合入 `0.3.0`；此前系统托盘、关闭隐藏、悬浮窗运行时切换、主窗口拖动、托盘收藏和 NSIS 安装后 loader 的 Windows 11 手工验收记录继续有效。不把所有格式写成无条件“已支持”，视频编码、LibreOffice 和 WebView2 Runtime 仍按各自外部依赖边界处理。
 
 依赖审计注意事项：当前公开 `xlsx@0.18.5` 没有可用的 npm 修复版本，并存在已知 Prototype Pollution/ReDoS 报告。应用不打开宏、外部链接或 HTML，限制工作簿大小和展示范围，并在 Worker 中解析以便超时或异常时终止；在替换为有修复的兼容库前，该风险仍需纳入发布判断。
 
@@ -81,7 +82,7 @@ PDF 的初始无范围请求返回完整 `200` 响应，客户端明确发起的
 - SVG、MOV、AVI、MKV 等未登记格式返回 `unsupported`；视频不提供隐藏转码。
 - DOC 预览依赖本机 LibreOffice；当前构建未内置或下载 WebView2 Runtime，也未签名。
 - 标签/分组、全文检索、批量操作和通用撤销栈尚未实现；阶段 F 的数据模型、影响范围和失败恢复决策记录在 `docs/phase-f-settings-and-external-operations.md`。
-- 悬浮球透明置顶窗口、资源管理器真实拖放、多显示器、DPI、任务栏避让、应用重启恢复、双屏边缘闪烁修复，以及本轮托盘、关闭隐藏、悬浮窗开关、主窗口拖动和安装后目录检查均已由用户完成 Windows 手工验收；浏览器回退只展示内存演示状态。
+- 悬浮球透明置顶窗口、资源管理器真实拖放、位置恢复以及本轮新增的悬停状态机、四边四角几何、跨 DPI 和组合交互均已由用户在 Windows 11 桌面端验收通过；浏览器回退只展示内存演示状态。
 - 浏览器回退不会执行真实文件剪贴板、重命名、原文件删除或外部打开/定位；桌面端复制到剪贴板、资源管理器粘贴、设置持久化和显式外部操作已由用户在 Windows 环境完成手工验收。
 - 解析失败、缺失、权限不足、过大、转换器缺失和暂不支持均保留索引并在模态对话框显示可执行的下一步。
 - 已使用 Windows GNU 工具链构建 x64 NSIS 安装包；安装器签名、WebView2 Runtime 提供方式和 LibreOffice 仍属于发布边界说明。
@@ -110,6 +111,6 @@ cargo test
 cargo clippy --all-targets --all-features -- -D warnings
 ```
 
-`npm.cmd run build` 会生成 Sites 所需的 `dist/client/index.html`、`dist/server/index.js` 和 `dist/.openai/hosting.json`。浏览器/Sites 模式不会调用真实文件预览、托盘或窗口 command；Windows 桌面预览、资料库操作、阶段 F、悬浮球和阶段 H 桌面验收均已完成，当前 `0.3.0` 的发布验证记录在根目录 `PROJECT_PROGRESS.md`。
+`npm.cmd run build` 会生成 Sites 所需的 `dist/client/index.html`、`dist/server/index.js` 和 `dist/.openai/hosting.json`。浏览器/Sites 模式不会调用真实文件预览、托盘或窗口 command；上一版 Windows 桌面预览、资料库操作、阶段 F、悬浮球基础能力和阶段 H 验收记录在根目录 `PROJECT_PROGRESS.md`，当前 `0.3.6` 悬浮球优化的代码级验证和 Windows 11 实机验收均已完成。
 
-悬浮球阶段的自动验证使用 `npm.cmd run test:floating-ball`、`cargo test`、`cargo check` 和 `cargo clippy`；真实 Windows 窗口、文件拖放、多显示器位置和关闭/重启行为已由用户使用 `tests/fixtures/desktop-acceptance/` 手工确认，代理不以浏览器页面或开发侧命令结果替代该验收。
+悬浮球阶段的自动验证使用 `npm.cmd run test:floating-ball`、`cargo test`、`cargo check` 和 `cargo clippy`；真实 Windows 窗口、文件拖放、多显示器位置和关闭/重启行为的验收记录均保留，本轮悬停面板优化的四边四角、DPI 和组合行为已由用户完成手工确认，代理不以浏览器页面或开发侧命令结果替代该验收。
