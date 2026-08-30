@@ -2,6 +2,142 @@
 
 ## 2026-08-30
 
+### 悬浮球拖动后无法展开与收起闪烁修复
+
+#### 已完成
+
+- 修复 Windows 非客户区拖动结束时 WebView 未收到 `pointerup` 导致 controller 永久停留在 `dragging` 的问题；位置防抖保存完成后现在同时结束 controller 拖动状态。
+- 将原生拖动标记提前到 `startDragging` IPC 调用前，避免拖动开始阶段产生的 `Moved` 事件被忽略，确保最终位置能按当前显示器和 DPI 保存。
+- 展开窗口改为先移动到完整 host 位置、再放大窗口，避免悬浮球位于显示器边缘时放大瞬间跨屏并触发错误 DPI。
+- 工作区 DIP 换算支持窗口 DPI 覆盖值，避免 monitor 快照与窗口快照不同步时产生错误的边界和方向计算。
+- 收起进入 `closing` 状态时隐藏面板并将球体保持在窗口原点，避免原生移动/缩小期间面板短暂闪现。
+- 用户于 `2026-08-30` 明确确认 Windows 11 桌面端本轮悬浮球全部验收场景通过。
+
+#### 进行中
+
+- 按第 9 节完成文档收尾、`dev` 提交、合并 `main`、推送、`v0.3.6` tag 和 GitHub Release。
+
+#### 阻塞与风险
+
+- 代理已在当前双屏开发环境完成原生拖动回归复现和修复后验证；用户已完成目标 Windows 11 桌面验收。本条确认未提供具体 Windows/WebView2/显示器版本，因此不补写未知信息。
+- GitHub Release 尚未创建，需完成本轮提交、合并、推送和 tag 后再记录 Release 结果。
+
+#### 下一步
+
+- 完成并核验 `v0.3.6` 的 GitHub Release 资源，然后把最终提交、tag、Action 和 Release 地址写回本文件。
+
+#### 涉及文件
+
+- `prototype/src/features/floating-ball/useFloatingBallDrag.js`
+- `prototype/src/features/floating-ball/useFloatingBallWindowGeometry.js`
+- `prototype/src/features/floating-ball/floatingBallModel.js`
+- `prototype/src/styles.css`
+- `prototype/tests/floating-ball-model.test.mjs`
+
+#### 验证
+
+- `npm.cmd run test:floating-ball`：17 项通过。
+- `node --check`：悬浮球拖动、窗口几何和模型模块通过。
+- `git diff --check`：通过。
+- 当前双屏开发环境原生回归：旧版本拖动后复现 `state-dragging`；修复后拖动到新位置并释放，状态恢复为可展开，位置文件成功保存。
+- `npm.cmd run tauri:build`：通过，生成 `prototype/src-tauri/target/release/bundle/nsis/本地资料工作台_0.3.6_x64-setup.exe`；`WebView2Loader.dll` 校验通过，160320 bytes，Windows x64。
+
+## 2026-08-30
+
+### 悬浮球拖动后无法在中间位置展开的回归修复
+
+#### 已完成
+
+- 定位到拖动开始时设置的 `suppressOpen` 在 `endDrag` 后未清除；当鼠标仍停在球体上时，后续 `floating-near=true` 会一直被拦截，导致把球拖到屏幕中间后无法展开最近记录。
+- 修正 controller：正常拖动释放后恢复 hover 触发并重新执行 120ms 打开延迟；拖动启动失败仍保持关闭抑制，避免失败路径自动弹出。
+- 按用户要求将展开方向收敛为只按当前位置选择左/右，上/下位置不再切换垂直弹窗布局；已移除临界打开后验失败路径，恢复原有窗口打开成功语义。
+
+#### 进行中
+
+- 等待用户使用最新 `0.3.6` 候选重新验证屏幕中间、自由位置和四边四角的悬浮球最近记录展开。
+
+#### 阻塞与风险
+
+- 尚未由代理代替用户执行 Windows 11 桌面手工验收；候选包需要重新安装/启动后验证，旧进程或旧安装包不会包含本次修复。
+
+#### 下一步
+
+- 用户用最新候选包先把悬浮球拖到屏幕中间，释放后覆盖球体，确认面板能重新弹出；再回归左右边缘、上/下边缘、四角和多显示器组合。
+- 用户记录通过/失败编号及 P0-P3 影响后，再决定是否进入计划第 9 节 Git/Release 流程。
+
+#### 验证
+
+- `npm.cmd run test:floating-ball`：16 项通过，包含拖动释放后恢复 hover 的回归用例。
+- `npm.cmd run tauri:build`：通过，已重建 `prototype/src-tauri/target/release/bundle/nsis/本地资料工作台_0.3.6_x64-setup.exe`；loader 校验通过，160320 bytes，Windows x64。
+- `git diff --check`：通过；生成 ACL 已确认不含已移除的 `outer-size` 权限，`49218` 临时端口已释放。
+
+## 2026-08-30
+
+### 0.3.6 悬浮球悬停弹窗优化候选实现
+
+#### 已完成
+
+- 按 `AGENT.md` 和当前 `PROJECT_PLAN.md` 完成悬浮球阶段 A-E 的代码级实现；本轮只触及悬浮球相关源码、测试、样式、版本入口和同步文档，没有修改 Sites 约定文件、索引 v3、设置 v2、预览协议或 capability。
+- 将几何计算收敛为 `floatingBallGeometryModel.js` 纯模型，并由 `floatingBallModel.js` 保持原有导出路径；统一表达 `ballRect`、`panelRect`、`hostRect`、`workArea`、`direction` 和 `scaleFactor`，面板空间不足时按工作区压缩尺寸并保留面板内部滚动。
+- 打开面板前读取实际 `outerPosition`、当前显示器工作区和缩放因子，方向只按左右剩余空间/水平位置选择；展开 host 只使用当前显示器工作区，不把任务栏占用的区域当作可用空间。
+- 方向选择覆盖四边、四角、自由位置和负坐标工作区；顶部/底部位置不再切换垂直弹窗布局，面板只在垂直轴做工作区 clamp。
+- 新增 `floatingBallHoverController.js`，统一 pointer enter/leave、`floating-near`、显式点击、Escape、关闭按钮和拖动抢占；打开/收起使用单一 timer，异步窗口操作使用递增操作序号，旧结果不能覆盖新状态。
+- 新增窗口几何、记录/收藏/拖放和拖动/位置保存 feature hook；`FloatingBallWindow.jsx` 收敛为 controller 接线、反馈状态和视图渲染，所有悬浮球模块控制在仓库建议的 300 行以内。
+- 将面板改为绝对定位的稳定 host 布局，球体到面板无空隙，关闭按钮归入面板标题栏；固定面板最大尺寸、列表内部滚动、长文本省略、反馈换行、焦点环和 `aria-expanded`/`aria-pressed` 等交互语义。
+- 保持 `floating-ball.json` v1、索引 v3、最近记录/收藏 command 和 `index-changed` 同步语义不变；程序化窗口移动不会再被 `onMoved` 误判为用户拖动。
+- 版本入口已统一为 `0.3.6`：前端 package、package-lock 根包、Tauri 配置、Rust crate、Cargo.lock 根包、README 和本进度记录均已同步；`0.3.0` 仍作为上一版稳定回退基线。
+
+#### 进行中
+
+- 等待用户在 Windows 11 Tauri `0.3.6` 候选上完成阶段 A-E 的四边四角、多显示器、DPI、任务栏、拖动、重启恢复和组合交互手工验收；手工验收未完成前不标记阶段 F 通过。
+
+#### 阻塞与风险
+
+- 本轮未代替用户启动或验收 Tauri 桌面应用；真实 Windows WebView2、透明置顶窗口、文件拖放、跨显示器负坐标、不同 DPI、显示器断开恢复和安装包行为仍需用户按计划验收。
+- 已生成 `0.3.6` Windows x64 NSIS 候选安装包，但尚未进行安装/启动手工验收；没有执行 commit、merge、push、tag 或 GitHub Release，上一版 `v0.3.0` Release 保持不变。
+- 面板几何统一在 DIP 中计算，再在 `floatingBallApi.js` 入口转换为物理像素；不同 DPI 显示器的实际 Windows 坐标语义仍属于桌面验收风险，失败时应记录显示器排列、缩放和复现步骤。
+
+#### 下一步
+
+- 用户使用 `PROJECT_PLAN.md` 阶段 F 清单启动 `0.3.6` 候选，优先验收四边四角展开、球体到面板过渡、快速覆盖/离开、拖动抢占、空/满/失效/反馈列表状态以及双显示器/DPI/负坐标组合。
+- 用户将通过项、失败项、P0-P3 影响级别和 Windows/WebView2/显示器信息写回本文件；只有用户明确回复通过后，才执行计划第 9 节的提交、合并、推送、tag 和 Release 流程。
+
+#### 涉及文件
+
+- `prototype/src/features/floating-ball/FloatingBallWindow.jsx`
+- `prototype/src/features/floating-ball/FloatingBallPanel.jsx`
+- `prototype/src/features/floating-ball/floatingBallModel.js`
+- `prototype/src/features/floating-ball/floatingBallGeometryModel.js`
+- `prototype/src/features/floating-ball/floatingBallHoverController.js`
+- `prototype/src/features/floating-ball/useFloatingBallWindowGeometry.js`
+- `prototype/src/features/floating-ball/useFloatingBallRecords.js`
+- `prototype/src/features/floating-ball/useFloatingBallDrag.js`
+- `prototype/src/styles.css`
+- `prototype/src/features/floating-ball/floatingBallApi.js`
+- `prototype/tests/floating-ball-model.test.mjs`
+- `prototype/tests/floating-ball-hover.test.mjs`
+- `prototype/package.json`
+- `prototype/package-lock.json`
+- `prototype/src-tauri/Cargo.toml`
+- `prototype/src-tauri/Cargo.lock`
+- `prototype/src-tauri/tauri.conf.json`
+- `README.md`
+- `PROJECT_PLAN.md`
+- `PROJECT_PROGRESS.md`
+
+#### 验证
+
+- `npm.cmd run test:floating-ball`：16 项通过，覆盖模型几何、四边四角、左右方向选择、负坐标、工作区不足、DPI 转换、状态机延迟、重入、显式收起、拖动抢占和关闭失败。
+- `node --check`：悬浮球模型、几何模型、hover controller、窗口几何、记录和拖动模块均通过语法检查。
+- `npm.cmd run build`：通过，生成 `dist/client/index.html`、`dist/server/index.js` 和 `dist/.openai/hosting.json`；仅产生被忽略的构建产物。
+- 临时 Vite `49218` 浏览器回退检查：点击/Enter 打开、鼠标覆盖延迟打开、球体到面板过渡保持、离开延迟收起、关闭按钮和 Escape 均通过；未读取或上传真实文件，验证结束后已关闭标签和服务。
+- `git diff --check`：通过，包含本轮代码和同步文档。
+- `cargo fmt --all -- --check`：通过；`cargo test`：45 项通过；`cargo check`：通过。此次未修改 Rust 原生逻辑或 capability，未追加 `cargo clippy`。
+- 版本一致性检查：`prototype/package.json`、package-lock 根包、Tauri 配置、Rust crate 和 Cargo.lock 根 package 均为 `0.3.6`。
+- `npm.cmd run tauri:build`：通过，生成 `prototype/src-tauri/target/release/bundle/nsis/本地资料工作台_0.3.6_x64-setup.exe`；`verify:loader` 确认 Windows x64 `WebView2Loader.dll` 为 `160320` bytes，并与 release 主程序位于同一目录。该构建产物被 `.gitignore` 忽略。
+
+## 2026-08-30
+
 ### GitHub Release 自动发布流程
 
 #### 已完成

@@ -1579,24 +1579,12 @@ input:focus-visible,
 
 .floating-ball-window {
   position: relative;
-  display: flex;
+  display: block;
   width: 100%;
   height: 100%;
-  align-items: flex-start;
   overflow: visible;
   pointer-events: none;
   user-select: none;
-}
-
-.floating-ball-window.direction-up,
-.floating-ball-window.direction-down {
-  align-items: flex-start;
-  flex-direction: column;
-}
-
-.floating-ball-window.is-browser-demo.direction-left,
-.floating-ball-window.is-browser-demo.direction-right {
-  align-items: center;
 }
 
 .floating-ball-window.is-browser-demo {
@@ -1610,14 +1598,29 @@ input:focus-visible,
   height: 322px;
 }
 
-.floating-ball-window.is-browser-demo.direction-up.is-panel-open,
-.floating-ball-window.is-browser-demo.direction-down.is-panel-open {
-  width: 320px;
-  height: 386px;
+.floating-ball-window.is-browser-demo .floating-ball-trigger {
+  left: 0;
+  top: 0;
+}
+
+.floating-ball-window.is-browser-demo.direction-left.is-panel-open .floating-ball-trigger {
+  left: 320px;
+}
+
+.floating-ball-window.is-browser-demo.direction-left .floating-ball-panel {
+  left: 0;
+  top: 0;
+}
+
+.floating-ball-window.is-browser-demo.direction-right .floating-ball-panel {
+  left: 64px;
+  top: 0;
 }
 
 .floating-ball-trigger {
-  position: relative;
+  position: absolute;
+  left: var(--floating-ball-ball-x, 0px);
+  top: var(--floating-ball-ball-y, 0px);
   display: grid;
   width: 64px;
   height: 64px;
@@ -1631,8 +1634,8 @@ input:focus-visible,
   box-shadow: 0 9px 24px rgba(23, 66, 47, 0.27), 0 0 0 4px rgba(19, 138, 79, 0.1);
   cursor: grab;
   pointer-events: auto;
-  transform: translate(var(--floating-ball-offset-x, 0px), var(--floating-ball-offset-y, 0px));
-  transition: background-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+  transform-origin: center;
+  transition: background-color 160ms ease, box-shadow 160ms ease;
 }
 
 .floating-ball-trigger:hover {
@@ -1643,7 +1646,7 @@ input:focus-visible,
 .floating-ball-trigger:active,
 .floating-ball-trigger.is-moving {
   cursor: grabbing;
-  transform: translate(var(--floating-ball-offset-x, 0px), var(--floating-ball-offset-y, 0px)) scale(0.96);
+  transform: scale(0.96);
 }
 
 .floating-ball-trigger.status-drag-over {
@@ -1667,10 +1670,15 @@ input:focus-visible,
 }
 
 .floating-ball-panel {
+  position: absolute;
+  left: var(--floating-ball-panel-x, 64px);
+  top: var(--floating-ball-panel-y, 0px);
   display: flex;
-  width: 320px;
-  height: 322px;
-  flex: 0 0 320px;
+  width: var(--floating-ball-panel-width, 320px);
+  height: var(--floating-ball-panel-height, 322px);
+  min-width: 0;
+  min-height: 0;
+  flex: 0 0 auto;
   flex-direction: column;
   overflow: hidden;
   color: #26343a;
@@ -1683,6 +1691,7 @@ input:focus-visible,
 
 .floating-ball-panel-header {
   display: flex;
+  min-width: 0;
   min-height: 68px;
   align-items: center;
   justify-content: space-between;
@@ -1702,6 +1711,9 @@ input:focus-visible,
 }
 
 .floating-ball-panel-header h2 {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   margin: 0;
   color: #213036;
   font-size: 18px;
@@ -1722,8 +1734,40 @@ input:focus-visible,
   background: #f3f8fc;
 }
 
+.floating-ball-header-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 7px;
+}
+
+.floating-ball-panel-close {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  color: #7b898f;
+  border: 1px solid #e0e7e9;
+  border-radius: 5px;
+  background: #ffffff;
+  cursor: pointer;
+}
+
+.floating-ball-panel-close:hover,
+.floating-ball-panel-close:focus-visible {
+  color: #a9433b;
+  border-color: #e6b8b0;
+  background: #fff1ef;
+}
+
+.floating-ball-panel-close:focus-visible {
+  outline: 3px solid rgba(36, 105, 168, 0.24);
+  outline-offset: 1px;
+}
+
 .floating-ball-feedback {
   display: flex;
+  min-width: 0;
   min-height: 37px;
   align-items: center;
   gap: 8px;
@@ -1741,6 +1785,11 @@ input:focus-visible,
   background: #fff7f1;
 }
 
+.floating-ball-feedback span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .floating-ball-list {
   display: grid;
   flex: 1;
@@ -1754,7 +1803,7 @@ input:focus-visible,
 
 .floating-ball-recent-item {
   display: flex;
-  width: auto;
+  width: 100%;
   min-height: 49px;
   min-width: 0;
   align-items: center;
@@ -1890,49 +1939,11 @@ input:focus-visible,
   font-size: 14px;
 }
 
-.floating-ball-close-hint {
-  position: absolute;
-  top: 7px;
-  right: 7px;
-  display: grid;
-  width: 24px;
-  height: 24px;
-  place-items: center;
-  color: #7b898f;
-  border-radius: 4px;
-  background: rgba(255, 255, 255, 0.92);
-  cursor: pointer;
-  pointer-events: auto;
-}
-
-.floating-ball-close-hint:hover,
-.floating-ball-close-hint:focus-visible {
-  color: #a9433b;
-  background: #fff1ef;
-}
-
-.floating-ball-close-hint:focus-visible {
-  outline: 3px solid rgba(36, 105, 168, 0.24);
-}
-
-.floating-ball-window.direction-left .floating-ball-close-hint {
-  right: 68px;
-}
-
-.floating-ball-window.direction-right .floating-ball-close-hint {
-  right: auto;
-  left: 68px;
-}
-
-.floating-ball-window.direction-down .floating-ball-close-hint {
-  top: 71px;
-}
-
 .floating-ball-error-mark,
 .floating-ball-success-mark {
   position: absolute;
-  right: 1px;
-  bottom: 1px;
+  left: calc(var(--floating-ball-ball-x, 0px) + 48px);
+  top: calc(var(--floating-ball-ball-y, 0px) + 48px);
   display: none;
   color: #ffffff;
   border: 2px solid #ffffff;
@@ -1945,9 +1956,25 @@ input:focus-visible,
   background: #138a4f;
 }
 
+.floating-ball-window.is-browser-demo .floating-ball-error-mark,
+.floating-ball-window.is-browser-demo .floating-ball-success-mark {
+  left: 48px;
+  top: 48px;
+}
+
 .floating-ball-window:has(.status-error) .floating-ball-error-mark,
 .floating-ball-window:has(.status-recorded) .floating-ball-success-mark {
   display: block;
+}
+
+/* Keep the native window transition out of the visible panel lifecycle. */
+.floating-ball-window.state-closing .floating-ball-panel {
+  visibility: hidden;
+}
+
+.floating-ball-window.state-closing .floating-ball-trigger {
+  left: 0;
+  top: 0;
 }
 
 .is-spinning {

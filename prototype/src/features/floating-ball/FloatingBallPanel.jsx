@@ -5,17 +5,45 @@ import {
   FolderSimple,
   Star,
   WarningCircle,
+  X,
 } from "@phosphor-icons/react";
 
-export function FloatingBallPanel({ recent, status, feedback, favoriteBusyId, onOpenFile, onToggleFavorite }) {
+export function FloatingBallPanel({
+  recent,
+  status,
+  feedback,
+  favoriteBusyId,
+  onOpenFile,
+  onToggleFavorite,
+  onClose,
+  onPointerEnter,
+  onPointerLeave,
+}) {
   return (
-    <section className="floating-ball-panel" aria-label="悬浮球最近记录" data-testid="floating-panel">
+    <section
+      className="floating-ball-panel"
+      aria-label="悬浮球最近记录"
+      data-testid="floating-panel"
+      onPointerEnter={onPointerEnter}
+      onPointerLeave={onPointerLeave}
+    >
       <header className="floating-ball-panel-header">
         <div>
           <span className="floating-ball-eyebrow">本地资料工作台</span>
           <h2>最近记录</h2>
         </div>
-        <span className="floating-ball-count">{recent.length} / 5</span>
+        <div className="floating-ball-header-actions">
+          <span className="floating-ball-count">{recent.length} / 5</span>
+          <button
+            type="button"
+            className="floating-ball-panel-close"
+            aria-label="收起最近记录"
+            title="收起"
+            onClick={onClose}
+          >
+            <X size={14} weight="bold" aria-hidden="true" />
+          </button>
+        </div>
       </header>
 
       {feedback && (

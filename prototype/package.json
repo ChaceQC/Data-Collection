@@ -1,6 +1,6 @@
 {
   "name": "local-material-workbench",
-  "version": "0.3.0",
+  "version": "0.3.6",
   "private": true,
   "type": "module",
   "scripts": {
@@ -10,7 +10,7 @@
     "test:library": "node --test tests/library-model.test.mjs",
     "test:settings": "node --test tests/settings-model.test.mjs",
     "test:preview": "node --test tests/preview-registry.test.mjs",
-    "test:floating-ball": "node --test tests/floating-ball-model.test.mjs",
+    "test:floating-ball": "node --test tests/floating-ball-*.test.mjs",
     "test:tray": "node --test tests/tray-model.test.mjs",
     "test:sites": "node --test tests/sites-worker.test.mjs",
     "tauri": "tauri",
