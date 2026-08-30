@@ -79,6 +79,40 @@ jobs:
         working-directory: prototype
         run: npm.cmd ci
 
+      - name: 预置 Windows x64 WebView2 loader
+        shell: pwsh
+        run: |
+          $cargoLock = Get-Content -LiteralPath 'prototype/src-tauri/Cargo.lock' -Raw -Encoding UTF8
+          $cargoMatch = [regex]::Match(
+            $cargoLock,
+            '(?ms)^\[\[package\]\]\s+name = "webview2-com-sys"\s+version = "([^"]+)"'
+          )
+          if (-not $cargoMatch.Success) {
+            throw 'Cargo.lock 中找不到 webview2-com-sys 的锁定版本'
+          }
+          $cargoVersion = $cargoMatch.Groups[1].Value
+
+          cargo fetch --locked --manifest-path 'prototype/src-tauri/Cargo.toml'
+          if ($LASTEXITCODE -ne 0) {
+            throw 'cargo fetch --locked 执行失败'
+          }
+
+          $registryRoot = Join-Path $env:USERPROFILE '.cargo/registry/src'
+          $crateDirs = @(Get-ChildItem -LiteralPath $registryRoot -Directory -Recurse -Filter "webview2-com-sys-$cargoVersion")
+          $loaderCandidates = @(
+            $crateDirs |
+              ForEach-Object { Join-Path $_.FullName 'x64/WebView2Loader.dll' } |
+              Where-Object { Test-Path -LiteralPath $_ -PathType Leaf }
+          )
+          if ($loaderCandidates.Count -ne 1) {
+            throw "找不到唯一的 webview2-com-sys $cargoVersion x64 loader，实际找到 $($loaderCandidates.Count) 个"
+          }
+
+          $releaseDir = Join-Path $env:GITHUB_WORKSPACE 'prototype/src-tauri/target/release'
+          New-Item -ItemType Directory -Path $releaseDir -Force | Out-Null
+          Copy-Item -LiteralPath $loaderCandidates[0] -Destination (Join-Path $releaseDir 'WebView2Loader.dll')
+          Write-Host "已预置 $($loaderCandidates[0])"
+
       - name: 构建 Windows x64 安装包
         working-directory: prototype
         run: npm.cmd run tauri:build
