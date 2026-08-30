@@ -1,6 +1,6 @@
 # 本地资料工作台原型
 
-这是基于 `AGENT.md` 方案 3“收纳入口”实现的本地资料工作台。当前版本包含 Tauri 2 桌面外壳、真实文件索引和统一预览适配器；浏览器运行时仍保留原型回退，用于 Sites 构建和界面验收。
+这是基于 `AGENT.md` 方案 3“收纳入口”实现的本地资料工作台。当前版本 `0.3.0` 包含 Tauri 2 桌面外壳、真实文件索引、统一预览适配器、悬浮球和系统托盘生命周期代码；阶段 H 的 Windows 11 桌面验收已完成，浏览器运行时仍只保留安全的原型回退。
 
 ## 启动
 
@@ -22,14 +22,14 @@ npm.cmd run tauri:dev
 npm.cmd run tauri:build
 ```
 
-安装包输出到 `src-tauri/target/release/bundle/nsis/`。当前安装模式为当前用户安装，构建配置不打包 WebView2 安装程序；Windows 11 目标机需要已有 WebView2 Runtime。
+安装包输出到 `src-tauri/target/release/bundle/nsis/`。`tauri:build` 通过 `bundle.resources` 将构建生成的 loader 映射到 NSIS 安装目录根部，并执行 `scripts/verify-webview2-loader.mjs` 检查 loader 的 PE 架构、大小、SHA-256 和 release 主程序同目录布局；也可以单独运行 `npm.cmd run verify:loader`。当前安装模式为当前用户安装，构建配置不打包 WebView2 安装程序；Windows 11 目标机需要已有 WebView2 Runtime。
 
 ## 当前范围
 
 - Tauri 运行时通过原生选择器和桌面拖放获取真实路径，由 Rust 校验并登记文件名、类型、大小和修改时间。
 - 导入文件夹会登记为一条文件夹记录，不在一级列表展开其中的文件；点击文件夹后按需读取直接子项并支持进入子目录。不跟随符号链接或 Windows reparse point，单次读取最多 20,000 项。
-- 索引保存于 Tauri app data 目录的版本 `2` `index.json`，记录路径、文件元数据、`favorite` 和 `addedAt`，不复制文件内容；重复导入会更新元数据并保留已有收藏和添加时间。
-- 设置保存于同一 Tauri app data 目录的版本 `1` `settings.json`，记录默认排序、每页数量和索引移除确认偏好；设置与索引分开原子写入，损坏设置回退安全默认值且不会清空索引。
+- 索引保存于 Tauri app data 目录的版本 `3` `index.json`，记录路径、文件元数据、`favorite`、`addedAt` 和可为空的 `lastRecordedAt`，不复制文件内容；v1/v2 索引迁移时不会把旧记录虚构为悬浮球最近记录。
+- 设置保存于同一 Tauri app data 目录的版本 `2` `settings.json`，记录默认排序、每页数量、索引移除确认、`hideToTray` 和 `showFloatingWindow`；读取版本 `1` 时保留旧字段并原子迁移，损坏设置回退安全默认值且不会清空索引。
 - 失效路径可以通过用户明确选择的同类型新文件或文件夹重新定位，不会自动移动、复制或删除原文件。
 - 点击普通文件行会打开模态预览对话框；关闭对话框、切换资料、目录返回和窗口退出都会释放当前预览会话。
 - 纯文本和 Markdown 使用 Rust 受限读取，支持 UTF-8 BOM、UTF-8 和 GB18030 判断；Markdown 的渲染结果经过 DOMPurify 清理，原文、HTML、JS、JSON 和配置内容都按安全文本显示。
@@ -42,9 +42,16 @@ npm.cmd run tauri:build
 - 资料库视图支持收藏/取消收藏、从索引移除、按名称/类型/状态搜索、按添加时间/修改时间/名称/大小排序和每页 20 条分页；最近添加使用持久化 `addedAt`。
 - 桌面应用支持把普通文件复制到 Windows 文件剪贴板、同目录重命名和移入系统回收站；复制后用户可在资源管理器中粘贴，应用不选择目标目录、不创建副本、不修改索引。这些操作分别经过确认、Rust 端 ID 查找和路径复核，文件夹及目录临时子项不提供物理操作。
 - 桌面应用支持由用户明确点击“用默认程序打开”和“在资源管理器中定位”；Rust 端只从索引按 ID 取回并重新校验当前路径，通过系统文件关联或资源管理器执行，不开放任意 shell。文件夹只提供资源管理器定位，失效记录和目录临时子项不提供外部操作。
+- 桌面应用启动时创建独立的 `floating-ball` 悬浮球窗口。用户可以从资源管理器把普通文件或文件夹拖到球体，Rust 端只登记路径和元数据；重复路径保留原索引 ID、收藏、添加时间和预览状态，并更新悬浮球专用的毫秒级 `lastRecordedAt`。
+- 悬浮球最近面板只显示最近 5 条通过悬浮球成功记录的资料，主窗口导入不会自动进入该列表；每条记录提供收藏/取消收藏按钮，路径失效、索引移除、重命名、重新定位和原文件操作通过 `index-changed` 事件同步。
+- 悬浮球使用受控的低频光标位置轮询、阈值滞回和延迟展开；用户可以拖动球体到工作区内自由位置或在 `24 DIP` 范围内贴到边缘。位置独立保存于 app data 目录的 `floating-ball.json` v1，保存的是显示器标识和逻辑坐标，不保存文件路径。
+- 桌面端在启动后创建唯一的“本地资料工作台”系统托盘图标，菜单提供打开主窗口、打开设置、显示/隐藏悬浮窗、最近任务和真正退出入口；托盘创建失败时主窗口保持可用并显示安全错误。
+- 设置面板提供“关闭窗口时隐藏到系统托盘”和“显示悬浮窗”。前者只拦截普通主窗口关闭请求，托盘退出会绕过隐藏逻辑；后者会持久化并在运行时创建/销毁悬浮球，默认值分别为 `false` 和 `true`。
+- 无装饰主窗口使用明确的标题栏拖动区域；窗口顶部拖动带和页面标题使用 Tauri `data-tauri-drag-region="deep"`，窗口控制、搜索、排序、资料列表、拖放区和模态对话框均标记为非拖动区域。
+- 托盘最近任务与悬浮球共享索引 v3 的最近记录和收藏状态，最多显示 5 项；每项只携带不透明索引 ID，不在菜单或事件中暴露完整路径。
 - 一级列表和文件夹内容按每页 20 条显示，文件夹浏览提供面包屑和返回上级操作。
-- 设置面板支持默认排序、排序方向、每页 10/20/50 条和索引移除确认；预览大小/图片像素上限只读展示，物理删除确认始终开启。浏览器回退仅在当前会话应用设置。
-- 已接入 `load_file_index`、`list_directory`、`index_paths`、`reposition_file`、`set_favorite`、`remove_index_entry`、`copy_indexed_file`、`open_indexed_file`、`reveal_indexed_file`、`rename_indexed_file`、`delete_original_file`、`load_settings`、`update_settings`、`can_preview`、`load_preview` 和 `dispose_preview` 十六个 Tauri command。
+- 设置面板支持默认排序、排序方向、每页 10/20/50 条、索引移除确认、关闭隐藏到托盘和悬浮窗可见性；预览大小/图片像素上限只读展示，物理删除确认始终开启。浏览器回退仅在当前会话应用设置。
+- 已接入 `load_file_index`、`list_directory`、`index_paths`、`reposition_file`、`record_floating_paths`、`get_floating_recent`、`open_main_from_floating`、`load_floating_placement`、`save_floating_placement`、`floating_window_status`、`retry_floating_ball`、`set_favorite`、`remove_index_entry`、`copy_indexed_file`、`open_indexed_file`、`reveal_indexed_file`、`rename_indexed_file`、`delete_original_file`、`load_settings`、`update_settings`、`set_floating_window_visible`、`show_main_window`、`tray_status`、`exit_app`、`can_preview`、`load_preview` 和 `dispose_preview` 二十七个 Tauri command。
 
 ## 预览依赖与边界
 
@@ -64,7 +71,7 @@ Windows WebView2 使用 `http://preview.localhost/<previewId>` 访问受控资�
 
 PDF 的初始无范围请求返回完整 `200` 响应，客户端明确发起的范围请求仍按 `Content-Range` 分段返回，以兼容 PDF.js 的文件长度探测和分页读取。
 
-预览、资料库核心功能以及阶段 F 的设置和显式外部操作已完成代码接入、开发侧检查，并已由用户完成 Windows 11/WebView2 桌面验收；版本当前仍维持 `0.1.0`，等待统一的发布版本判断。不把所有格式写成无条件“已支持”，视频编码和 LibreOffice 仍按各自外部依赖边界处理。
+预览、资料库核心功能、阶段 F 的设置和显式外部操作，以及悬浮球阶段 A-E 的代码接入和用户验收均已完成。`0.2.8` 的主窗口标题栏拖动修复已合入 `0.3.0`；用户已完成系统托盘、关闭隐藏、悬浮窗运行时切换、主窗口拖动、托盘收藏和 NSIS 安装后 loader 的 Windows 11 手工验收。不把所有格式写成无条件“已支持”，视频编码、LibreOffice 和 WebView2 Runtime 仍按各自外部依赖边界处理。
 
 依赖审计注意事项：当前公开 `xlsx@0.18.5` 没有可用的 npm 修复版本，并存在已知 Prototype Pollution/ReDoS 报告。应用不打开宏、外部链接或 HTML，限制工作簿大小和展示范围，并在 Worker 中解析以便超时或异常时终止；在替换为有修复的兼容库前，该风险仍需纳入发布判断。
 
@@ -74,6 +81,7 @@ PDF 的初始无范围请求返回完整 `200` 响应，客户端明确发起的
 - SVG、MOV、AVI、MKV 等未登记格式返回 `unsupported`；视频不提供隐藏转码。
 - DOC 预览依赖本机 LibreOffice；当前构建未内置或下载 WebView2 Runtime，也未签名。
 - 标签/分组、全文检索、批量操作和通用撤销栈尚未实现；阶段 F 的数据模型、影响范围和失败恢复决策记录在 `docs/phase-f-settings-and-external-operations.md`。
+- 悬浮球透明置顶窗口、资源管理器真实拖放、多显示器、DPI、任务栏避让、应用重启恢复、双屏边缘闪烁修复，以及本轮托盘、关闭隐藏、悬浮窗开关、主窗口拖动和安装后目录检查均已由用户完成 Windows 手工验收；浏览器回退只展示内存演示状态。
 - 浏览器回退不会执行真实文件剪贴板、重命名、原文件删除或外部打开/定位；桌面端复制到剪贴板、资源管理器粘贴、设置持久化和显式外部操作已由用户在 Windows 环境完成手工验收。
 - 解析失败、缺失、权限不足、过大、转换器缺失和暂不支持均保留索引并在模态对话框显示可执行的下一步。
 - 已使用 Windows GNU 工具链构建 x64 NSIS 安装包；安装器签名、WebView2 Runtime 提供方式和 LibreOffice 仍属于发布边界说明。
@@ -83,9 +91,12 @@ PDF 的初始无范围请求返回完整 `200` 响应，客户端明确发起的
 ```powershell
 npm.cmd run build
 npm.cmd run test:library
-npm.cmd run test:settings
-npm.cmd run test:preview
-npm.cmd run test:sites
+  npm.cmd run test:settings
+  npm.cmd run test:preview
+  npm.cmd run test:floating-ball
+  npm.cmd run test:tray
+  npm.cmd run test:sites
+  npm.cmd run verify:loader
 ```
 
 Rust 侧检查：
@@ -99,4 +110,6 @@ cargo test
 cargo clippy --all-targets --all-features -- -D warnings
 ```
 
-`npm.cmd run build` 会生成 Sites 所需的 `dist/client/index.html`、`dist/server/index.js` 和 `dist/.openai/hosting.json`。浏览器/Sites 模式不会调用真实文件预览 command；Windows 桌面预览、资料库操作和阶段 F 已使用无敏感夹具完成用户手工验收，具体通过项记录在根目录 `PROJECT_PROGRESS.md`。
+`npm.cmd run build` 会生成 Sites 所需的 `dist/client/index.html`、`dist/server/index.js` 和 `dist/.openai/hosting.json`。浏览器/Sites 模式不会调用真实文件预览、托盘或窗口 command；Windows 桌面预览、资料库操作、阶段 F、悬浮球和阶段 H 桌面验收均已完成，当前 `0.3.0` 的发布验证记录在根目录 `PROJECT_PROGRESS.md`。
+
+悬浮球阶段的自动验证使用 `npm.cmd run test:floating-ball`、`cargo test`、`cargo check` 和 `cargo clippy`；真实 Windows 窗口、文件拖放、多显示器位置和关闭/重启行为已由用户使用 `tests/fixtures/desktop-acceptance/` 手工确认，代理不以浏览器页面或开发侧命令结果替代该验收。

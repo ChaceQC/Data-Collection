@@ -2,6 +2,7 @@ use std::{
     fs,
     path::{Path, PathBuf},
     sync::Mutex,
+    time::{SystemTime, UNIX_EPOCH},
 };
 
 use atomic_write_file::AtomicWriteFile;
@@ -10,10 +11,13 @@ use thiserror::Error;
 
 use crate::filesystem::IndexEntry;
 
+pub(crate) mod floating_ball;
 pub(crate) mod settings;
 
-pub const INDEX_FORMAT_VERSION: u32 = 2;
+pub const INDEX_FORMAT_VERSION: u32 = 3;
 const LEGACY_INDEX_FORMAT_VERSION: u32 = 1;
+const PREVIOUS_INDEX_FORMAT_VERSION: u32 = 2;
+pub const FLOATING_RECENT_LIMIT: usize = 5;
 
 #[derive(Debug, Error)]
 pub enum StorageError {
@@ -48,6 +52,37 @@ pub struct AppState {
 struct IndexDocument {
     version: u32,
     entries: Vec<IndexEntry>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum IndexMergeMode {
+    RegularImport,
+    FloatingRecord { base_recorded_at: i64 },
+}
+
+#[derive(Debug, Default)]
+pub struct MergeStats {
+    pub added_ids: Vec<String>,
+    pub affected_ids: Vec<String>,
+    pub added_count: usize,
+    pub refreshed_count: usize,
+    pub recorded_count: usize,
+    pub accepted_count: usize,
+    pub truncated: bool,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FloatingRecentEntry {
+    pub id: String,
+    pub name: String,
+    #[serde(rename = "type")]
+    pub file_type: String,
+    pub kind: String,
+    pub status: String,
+    pub invalid: bool,
+    pub favorite: bool,
+    pub recorded_at: i64,
 }
 
 impl AppState {
@@ -106,9 +141,12 @@ pub fn load_entries(path: &Path) -> Result<Vec<IndexEntry>, StorageError> {
         serde_json::from_slice::<IndexDocument>(&bytes).map_err(|_| StorageError::Corrupt)?;
     let mut entries = document.entries;
     let needs_save = match document.version {
-        INDEX_FORMAT_VERSION => normalize_added_at(&mut entries),
-        LEGACY_INDEX_FORMAT_VERSION => {
-            normalize_added_at(&mut entries);
+        INDEX_FORMAT_VERSION => normalize_entries(&mut entries),
+        LEGACY_INDEX_FORMAT_VERSION | PREVIOUS_INDEX_FORMAT_VERSION => {
+            normalize_entries(&mut entries);
+            for entry in &mut entries {
+                entry.last_recorded_at = None;
+            }
             true
         }
         _ => return Err(StorageError::UnsupportedVersion),
@@ -140,6 +178,130 @@ pub fn sort_entries(entries: &mut [IndexEntry]) {
     });
 }
 
+pub fn merge_index_entries(
+    entries: &mut Vec<IndexEntry>,
+    incoming: impl IntoIterator<Item = IndexEntry>,
+    mode: IndexMergeMode,
+) -> MergeStats {
+    let mut stats = MergeStats::default();
+    for (input_index, mut incoming) in incoming.into_iter().enumerate() {
+        let existing = entries
+            .iter_mut()
+            .find(|entry| crate::filesystem::same_path(&entry.path, &incoming.path));
+        if let Some(existing) = existing {
+            let id = existing.id.clone();
+            let favorite = existing.favorite;
+            let preview_status = existing.preview_status.clone();
+            let added_at = existing.added_at;
+            let last_recorded_at = existing.last_recorded_at;
+            *existing = incoming;
+            existing.id = id;
+            existing.favorite = favorite;
+            existing.preview_status = preview_status;
+            existing.added_at = added_at;
+            existing.last_recorded_at = match mode {
+                IndexMergeMode::RegularImport => last_recorded_at,
+                IndexMergeMode::FloatingRecord { base_recorded_at } => {
+                    stats.recorded_count += 1;
+                    Some(recorded_timestamp(base_recorded_at, input_index))
+                }
+            };
+            stats.refreshed_count += 1;
+            stats.accepted_count += 1;
+            stats.affected_ids.push(existing.id.clone());
+            continue;
+        }
+
+        if entries.len() >= crate::filesystem::MAX_INDEX_ENTRIES {
+            stats.truncated = true;
+            continue;
+        }
+
+        if let IndexMergeMode::FloatingRecord { base_recorded_at } = mode {
+            incoming.last_recorded_at = Some(recorded_timestamp(base_recorded_at, input_index));
+            stats.recorded_count += 1;
+        }
+        stats.added_ids.push(incoming.id.clone());
+        stats.affected_ids.push(incoming.id.clone());
+        stats.added_count += 1;
+        stats.accepted_count += 1;
+        entries.push(incoming);
+    }
+    sort_entries(entries);
+    stats
+}
+
+pub fn floating_recent(entries: &[IndexEntry]) -> Vec<FloatingRecentEntry> {
+    let mut recent = entries
+        .iter()
+        .filter_map(|entry| {
+            let recorded_at = entry.last_recorded_at.filter(|value| *value > 0)?;
+            Some(FloatingRecentEntry {
+                id: entry.id.clone(),
+                name: entry.name.clone(),
+                file_type: entry.file_type.clone(),
+                kind: entry.kind.clone(),
+                status: entry.status.clone(),
+                invalid: entry.invalid,
+                favorite: entry.favorite,
+                recorded_at,
+            })
+        })
+        .collect::<Vec<_>>();
+    recent.sort_by(|left, right| {
+        right
+            .recorded_at
+            .cmp(&left.recorded_at)
+            .then_with(|| left.id.cmp(&right.id))
+    });
+    recent.truncate(FLOATING_RECENT_LIMIT);
+    recent
+}
+
+pub fn set_favorite(
+    entries: &mut [IndexEntry],
+    file_id: &str,
+    favorite: bool,
+) -> Result<bool, StorageError> {
+    if file_id.trim().is_empty() {
+        return Err(StorageError::InvalidId);
+    }
+    let entry = entries
+        .iter_mut()
+        .find(|entry| entry.id == file_id)
+        .ok_or(StorageError::EntryNotFound)?;
+    if entry.favorite == favorite {
+        return Ok(false);
+    }
+    entry.favorite = favorite;
+    Ok(true)
+}
+
+pub fn current_timestamp_millis() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .ok()
+        .and_then(|duration| i64::try_from(duration.as_millis()).ok())
+        .unwrap_or(1)
+}
+
+fn recorded_timestamp(base_recorded_at: i64, input_index: usize) -> i64 {
+    base_recorded_at
+        .max(1)
+        .saturating_add(input_index.min(i64::MAX as usize) as i64)
+}
+
+fn normalize_entries(entries: &mut [IndexEntry]) -> bool {
+    let mut changed = normalize_added_at(entries);
+    for entry in entries {
+        if entry.last_recorded_at.is_some_and(|value| value <= 0) {
+            entry.last_recorded_at = None;
+            changed = true;
+        }
+    }
+    changed
+}
+
 fn normalize_added_at(entries: &mut [IndexEntry]) -> bool {
     let mut changed = false;
     for entry in entries {
@@ -154,7 +316,10 @@ fn normalize_added_at(entries: &mut [IndexEntry]) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{load_entries, save_entries, sort_entries, AppState, StorageError};
+    use super::{
+        floating_recent, load_entries, merge_index_entries, save_entries, sort_entries, AppState,
+        IndexMergeMode, StorageError,
+    };
     use crate::filesystem::IndexEntry;
     use std::{fs, path::PathBuf, time::SystemTime};
 
@@ -229,29 +394,81 @@ mod tests {
 
     #[test]
     fn migrates_legacy_index_and_backfills_added_at_without_clearing_entries() {
-        let path = unique_temp_path();
-        let entry = sample_entry("旧资料.txt", 42);
-        let mut legacy_entry = serde_json::to_value(&entry).expect("entry should serialize");
-        legacy_entry
-            .as_object_mut()
-            .expect("entry should be an object")
-            .remove("addedAt");
-        let legacy = serde_json::json!({ "version": 1, "entries": [legacy_entry] });
-        fs::write(
-            &path,
-            serde_json::to_vec(&legacy).expect("legacy should serialize"),
-        )
-        .expect("legacy index should be written");
+        for version in [1, 2] {
+            let path = unique_temp_path();
+            let entry = sample_entry("旧资料.txt", 42);
+            let mut legacy_entry = serde_json::to_value(&entry).expect("entry should serialize");
+            legacy_entry
+                .as_object_mut()
+                .expect("entry should be an object")
+                .remove("addedAt");
+            legacy_entry["lastRecordedAt"] = serde_json::json!(9999);
+            let legacy = serde_json::json!({ "version": version, "entries": [legacy_entry] });
+            fs::write(
+                &path,
+                serde_json::to_vec(&legacy).expect("legacy should serialize"),
+            )
+            .expect("legacy index should be written");
 
-        let loaded = load_entries(&path).expect("legacy index should migrate");
+            let loaded = load_entries(&path).expect("legacy index should migrate");
 
-        assert_eq!(loaded[0].added_at, 42);
-        let migrated: serde_json::Value =
-            serde_json::from_slice(&fs::read(&path).expect("migrated index should exist"))
-                .expect("migrated index should be valid JSON");
-        assert_eq!(migrated["version"], 2);
-        assert_eq!(migrated["entries"][0]["addedAt"], 42);
-        let _ = fs::remove_file(path);
+            assert_eq!(loaded[0].added_at, 42);
+            assert_eq!(loaded[0].last_recorded_at, None);
+            let migrated: serde_json::Value =
+                serde_json::from_slice(&fs::read(&path).expect("migrated index should exist"))
+                    .expect("migrated index should be valid JSON");
+            assert_eq!(migrated["version"], 3);
+            assert_eq!(migrated["entries"][0]["addedAt"], 42);
+            assert_eq!(
+                migrated["entries"][0]["lastRecordedAt"],
+                serde_json::Value::Null
+            );
+            let _ = fs::remove_file(path);
+        }
+    }
+
+    #[test]
+    fn floating_merge_preserves_user_fields_and_orders_millisecond_records() {
+        let mut existing = sample_entry("资料.txt", 20);
+        existing.favorite = true;
+        existing.added_at = 11;
+        existing.preview_status = "ready".to_string();
+        existing.last_recorded_at = Some(100);
+        let mut incoming = sample_entry("资料.txt", 30);
+        incoming.id = "incoming-id".to_string();
+        incoming.name = "资料.txt".to_string();
+
+        let mut entries = vec![existing];
+        let stats = merge_index_entries(
+            &mut entries,
+            [incoming],
+            IndexMergeMode::FloatingRecord {
+                base_recorded_at: 2_000,
+            },
+        );
+
+        assert_eq!(stats.added_count, 0);
+        assert_eq!(stats.refreshed_count, 1);
+        assert_eq!(stats.recorded_count, 1);
+        assert_eq!(entries[0].id, "资料.txt");
+        assert!(entries[0].favorite);
+        assert_eq!(entries[0].added_at, 11);
+        assert_eq!(entries[0].preview_status, "ready");
+        assert_eq!(entries[0].last_recorded_at, Some(2_000));
+
+        let mut more = (0..6)
+            .map(|index| {
+                let mut entry = sample_entry(&format!("最近{index}.txt"), index);
+                entry.id = format!("recent-{index}");
+                entry.last_recorded_at = Some(3_000 + index);
+                entry
+            })
+            .collect::<Vec<_>>();
+        more.push(sample_entry("主窗口导入.txt", 99));
+        let recent = floating_recent(&more);
+        assert_eq!(recent.len(), 5);
+        assert_eq!(recent[0].id, "recent-5");
+        assert!(!recent.iter().any(|entry| entry.name == "主窗口导入.txt"));
     }
 
     #[test]
@@ -301,6 +518,26 @@ mod tests {
             .is_empty());
     }
 
+    #[test]
+    fn favorite_update_preserves_the_entry_identity_and_user_metadata() {
+        let mut entry = sample_entry("收藏资料.md", 12);
+        entry.added_at = 7;
+        entry.last_recorded_at = Some(99);
+        entry.preview_status = "ready".to_string();
+        let original = entry.clone();
+        let mut entries = vec![entry];
+
+        assert!(
+            super::set_favorite(&mut entries, &original.id, true).expect("favorite should update")
+        );
+        assert!(entries[0].favorite);
+        assert_eq!(entries[0].id, original.id);
+        assert_eq!(entries[0].path, original.path);
+        assert_eq!(entries[0].added_at, original.added_at);
+        assert_eq!(entries[0].last_recorded_at, original.last_recorded_at);
+        assert_eq!(entries[0].preview_status, original.preview_status);
+    }
+
     fn sample_entry(name: &str, modified_at: i64) -> IndexEntry {
         IndexEntry {
             id: name.to_string(),
@@ -315,6 +552,7 @@ mod tests {
             favorite: false,
             added_at: modified_at,
             preview_status: "idle".to_string(),
+            last_recorded_at: None,
         }
     }
 

@@ -11,7 +11,8 @@ use thiserror::Error;
 
 use crate::config::PREVIEW_LIMITS;
 
-pub const SETTINGS_FORMAT_VERSION: u32 = 1;
+pub const SETTINGS_FORMAT_VERSION: u32 = 2;
+const LEGACY_SETTINGS_FORMAT_VERSION: u32 = 1;
 pub const DEFAULT_PAGE_SIZE: u32 = 20;
 pub const PAGE_SIZE_OPTIONS: &[u32] = &[10, 20, 50];
 
@@ -37,6 +38,10 @@ pub struct SettingsUpdate {
     pub default_sort: SortPreference,
     pub page_size: u32,
     pub confirm_before_remove: bool,
+    #[serde(default)]
+    pub hide_to_tray: bool,
+    #[serde(default = "default_show_floating_window")]
+    pub show_floating_window: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -53,6 +58,8 @@ pub struct AppSettings {
     pub default_sort: SortPreference,
     pub page_size: u32,
     pub confirm_before_remove: bool,
+    pub hide_to_tray: bool,
+    pub show_floating_window: bool,
     pub preview_limits: Vec<PreviewLimitView>,
 }
 
@@ -90,6 +97,10 @@ struct PersistedSettings {
     page_size: u32,
     #[serde(default = "default_confirm_before_remove")]
     confirm_before_remove: bool,
+    #[serde(default)]
+    hide_to_tray: bool,
+    #[serde(default = "default_show_floating_window")]
+    show_floating_window: bool,
 }
 
 impl Default for PersistedSettings {
@@ -98,6 +109,8 @@ impl Default for PersistedSettings {
             default_sort: SortPreference::default(),
             page_size: DEFAULT_PAGE_SIZE,
             confirm_before_remove: true,
+            hide_to_tray: false,
+            show_floating_window: true,
         }
     }
 }
@@ -116,7 +129,13 @@ impl SettingsState {
 
         let settings = if settings_path.exists() {
             match read_settings(&settings_path) {
-                Ok(settings) => settings,
+                Ok(read_result) => {
+                    if read_result.needs_migration {
+                        // 迁移失败时保留旧文件和内存快照，避免启动失败或半写文档。
+                        let _ = save_settings(&settings_path, &read_result.settings);
+                    }
+                    read_result.settings
+                }
                 Err(
                     SettingsError::Corrupt
                     | SettingsError::UnsupportedVersion
@@ -170,6 +189,8 @@ impl AppSettings {
             default_sort: settings.default_sort.clone(),
             page_size: settings.page_size,
             confirm_before_remove: settings.confirm_before_remove,
+            hide_to_tray: settings.hide_to_tray,
+            show_floating_window: settings.show_floating_window,
             preview_limits: PREVIEW_LIMITS
                 .iter()
                 .map(|limit| PreviewLimitView {
@@ -182,17 +203,29 @@ impl AppSettings {
     }
 }
 
-fn read_settings(path: &Path) -> Result<PersistedSettings, SettingsError> {
+struct ReadSettings {
+    settings: PersistedSettings,
+    needs_migration: bool,
+}
+
+fn read_settings(path: &Path) -> Result<ReadSettings, SettingsError> {
     let bytes = fs::read(path).map_err(|_| SettingsError::Read)?;
     let document =
         serde_json::from_slice::<SettingsDocument>(&bytes).map_err(|_| SettingsError::Corrupt)?;
-    if document.version != SETTINGS_FORMAT_VERSION {
+    let needs_migration = document.version == LEGACY_SETTINGS_FORMAT_VERSION;
+    if document.version != SETTINGS_FORMAT_VERSION && !needs_migration {
         return Err(SettingsError::UnsupportedVersion);
     }
-    validate_update(SettingsUpdate {
+    let settings = validate_update(SettingsUpdate {
         default_sort: document.settings.default_sort,
         page_size: document.settings.page_size,
         confirm_before_remove: document.settings.confirm_before_remove,
+        hide_to_tray: document.settings.hide_to_tray,
+        show_floating_window: document.settings.show_floating_window,
+    })?;
+    Ok(ReadSettings {
+        settings,
+        needs_migration,
     })
 }
 
@@ -222,6 +255,8 @@ fn validate_update(update: SettingsUpdate) -> Result<PersistedSettings, Settings
         default_sort: update.default_sort,
         page_size: update.page_size,
         confirm_before_remove: update.confirm_before_remove,
+        hide_to_tray: update.hide_to_tray,
+        show_floating_window: update.show_floating_window,
     })
 }
 
@@ -230,6 +265,10 @@ fn default_page_size() -> u32 {
 }
 
 fn default_confirm_before_remove() -> bool {
+    true
+}
+
+fn default_show_floating_window() -> bool {
     true
 }
 
@@ -251,6 +290,8 @@ mod tests {
         let settings = state.snapshot().expect("settings should be readable");
         assert_eq!(settings.page_size, DEFAULT_PAGE_SIZE);
         assert!(settings.confirm_before_remove);
+        assert!(!settings.hide_to_tray);
+        assert!(settings.show_floating_window);
         assert!(!settings.preview_limits.is_empty());
         let document: serde_json::Value =
             serde_json::from_slice(&fs::read(&path).expect("settings file should exist"))
@@ -295,12 +336,16 @@ mod tests {
                 },
                 page_size: 50,
                 confirm_before_remove: false,
+                hide_to_tray: true,
+                show_floating_window: false,
             })
             .expect("settings update should succeed");
 
         assert_eq!(updated.default_sort.key, "name");
         assert_eq!(updated.page_size, 50);
         assert!(!updated.confirm_before_remove);
+        assert!(updated.hide_to_tray);
+        assert!(!updated.show_floating_window);
         let reloaded = SettingsState::default();
         reloaded
             .initialize(path.clone())
@@ -324,10 +369,64 @@ mod tests {
             },
             page_size: 999,
             confirm_before_remove: false,
+            hide_to_tray: false,
+            show_floating_window: true,
         });
 
         assert!(result.is_err());
         assert_eq!(state.snapshot().expect("settings should read"), before);
+        cleanup(path);
+    }
+
+    #[test]
+    fn migrates_v1_settings_without_losing_existing_preferences() {
+        let path = unique_path("settings-v1.json");
+        let legacy = serde_json::json!({
+            "version": 1,
+            "settings": {
+                "defaultSort": { "key": "name", "direction": "asc" },
+                "pageSize": 50,
+                "confirmBeforeRemove": false
+            }
+        });
+        fs::write(
+            &path,
+            serde_json::to_vec(&legacy).expect("legacy settings should serialize"),
+        )
+        .expect("legacy settings should be written");
+
+        let state = SettingsState::default();
+        state
+            .initialize(path.clone())
+            .expect("settings should migrate");
+        let settings = state.snapshot().expect("settings should be readable");
+        assert_eq!(settings.default_sort.key, "name");
+        assert_eq!(settings.page_size, 50);
+        assert!(!settings.confirm_before_remove);
+        assert!(!settings.hide_to_tray);
+        assert!(settings.show_floating_window);
+
+        let migrated: serde_json::Value =
+            serde_json::from_slice(&fs::read(&path).expect("migrated settings should exist"))
+                .expect("migrated settings should be JSON");
+        assert_eq!(migrated["version"], SETTINGS_FORMAT_VERSION);
+        assert_eq!(migrated["settings"]["hideToTray"], false);
+        assert_eq!(migrated["settings"]["showFloatingWindow"], true);
+        cleanup(path);
+    }
+
+    #[test]
+    fn rejects_non_boolean_v2_flags_without_overwriting_the_file() {
+        let path = unique_path("settings-invalid-boolean.json");
+        let invalid = br#"{"version":2,"settings":{"hideToTray":"yes","showFloatingWindow":true}}"#;
+        fs::write(&path, invalid).expect("invalid settings should be written");
+
+        let state = SettingsState::default();
+        state
+            .initialize(path.clone())
+            .expect("settings should recover");
+        assert!(!state.snapshot().expect("settings should read").hide_to_tray);
+        assert_eq!(fs::read(&path).expect("settings should remain"), invalid);
         cleanup(path);
     }
 

@@ -3,16 +3,24 @@ mod commands;
 mod config;
 #[cfg_attr(test, allow(dead_code))]
 mod filesystem;
+#[cfg(test)]
+#[path = "windows/monitor.rs"]
+mod monitor_tests;
 #[cfg_attr(test, allow(dead_code))]
 mod preview;
 #[cfg_attr(test, allow(dead_code))]
 mod storage;
+#[cfg(test)]
+#[path = "windows/tray_model.rs"]
+mod tray_model_tests;
+#[cfg(not(test))]
+mod windows;
 
 #[cfg(not(test))]
 use std::io::Error;
 
 #[cfg(not(test))]
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 
 #[cfg(not(test))]
 pub fn run() {
@@ -25,6 +33,9 @@ pub fn run() {
         .manage(storage::AppState::default())
         .manage(storage::settings::SettingsState::default())
         .manage(preview::PreviewState::default())
+        .manage(windows::FloatingBallState::default())
+        .manage(windows::lifecycle::LifecycleState::default())
+        .manage(windows::tray::TrayState::default())
         .setup(|app| {
             let data_dir = app
                 .path()
@@ -36,6 +47,36 @@ pub fn run() {
             app.state::<storage::settings::SettingsState>()
                 .initialize(data_dir.join("settings.json"))
                 .map_err(|error| Error::other(error.to_string()))?;
+            let settings = app
+                .state::<storage::settings::SettingsState>()
+                .snapshot()
+                .map_err(|error| Error::other(error.to_string()))?;
+            let floating_state = app.state::<windows::FloatingBallState>();
+            floating_state.set_desired_visible(settings.show_floating_window);
+            if let Some(main_window) = app.get_webview_window("main") {
+                let app_handle = app.handle().clone();
+                main_window.on_window_event(move |event| {
+                    windows::lifecycle::handle_main_window_event(
+                        &app_handle,
+                        &app_handle.state::<windows::lifecycle::LifecycleState>(),
+                        event,
+                    );
+                });
+            }
+            if settings.show_floating_window {
+                if let Err(error) = windows::create_floating_ball(
+                    app.handle(),
+                    &floating_state,
+                    &data_dir.join("floating-ball.json"),
+                ) {
+                    floating_state.set_creation_error(Some(error));
+                }
+            }
+            let tray_state = app.state::<windows::tray::TrayState>();
+            if let Err(error) = windows::tray::create_tray(app.handle(), &tray_state) {
+                tray_state.set_creation_error(Some(error.clone()));
+                let _ = app.emit_to("main", "tray-unavailable", error);
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -43,6 +84,13 @@ pub fn run() {
             commands::list_directory,
             commands::index_paths,
             commands::reposition_file,
+            commands::floating_ball::record_floating_paths,
+            commands::floating_ball::get_floating_recent,
+            commands::floating_ball::open_main_from_floating,
+            commands::floating_ball::load_floating_placement,
+            commands::floating_ball::save_floating_placement,
+            commands::floating_ball::floating_window_status,
+            commands::floating_ball::retry_floating_ball,
             commands::library::set_favorite,
             commands::library::remove_index_entry,
             commands::library::copy_indexed_file,
@@ -52,6 +100,10 @@ pub fn run() {
             commands::library::delete_original_file,
             commands::settings::load_settings,
             commands::settings::update_settings,
+            commands::window::set_floating_window_visible,
+            commands::window::show_main_window,
+            commands::window::tray_status,
+            commands::window::exit_app,
             commands::can_preview,
             commands::load_preview,
             commands::dispose_preview
@@ -60,7 +112,14 @@ pub fn run() {
         .map(|app| {
             app.run(|app_handle, event| {
                 if matches!(event, tauri::RunEvent::Exit) {
+                    app_handle
+                        .state::<windows::lifecycle::LifecycleState>()
+                        .begin_exit();
+                    app_handle.state::<windows::tray::TrayState>().begin_exit();
+                    let floating_state = app_handle.state::<windows::FloatingBallState>();
+                    windows::close_floating_ball(app_handle, &floating_state);
                     app_handle.state::<preview::PreviewState>().dispose_all();
+                    let _ = app_handle.remove_tray_by_id(windows::tray::TRAY_ID);
                 }
             });
         });

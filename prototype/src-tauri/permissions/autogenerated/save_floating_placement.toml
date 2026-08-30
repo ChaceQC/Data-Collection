@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-save-floating-placement"
+description = "Enables the save_floating_placement command without any pre-configured scope."
+commands.allow = ["save_floating_placement"]
+
+[[permission]]
+identifier = "deny-save-floating-placement"
+description = "Denies the save_floating_placement command without any pre-configured scope."
+commands.deny = ["save_floating_placement"]

@@ -29,12 +29,13 @@ export function SettingsPanel({ settings = DEFAULT_SETTINGS, saving = false, onC
   return (
     <div
       className="library-dialog-backdrop"
+      data-tauri-drag-region="false"
       role="presentation"
       onMouseDown={(event) => {
         if (event.currentTarget === event.target && !saving) onCancel();
       }}
     >
-      <section className="library-dialog settings-dialog" role="dialog" aria-modal="true" aria-labelledby="settings-dialog-title">
+      <section className="library-dialog settings-dialog" data-tauri-drag-region="false" role="dialog" aria-modal="true" aria-labelledby="settings-dialog-title">
         <header className="library-dialog-header">
           <div className="settings-dialog-title">
             <GearSix size={21} weight="regular" aria-hidden="true" />
@@ -90,6 +91,29 @@ export function SettingsPanel({ settings = DEFAULT_SETTINGS, saving = false, onC
               <span>从资料库移除记录前确认</span>
             </label>
             <p className="settings-hint">删除原文件始终显示影响范围确认，不能通过设置跳过。</p>
+          </section>
+
+          <section className="settings-section" aria-labelledby="settings-window-title">
+            <h3 id="settings-window-title">窗口</h3>
+            <label className="settings-checkbox">
+              <input
+                type="checkbox"
+                checked={draft.hideToTray}
+                onChange={(event) => setDraft((current) => ({ ...current, hideToTray: event.target.checked }))}
+              />
+              <span>关闭窗口时隐藏到系统托盘</span>
+            </label>
+            <label className="settings-checkbox">
+              <input
+                type="checkbox"
+                checked={draft.showFloatingWindow}
+                onChange={(event) => setDraft((current) => ({ ...current, showFloatingWindow: event.target.checked }))}
+              />
+              <span>显示悬浮窗</span>
+            </label>
+            <p className="settings-hint">
+              浏览器回退模式仅在当前会话生效；桌面端设置会在下次启动恢复。
+            </p>
           </section>
 
           <section className="settings-section" aria-labelledby="settings-preview-title">

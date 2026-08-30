@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-retry-floating-ball"
+description = "Enables the retry_floating_ball command without any pre-configured scope."
+commands.allow = ["retry_floating_ball"]
+
+[[permission]]
+identifier = "deny-retry-floating-ball"
+description = "Denies the retry_floating_ball command without any pre-configured scope."
+commands.deny = ["retry_floating_ball"]

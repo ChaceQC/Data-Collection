@@ -201,6 +201,24 @@
           "markdownDescription": "Enables the dispose_preview command without any pre-configured scope."
         },
         {
+          "description": "Enables the exit_app command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-exit-app",
+          "markdownDescription": "Enables the exit_app command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the floating_window_status command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-floating-window-status",
+          "markdownDescription": "Enables the floating_window_status command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_floating_recent command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-floating-recent",
+          "markdownDescription": "Enables the get_floating_recent command without any pre-configured scope."
+        },
+        {
           "description": "Enables the index_paths command without any pre-configured scope.",
           "type": "string",
           "const": "allow-index-paths",
@@ -217,6 +235,12 @@
           "type": "string",
           "const": "allow-load-file-index",
           "markdownDescription": "Enables the load_file_index command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the load_floating_placement command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-load-floating-placement",
+          "markdownDescription": "Enables the load_floating_placement command without any pre-configured scope."
         },
         {
           "description": "Enables the load_preview command without any pre-configured scope.",
@@ -237,6 +261,18 @@
           "markdownDescription": "Enables the open_indexed_file command without any pre-configured scope."
         },
         {
+          "description": "Enables the open_main_from_floating command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-open-main-from-floating",
+          "markdownDescription": "Enables the open_main_from_floating command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the record_floating_paths command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-record-floating-paths",
+          "markdownDescription": "Enables the record_floating_paths command without any pre-configured scope."
+        },
+        {
           "description": "Enables the remove_index_entry command without any pre-configured scope.",
           "type": "string",
           "const": "allow-remove-index-entry",
@@ -255,16 +291,46 @@
           "markdownDescription": "Enables the reposition_file command without any pre-configured scope."
         },
         {
+          "description": "Enables the retry_floating_ball command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-retry-floating-ball",
+          "markdownDescription": "Enables the retry_floating_ball command without any pre-configured scope."
+        },
+        {
           "description": "Enables the reveal_indexed_file command without any pre-configured scope.",
           "type": "string",
           "const": "allow-reveal-indexed-file",
           "markdownDescription": "Enables the reveal_indexed_file command without any pre-configured scope."
         },
         {
+          "description": "Enables the save_floating_placement command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-save-floating-placement",
+          "markdownDescription": "Enables the save_floating_placement command without any pre-configured scope."
+        },
+        {
           "description": "Enables the set_favorite command without any pre-configured scope.",
           "type": "string",
           "const": "allow-set-favorite",
           "markdownDescription": "Enables the set_favorite command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the set_floating_window_visible command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-set-floating-window-visible",
+          "markdownDescription": "Enables the set_floating_window_visible command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the show_main_window command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-show-main-window",
+          "markdownDescription": "Enables the show_main_window command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the tray_status command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-tray-status",
+          "markdownDescription": "Enables the tray_status command without any pre-configured scope."
         },
         {
           "description": "Enables the update_settings command without any pre-configured scope.",
@@ -297,6 +363,24 @@
           "markdownDescription": "Denies the dispose_preview command."
         },
         {
+          "description": "Denies the exit_app command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-exit-app",
+          "markdownDescription": "Denies the exit_app command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the floating_window_status command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-floating-window-status",
+          "markdownDescription": "Denies the floating_window_status command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_floating_recent command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-floating-recent",
+          "markdownDescription": "Denies the get_floating_recent command without any pre-configured scope."
+        },
+        {
           "description": "Denies the index_paths command without any pre-configured scope.",
           "type": "string",
           "const": "deny-index-paths",
@@ -313,6 +397,12 @@
           "type": "string",
           "const": "deny-load-file-index",
           "markdownDescription": "Denies the load_file_index command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the load_floating_placement command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-load-floating-placement",
+          "markdownDescription": "Denies the load_floating_placement command without any pre-configured scope."
         },
         {
           "description": "Denies the load_preview command.",
@@ -333,6 +423,18 @@
           "markdownDescription": "Denies the open_indexed_file command without any pre-configured scope."
         },
         {
+          "description": "Denies the open_main_from_floating command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-open-main-from-floating",
+          "markdownDescription": "Denies the open_main_from_floating command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the record_floating_paths command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-record-floating-paths",
+          "markdownDescription": "Denies the record_floating_paths command without any pre-configured scope."
+        },
+        {
           "description": "Denies the remove_index_entry command without any pre-configured scope.",
           "type": "string",
           "const": "deny-remove-index-entry",
@@ -351,16 +453,46 @@
           "markdownDescription": "Denies the reposition_file command without any pre-configured scope."
         },
         {
+          "description": "Denies the retry_floating_ball command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-retry-floating-ball",
+          "markdownDescription": "Denies the retry_floating_ball command without any pre-configured scope."
+        },
+        {
           "description": "Denies the reveal_indexed_file command without any pre-configured scope.",
           "type": "string",
           "const": "deny-reveal-indexed-file",
           "markdownDescription": "Denies the reveal_indexed_file command without any pre-configured scope."
         },
         {
+          "description": "Denies the save_floating_placement command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-save-floating-placement",
+          "markdownDescription": "Denies the save_floating_placement command without any pre-configured scope."
+        },
+        {
           "description": "Denies the set_favorite command without any pre-configured scope.",
           "type": "string",
           "const": "deny-set-favorite",
           "markdownDescription": "Denies the set_favorite command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the set_floating_window_visible command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-set-floating-window-visible",
+          "markdownDescription": "Denies the set_floating_window_visible command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the show_main_window command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-show-main-window",
+          "markdownDescription": "Denies the show_main_window command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the tray_status command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-tray-status",
+          "markdownDescription": "Denies the tray_status command without any pre-configured scope."
         },
         {
           "description": "Denies the update_settings command without any pre-configured scope.",

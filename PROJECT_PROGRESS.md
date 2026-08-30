@@ -1,5 +1,445 @@
 # 项目进度
 
+## 2026-08-30
+
+### 0.3.0 阶段 H 验收完成与发布同步
+
+#### 已完成
+
+- 用户确认 Windows 11 桌面端第 6.3 节 1-17 项全部验收通过，包含系统托盘、关闭/退出、悬浮窗开关、主窗口拖动、跨显示器与 DPI、托盘最近任务/收藏、生命周期、预览回归和 NSIS 安装后 loader 检查。
+- `0.2.8` 的主窗口顶部拖动带和页面标题拖动修复已纳入 `0.3.0`，交互控件排除规则保持不变。
+- `PROJECT_PLAN.md` 阶段 H、最终完成条件、当前执行入口和实现快照已更新为完成状态。
+- 前端 package、package-lock 根包、Tauri 配置、Rust crate、Cargo.lock 根包、README 和进度文档已统一到 `0.3.0`。
+
+#### 进行中
+
+- 无；`0.3.0` 阶段 H 发布门槛已完成。
+
+#### 阻塞与风险
+
+- 当前没有用户验收阻塞；WebView2 Runtime 仍依赖目标机已有安装，LibreOffice 仍是 DOC 预览可选依赖，安装包仍未签名。
+
+#### 下一步
+
+- 维护 `0.3.0` 的外部依赖边界；后续涉及托盘、关闭语义、窗口拖动或安装目录的改动需重新执行对应验收。
+
+#### 涉及文件
+
+- `prototype/package.json`
+- `prototype/package-lock.json`
+- `prototype/src-tauri/tauri.conf.json`
+- `prototype/src-tauri/Cargo.toml`
+- `prototype/src-tauri/Cargo.lock`
+- `prototype/src/App.jsx`
+- `prototype/src/styles.css`
+- `prototype/README.md`
+- `PROJECT_PLAN.md`
+- `PROJECT_PROGRESS.md`
+
+#### 验证
+
+- 用户确认 Windows 11 桌面手工验收全部通过。
+- `git diff --check`：通过。
+- `npm.cmd run tauri:build`：通过，生成 `prototype/src-tauri/target/release/bundle/nsis/本地资料工作台_0.3.0_x64-setup.exe`。
+- `WebView2Loader.dll` release 检查：通过，大小 `160320` bytes、SHA-256 为 `8427b1fc58ec707813e5c0a51eb5d69397bb333250a7b891be4d3b123f1e0f1c`，与 Windows x64 release 主程序同目录。
+
+## 2026-08-30
+
+### 0.2.8 主窗口拖动入口修复（已验收，已纳入 0.3.0）
+
+#### 已完成
+
+- 恢复并扩大 Tauri 2 官方 `data-tauri-drag-region="deep"`：新增覆盖窗口顶部的拖动带，同时保留页面标题拖动区域。
+- Tauri 官方拖动脚本只响应鼠标左键，并排除按钮、输入框、下拉框、文本域、链接、按钮角色和显式非拖动区域；浏览器回退不会调用桌面窗口 API。
+- 为顶部拖动带和页面标题增加可见的移动光标和不可选标题样式，保持窗口控制、搜索、排序、资料列表、拖放和模态交互的独立行为。
+- 将 `prototype/package.json`、package-lock 根包、Tauri 配置、Cargo 根包、Cargo.lock 根包和 README 统一同步到 `0.2.8`。
+- 更新 `PROJECT_PLAN.md`，增加 `0.2.8` 主窗口拖动修复检查点，并保留真实 Windows 11 拖动验收为未完成条件。
+
+#### 进行中
+
+- `0.2.8` Windows 桌面开发版已由用户完成标题栏拖动及各交互区域验收。
+
+#### 阻塞与风险
+
+- 真实无装饰窗口拖动、双显示器/负坐标移动和最大化恢复已由用户在 Windows 11/WebView2 桌面环境确认；后续改动需要重新执行对应验收。
+- 托盘、关闭隐藏、悬浮窗组合和 NSIS 安装后 loader 检查已在阶段 H 验收中通过；WebView2 Runtime、LibreOffice 和安装签名仍是既有发布边界。
+
+#### 下一步
+
+- 用户已在 Tauri 开发版中拖动标题栏空白区域，并确认窗口控制、搜索、排序、资料行、预览和拖放区没有误触发拖动。
+
+#### 涉及文件
+
+- `prototype/src/App.jsx`
+- `prototype/src/styles.css`
+- `prototype/package.json`
+- `prototype/package-lock.json`
+- `prototype/src-tauri/tauri.conf.json`
+- `prototype/src-tauri/Cargo.toml`
+- `prototype/src-tauri/Cargo.lock`
+- `prototype/README.md`
+- `PROJECT_PLAN.md`
+- `PROJECT_PROGRESS.md`
+
+#### 验证
+
+- `git diff --check`：通过。
+- `npm.cmd run build`：通过，生成 `dist/client/index.html`、`dist/server/index.js` 和 `dist/.openai/hosting.json`。
+- `cargo check`：通过，Rust crate 版本为 `0.2.8`。
+- `npm.cmd run tauri:dev`：已启动，Tauri 原生开发窗口正在等待 Windows 手工验收。
+- Windows 桌面手工验收：用户已确认通过；最终 `0.3.0` 发布构建已在上方条目复核。
+
+## 2026-08-30
+
+### 悬浮窗重开死锁与最近列表收藏修复
+
+#### 已完成
+
+- 修复 Windows 下运行时开启悬浮窗的死锁：`update_settings`、`set_floating_window_visible` 和 `retry_floating_ball` 改为异步 command，托盘切换改为异步任务，避免同步 IPC/托盘事件调用 `WebviewWindowBuilder`。
+- 修复悬浮窗反复关闭/开启时靠近监视线程令牌复用导致旧线程复活和叠加的问题；每次启动监视使用新的停止令牌，并在窗口显示成功后再启动监视。
+- 为悬浮窗最近文件列表增加独立的收藏/取消收藏按钮，复用现有 `set_favorite` 索引写入和 `index-changed` 跨窗口同步；同步补充悬浮窗 capability 权限。
+- 修正 NSIS 发布载荷：在 `tauri.conf.json` 中将构建生成的 `WebView2Loader.dll` 映射到安装目录根部，确保安装包实际包含 loader，而不是只生成在 `target/release`。
+- 清理当前工作树中遗留的旧 Cargo debug 构建缓存，默认路径下的构建不再引用旧 `C:\Users\q-lau\Documents\test` 路径。
+
+#### 进行中
+
+- Windows 11 的托盘、显式退出、跨 DPI 位置恢复和安装后 loader 检查仍按阶段 H 由用户手工验收。
+
+#### 阻塞与风险
+
+- 首次 `cargo check --release` 曾因已有 release 应用进程锁定 `target\release\local-material-workbench.exe` 返回 Windows `os error 32`；进程释放后再次检查已通过，未终止用户进程。
+- 浏览器回退和当前开发版行为已检查，但不能替代用户对真实托盘和安装包生命周期的验收。
+
+#### 下一步
+
+- 用户在 Windows 桌面端验证悬浮窗关闭/开启、悬浮列表收藏持久化及主窗口/托盘同步，再继续阶段 H 验收记录。
+
+#### 涉及文件
+
+- `prototype/src-tauri/src/windows/mod.rs`
+- `prototype/src-tauri/src/commands/settings.rs`
+- `prototype/src-tauri/src/commands/window.rs`
+- `prototype/src-tauri/src/commands/floating_ball.rs`
+- `prototype/src-tauri/src/windows/tray.rs`
+- `prototype/src-tauri/capabilities/floating.json`
+- `prototype/src-tauri/gen/schemas/capabilities.json`
+- `prototype/src-tauri/tauri.conf.json`
+- `prototype/src/features/floating-ball/FloatingBallPanel.jsx`
+- `prototype/src/features/floating-ball/FloatingBallWindow.jsx`
+- `prototype/src/styles.css`
+- `prototype/README.md`
+
+#### 验证
+
+- `npm.cmd run test:floating-ball`：9 项通过。
+- `npm.cmd run test:tray`：3 项通过。
+- `npm.cmd run build`：通过，Sites 产物均生成。
+- `cargo fmt --all -- --check`：通过。
+- `cargo check`：通过，构建路径显示为当前 `E:\Project\test`。
+- `cargo check --release`：通过，构建路径显示为当前 `E:\Project\test`。
+- `npm.cmd run tauri:build`：通过，生成 `prototype/src-tauri/target/release/bundle/nsis/本地资料工作台_0.2.7_x64-setup.exe`。
+- release loader 校验：通过，`WebView2Loader.dll` 为 `160320` bytes，与主程序位于同一 Windows x64 release 目录。
+- NSIS 载荷复核：通过，生成的 `target/release/nsis/x64/installer.nsi` 包含 `File /a "/oname=WebView2Loader.dll"`，目标为 `$INSTDIR` 根目录。
+- Playwright 浏览器回退：收藏按钮切换、收起后重新展开通过；用户确认当前开发版桌面悬浮窗恢复正常。
+
+### 0.2.7 阶段 A-G 开发实现与发布候选构建
+
+#### 已完成
+
+- 按当前 `PROJECT_PLAN.md` 落地设置 v2：新增 `hideToTray`、`showFloatingWindow`，支持 v1 兼容读取、原子迁移、非法布尔值回退和迁移写入失败时保留旧文件。
+- 新增原生窗口生命周期服务和唯一托盘服务：固定 `main-tray` ID、产品 tooltip、打开主窗口/设置、显示或隐藏悬浮窗、最近任务子菜单和显式退出；托盘菜单事件只接受内部 ID。
+- 新增只读 `tray_status` command，主窗口启动时主动读取托盘可用状态，避免启动事件早于前端监听器而丢失错误提示。
+- 将关闭请求接入 `hideToTray` 状态机：普通关闭可隐藏到托盘，显式退出先清理悬浮窗和预览资源，再销毁主窗口并退出；托盘不可用时阻止无提示隐藏并向主窗口发送安全提示。
+- 将 `showFloatingWindow` 接入启动和运行时设置：关闭时停止靠近轮询并销毁悬浮窗，开启时按持久化位置幂等重建，失败保留用户意图并返回可诊断状态。
+- 明确主窗口标题栏拖动区域并为窗口控制、拖放区、资料列表、设置模态和预览交互增加非拖动标记；浏览器/Sites 回退不调用桌面窗口 API。
+- 抽取共享最近任务/收藏模型，托盘任务最多显示 5 条，清理危险/超长文案；收藏动作复用索引原子写入并通过 `index-changed` 同步主窗口和悬浮球。
+- 新增 `verify-webview2-loader.mjs`，校验 loader 存在、PE x64 架构、非空、SHA-256 和与 release 主程序同目录布局；`tauri:build` 自动执行该检查。
+- 将前端、Tauri 配置、Rust crate、锁文件、README 和生成 permission/schema 入口统一同步到 `0.2.7` 开发候选。
+
+#### 进行中
+
+- 阶段 H 的真实 Windows 11 手工验收仍待用户执行，尤其是托盘唯一性、关闭隐藏/显式退出、悬浮窗四种组合、跨显示器拖动、动态任务菜单和设置重启恢复。
+- NSIS 安装后的实际目录检查、首次启动、升级、卸载和重装尚未由代理代替用户完成；当前 loader 证据仅覆盖 release 输出目录。
+
+#### 阻塞与风险
+
+- 当前没有代码编译阻塞；Tauri 2 tray API、无装饰窗口行为和 WebView2 媒体/Runtime 兼容性仍需目标 Windows 环境确认。
+- `WebView2Loader.dll` 只负责加载器，安装包仍使用 `webviewInstallMode=skip`，不内置 WebView2 Runtime；安装器未签名。
+- 浏览器回退可以演示设置字段和页面状态，但不能替代系统托盘、窗口关闭语义、原生拖动或安装目录检查。
+- 设置迁移写入失败的真实文件系统故障注入尚未单独自动化；当前代码依赖 `AtomicWriteFile` 的失败即保留旧文件语义，后续可在 Windows 权限夹具中补充验证。
+
+#### 下一步
+
+- 使用 `tests/fixtures/desktop-acceptance/` 和无敏感测试文件完成 `PROJECT_PLAN.md` 第 6.3 节第 1-17 项，记录 Windows/WebView2 版本、通过项和阻断项。
+- 将安装包实际安装到临时用户目录，确认主 exe 同目录存在 `WebView2Loader.dll`，然后按结果决定是否进入 `0.3.0` 发布门槛。
+
+#### 涉及文件
+
+- `prototype/src-tauri/src/storage/settings.rs`
+- `prototype/src-tauri/src/storage/mod.rs`
+- `prototype/src-tauri/src/windows/`
+- `prototype/src-tauri/src/commands/settings.rs`
+- `prototype/src-tauri/src/commands/window.rs`
+- `prototype/src-tauri/src/commands/library.rs`
+- `prototype/src-tauri/src/commands/mod.rs`
+- `prototype/src-tauri/src/lib.rs`
+- `prototype/src-tauri/build.rs`
+- `prototype/src-tauri/Cargo.toml`
+- `prototype/src-tauri/Cargo.lock`
+- `prototype/src-tauri/capabilities/default.json`
+- `prototype/src-tauri/permissions/autogenerated/`
+- `prototype/src-tauri/gen/schemas/`
+- `prototype/src/features/settings/`
+- `prototype/src/features/tray/`
+- `prototype/src/features/floating-ball/`
+- `prototype/src/App.jsx`
+- `prototype/src/features/library/LibraryPanel.jsx`
+- `prototype/src/styles.css`
+- `prototype/scripts/verify-webview2-loader.mjs`
+- `prototype/package.json`
+- `prototype/package-lock.json`
+- `prototype/README.md`
+- `PROJECT_PLAN.md`
+
+#### 验证
+
+- `npm.cmd run test:settings`：4 项通过。
+- `npm.cmd run test:tray`：3 项通过。
+- `npm.cmd run test:library`：5 项通过。
+- `npm.cmd run test:preview`：4 项通过。
+- `npm.cmd run test:floating-ball`：9 项通过。
+- `npm.cmd run test:sites`：4 项通过。
+- `npm.cmd run build`：通过，Sites 产物 `dist/client/index.html`、`dist/server/index.js`、`dist/.openai/hosting.json` 均生成。
+- `cargo fmt --all -- --check`、`cargo check`、`cargo test -- --test-threads=1`：通过，Rust 共 45 项测试通过。
+- `cargo clippy --all-targets --all-features -- -D warnings`：通过。
+- `npm.cmd run tauri:build`：通过，生成 `本地资料工作台_0.2.7_x64-setup.exe`。
+- `npm.cmd run verify:loader`：通过；loader 大小 `160320` bytes，SHA-256 为 `8427b1fc58ec707813e5c0a51eb5d69397bb333250a7b891be4d3b123f1e0f1c`，release 主程序同目录检查通过。
+- loader 来源为锁定的 `webview2-com-sys v0.38.2` 构建输出，经 Tauri bundler 自动放置到 Windows x64 release 主程序目录；未把 DLL 固定副本提交到仓库。
+- 未执行真实 Windows 托盘、关闭/隐藏、原生拖动和安装后目录手工验收，未以浏览器演示替代这些项目。
+
+## 2026-08-30
+
+### 0.3.0 桌面生命周期与发布优化计划重写
+
+#### 已完成
+
+- 根据最新需求，将当前执行计划改写为面向 `0.3.0` 的系统托盘、关闭隐藏、悬浮窗可见性、主窗口拖动、托盘任务收藏和 `WebView2Loader.dll` 发布优化路线。
+- 移除旧版 `PROJECT_PLAN.md` 的悬浮球发布计划内容，并以新的分阶段计划替换；检查根目录未发现需要并行维护的独立 `PLAN.md`。
+- 固定版本策略：计划重写当天继续保持应用版本 `0.2.0`，阶段 A-G 完成后依次更新 `0.2.1` 至 `0.2.7`，全部实现、Windows 手工验收和安装包检查完成后再更新为 `0.3.0`。
+- 在新计划中明确设置格式 v1 到 v2 迁移、托盘菜单和事件边界、关闭请求与显式退出的区分、悬浮窗运行时开关、主窗口拖动排除区域、托盘收藏同步以及安装后 loader 文件检查。
+
+#### 进行中
+
+- 本次仅完成计划和进度文档重写，尚未修改系统托盘、设置、窗口行为或构建配置源码。
+- 下一执行阶段为阶段 A：设置 v2、生命周期/托盘契约和最小验证骨架。
+
+#### 阻塞与风险
+
+- 当前没有实现阻塞；Tauri 2 的托盘 API、无装饰窗口关闭拦截、悬浮窗重建和 NSIS 资源落位仍需在实现后以真实 Windows 11 环境验证。
+- `WebView2Loader.dll` 与 WebView2 Runtime 是不同组件；本计划只要求 loader 随安装包提供，Runtime 依赖边界继续保持并在 README 中说明。
+- 当前工作树已有前序悬浮球实现改动，本次不撤销、不覆盖这些改动，也不因写计划运行大规模测试。
+
+#### 下一步
+
+- 按 `PROJECT_PLAN.md` 阶段 A 清单实现设置 v2 迁移、两个布尔设置、状态机契约和针对性测试；阶段完成并验证后统一同步版本 `0.2.1`。
+
+#### 涉及文件
+
+- `PROJECT_PLAN.md`
+- `PROJECT_PROGRESS.md`
+
+#### 验证
+
+- 已使用 UTF-8 读取 `AGENT.md`、`prototype/AGENTS.md`、现有计划、进度、README、Tauri 配置、Rust 设置/窗口/命令和前端设置/悬浮球实现。
+- 已检查根目录计划文件，当前只有 `PROJECT_PLAN.md`，未发现独立 `PLAN.md`。
+- 本次为文档重写，未运行前端、Rust 或安装包全量测试。
+
+## 2026-08-30
+
+### 0.2.0 发布与 Windows 手工验收完成
+
+#### 已完成
+
+- 用户确认 Windows 11/WebView2 桌面验收完成，覆盖计划第 6.3 节的悬浮球启动、置顶、拖放记录、最近 5 条、展开/收起、双屏 DPI、边缘吸附、位置恢复、跨窗口同步、生命周期和键盘操作场景。
+- 双屏边缘展开/收起时的 DPI 坐标跳变问题已确认修复，悬浮球不会在两个显示器边界之间乱闪。
+- 已将 `prototype/package.json`、`package-lock.json` 根包、Tauri 配置、Cargo 根包、`Cargo.lock` 根包、README、计划和进度统一同步到 `0.2.0`。
+- 已生成 Windows x64 NSIS 安装包：`prototype/src-tauri/target/release/bundle/nsis/本地资料工作台_0.2.0_x64-setup.exe`。
+
+#### 进行中
+
+- `0.2.0` 发布门槛已完成；后续仅按现有外部依赖边界维护，不新增本计划之外的功能。
+
+#### 阻塞与风险
+
+- 用户未提供具体 Windows/WebView2 版本和测试夹具名称，进度文档不臆填这些环境字段；用户未报告 P0/P1 阻塞。
+- WebView2 Runtime、LibreOffice、视频编码、SheetJS 和未签名安装包等既有发布边界风险保持不变。
+
+#### 下一步
+
+- 维护 `0.2.0` 已发布构建的安装、卸载和外部依赖说明；不上传安装包或修改远程仓库。
+
+#### 涉及文件
+
+- `prototype/package.json`
+- `prototype/package-lock.json`
+- `prototype/src-tauri/Cargo.toml`
+- `prototype/src-tauri/Cargo.lock`
+- `prototype/src-tauri/tauri.conf.json`
+- `PROJECT_PLAN.md`
+- `PROJECT_PROGRESS.md`
+- `prototype/README.md`
+
+#### 验证
+
+- `npm.cmd run test:library`、`test:settings`、`test:preview`、`test:floating-ball`、`test:sites`：共 25 项通过。
+- `npm.cmd run build`：通过。
+- `cargo fmt --all -- --check`、`cargo check`、`cargo test -- --test-threads=1`（39 项）和 `cargo clippy --all-targets --all-features -- -D warnings`：通过。
+- `npm.cmd run tauri:build`：通过，生成 `本地资料工作台_0.2.0_x64-setup.exe`。
+- 已检查版本入口和工作树，项目版本入口均为 `0.2.0`，未发现未跟踪构建产物；Cargo lock 中的第三方依赖版本不作项目版本替换。
+
+## 2026-08-29
+
+### 双屏 DPI 边缘闪烁修复
+
+#### 已完成
+
+- 定位并修复双屏边界附近展开/收起时的坐标单位混用：Tauri 读取的窗口位置、尺寸和移动事件统一按物理像素处理，面板几何计算和 `floating-ball.json` 持久化继续使用 DIP。
+- 展开面板时按当前显示器缩放比例将宿主矩形转换为物理位置/尺寸；收起时复用展开前的缩放比例和球体锚点，避免窗口被另一块屏幕的 DPI 重新解释并在屏幕边界跳动。
+- 移除临时的窗口位置诊断输出，新增 `1.5x` DPI、负坐标工作区和 DIP/物理像素往返测试。
+
+#### 进行中
+
+- 代码修复和开发侧检查已完成，仍等待用户在实际双屏 Windows 11/WebView2 环境确认靠近边缘时不再闪烁。
+
+#### 阻塞与风险
+
+- 代理未替用户完成真实桌面手工验收；不同显示器排列、缩放比例、任务栏工作区、拖动跨屏和重启位置恢复仍以用户的 Windows 验收为准。
+- 版本继续保持 `0.1.5`，未因代码修复直接升级 `0.2.0`。
+
+#### 下一步
+
+- 使用最新开发版或安装包，在双屏环境把悬浮球放到主屏右边缘，仅移动鼠标靠近并反复展开/收起，确认窗口位置不在两块屏幕边界之间跳变。
+- 用户完成计划第 6.3 节验收后，再决定是否统一升级到 `0.2.0`。
+
+#### 涉及文件
+
+- `prototype/src/features/floating-ball/floatingBallApi.js`
+- `prototype/src/features/floating-ball/floatingBallModel.js`
+- `prototype/src/features/floating-ball/FloatingBallWindow.jsx`
+- `prototype/tests/floating-ball-model.test.mjs`
+- `prototype/src-tauri/src/windows/monitor.rs`
+- `PROJECT_PROGRESS.md`
+
+#### 验证
+
+- `npm.cmd run test:floating-ball`：9 项模型测试通过，包含多 DPI 物理坐标转换。
+- `npm.cmd run build`：Vite 和 Sites 构建通过。
+- `cargo fmt --all -- --check`、`cargo test -- --test-threads=1`（39 项）、`cargo check` 和 `cargo clippy --all-targets --all-features -- -D warnings`：通过。
+- `npm.cmd run tauri:build`：通过，已重新生成 `prototype/src-tauri/target/release/bundle/nsis/本地资料工作台_0.1.5_x64-setup.exe`。
+- `git diff --check`：通过；未发现项目内临时诊断日志或残留 `floating near` 输出。
+
+### 悬浮球阶段 A-E 代码实现与开发侧验证
+
+#### 已完成
+
+- 完成索引 v2 到 v3 的兼容迁移：`IndexEntry` 增加可为空的 `lastRecordedAt`；v1/v2 旧记录迁移后保持空值，不会虚构悬浮球记录。
+- 抽取共享索引合并逻辑，普通主窗口导入保留悬浮球时间，悬浮球记录对新增和已存在路径使用毫秒级时间戳，保留 ID、收藏、添加时间和预览状态。
+- 新增独立的 `floating-ball.json` v1 原子存储、字段校验、损坏/缺失回退、工作区夹紧和显示器标识处理；位置数据不写入索引或设置文件。
+- 新增 `floating-ball` Tauri 窗口、透明/无装饰/置顶/跳过任务栏配置、创建失败降级、主窗口关闭清理和应用退出清理。
+- 新增 `record_floating_paths`、`get_floating_recent`、`open_main_from_floating`、`load_floating_placement`、`save_floating_placement` 和 `floating_window_status`，悬浮球 capability 只开放必要的 command、窗口和事件权限。
+- 增加主窗口可执行的 `retry_floating_ball` 入口；悬浮球创建失败时显示可重试横幅，成功恢复后清除错误状态。
+- 新增悬浮球 React 路由、最近 5 条面板、拖放状态、防重复提交、部分失败反馈、失效记录、键盘焦点、面板方向、靠近滞回、窗口移动去抖和边缘吸附模型。
+- 修正面板展开时的球体锚点：横向布局不再垂直漂移，面板宿主会在工作区内夹紧并用偏移保持球体位置；位置保存失败会保留可见错误状态和下次启动提示。
+- 修正悬浮球点击文件夹记录后的主窗口行为，现会进入现有目录浏览；增加对应的工作区边界和锚点纯函数测试。
+- 修复悬浮球无法展开的实际运行时问题：`currentMonitor()` 是 Tauri 模块级 API，错误的实例级调用会让 `openPanel()` 进入失败回退；改正后开发版受控点击可将窗口从 `136x64` 扩展到 `384x322`。
+- 靠近监视线程保持 `80ms` 采样，并以 `400ms` 间隔重发当前状态以覆盖 WebView 初始化时序；前端在滞回带内保持状态，避免周期事件造成反复展开/折叠。
+- 快速连续 drop 在当前记录任务期间进入内存队列，按顺序串行提交并去除队列内重复路径，不再静默丢弃后续拖入。
+- 扩充 `tests/fixtures/desktop-acceptance/悬浮球验收/` 无敏感夹具，覆盖 6 条不同最近记录、中文/空格路径、Markdown、Python、JSON 和文件夹节点场景。
+- 主窗口接入 `floating-recorded`、`floating-open-file` 和索引刷新事件；移除、删除、重命名、重新定位和普通导入会按 ID 同步悬浮球，不向事件或展示数据泄露完整路径。
+- README、计划勾选状态、版本字段和 `.gitignore` 已同步到阶段 E 的 `0.1.5`；Sites 约定文件未修改。
+
+#### 进行中
+
+- 阶段 A-E 的代码实现和开发侧自动验证完成；阶段 F 仍等待用户在 Windows 11/WebView2 桌面环境执行悬浮球手工验收，完成前不升级到 `0.2.0`。
+
+#### 阻塞与风险
+
+- 尚未由代理执行或宣称 Windows 桌面手工验收：真实资源管理器拖放、透明置顶窗口、任务栏避让、窗口生命周期、不同 DPI/多显示器、重启位置恢复和真实文件样本仍需用户按 `PROJECT_PLAN.md` 第 6.3 节检查。
+- Rust runtime 窗口模块在 `cargo test` 中隔离以避免当前 Windows GNU 测试进程的 `STATUS_ENTRYPOINT_NOT_FOUND`；`monitor.rs` 的纯位置算法通过测试入口单独编译并执行，runtime 代码由 `cargo check` 和 Tauri 构建编译，仍需在目标 Windows 环境做最终行为验证。
+- SheetJS 漏洞、WebView2 Runtime、LibreOffice、视频编码和未签名安装包仍是既有发布边界风险；本次未放宽任何格式或系统权限。
+
+#### 下一步
+
+- 用户使用 `tests/fixtures/desktop-acceptance/` 和无敏感临时文件完成计划第 6.3 节 12 项检查，记录 Windows/WebView2 版本、通过项、失败项和是否阻断 `0.2.0`；代理不以浏览器演示替代该验收。
+- 若手工验收全部通过，再将版本位置统一提升到 `0.2.0`，执行发布验证并生成/检查 Windows x64 NSIS 安装包。
+
+#### 涉及文件
+
+- `PROJECT_PLAN.md`
+- `PROJECT_PROGRESS.md`
+- `prototype/README.md`
+- `prototype/package.json`
+- `prototype/package-lock.json`
+- `prototype/src/main.jsx`
+- `prototype/src/App.jsx`
+- `prototype/src/features/floating-ball/`
+- `prototype/src/features/library/`
+- `prototype/src/styles.css`
+- `prototype/src-tauri/src/filesystem/mod.rs`
+- `prototype/src-tauri/src/storage/mod.rs`
+- `prototype/src-tauri/src/storage/floating_ball.rs`
+- `prototype/src-tauri/src/commands/`
+- `prototype/src-tauri/src/windows/`
+- `prototype/src-tauri/capabilities/`
+- `prototype/src-tauri/permissions/autogenerated/`
+
+#### 验证
+
+- `npm.cmd run test:floating-ball`：模型 8 项测试通过。
+- 开发版真实启动诊断：浮球 WebView URL 正确包含 `?window=floating-ball`；修复前点击只移动/不展开，修复后点击成功展开为 `384x322`。
+- `npm.cmd run test:library`、`npm.cmd run test:settings`、`npm.cmd run test:preview`、`npm.cmd run test:sites`：既有回归全部通过。
+- `npm.cmd run build`：Vite 构建通过，并生成 `dist/client/index.html`、`dist/server/index.js` 和 `dist/.openai/hosting.json`。
+- `cargo fmt --all -- --check`、`cargo test`：Rust 格式检查通过，39 项测试通过，包含显示器工作区位置归一化；窗口运行时模块由 `cargo check` 和 Tauri 构建编译。
+- `cargo clippy --all-targets --all-features -- -D warnings`：通过。
+- `npm.cmd run tauri:build`：Tauri 动态窗口 capability 和 Windows x64 NSIS 构建通过，已生成 `prototype/src-tauri/target/release/bundle/nsis/本地资料工作台_0.1.5_x64-setup.exe`。
+- 已在临时 Vite 页面检查 `?window=floating-ball` 浏览器回退：只使用内存演示记录，浮球点击展开/收起，列表最多 5 条；临时服务和浏览器会话已关闭。
+
+## 2026-08-29
+
+### 悬浮球功能计划重写
+
+#### 已完成
+
+- 根据最新需求，将根目录旧版 `PROJECT_PLAN.md` 整体替换为悬浮球功能实施计划；当前执行入口只保留新的 `PROJECT_PLAN.md`，未发现需要并行维护的 `PLAN.md`。
+- 新计划明确悬浮球、文件直接拖入记录、鼠标靠近展示最近 5 条和屏幕边缘吸附四项能力，并把索引 v3、位置文件 v1、跨窗口事件、Windows 多显示器/DPI 和手工验收写入阶段门槛。
+- 新计划明确版本序列：当前保持 `0.1.0`，阶段 A-E 完成后依次更新为 `0.1.1` 至 `0.1.5`，全部功能和 Windows 验收完成后再更新为 `0.2.0`。
+- 本次只变更计划和进度文档，没有新增 command、窗口、依赖、权限或用户数据文件。
+
+#### 进行中
+
+- 悬浮球功能尚未实现；当前应用仍按既有 `0.1.0` 基线运行，下一执行阶段为阶段 A 的索引 v3 和 `floating-ball.json` v1 数据基础。
+
+#### 阻塞与风险
+
+- 当前没有代码实现阻塞；透明置顶窗口、Windows 光标靠近检测、跨显示器坐标和高 DPI 贴边行为必须在实现后由 Windows 11/WebView2 桌面环境手工验收，不能用浏览器回退替代。
+- 新增索引字段会影响 v2 到 v3 迁移；必须保留旧索引、原子写入并避免普通主窗口导入虚构悬浮球最近记录。
+- 现有 SheetJS、WebView2、LibreOffice、视频编码和未签名安装包风险继续沿用既有记录，不因本次计划重写而宣称已解决。
+
+#### 下一步
+
+- 实现阶段 A：增加 `lastRecordedAt`、索引 v3 迁移、独立位置文件 v1、字段保留规则和针对性 Rust 单测；完成后同步版本 `0.1.1`。
+
+#### 涉及文件
+
+- `PROJECT_PLAN.md`
+- `PROJECT_PROGRESS.md`
+- 后续实现范围以新计划第 5 节列出的 `prototype/` 文件为准；本次没有修改这些源码文件。
+
+#### 验证
+
+- 已使用 UTF-8 读取仓库规则、当前计划、进度、原型 README、Tauri 配置、Rust 存储/command 和前端入口，确认新计划与当前 `0.1.0` 基线一致。
+- 已检查计划结构、阶段版本表、旧计划残留和工作区文件列表；本次为文档变更，未运行前端、Rust 或安装包全量测试。
+
 ## 2026-08-29
 
 ### 阶段 F 设置、显式外部操作与 Windows 验收完成

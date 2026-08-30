@@ -3,9 +3,9 @@
 ## 对照目标
 
 - Source visual truth: `C:\Users\q-lau\.codex\generated_images\custom-provider\20260828-203127-create-one-realistic-production-quality-ui-conce.png`
-- Implementation screenshot: `C:\Users\q-lau\Documents\test\prototype\implementation-option-3.png`
-- Full-view comparison: `C:\Users\q-lau\Documents\test\prototype\design-qa-comparison.png`
-- Focused comparison: `C:\Users\q-lau\Documents\test\prototype\design-qa-focus.png`
+ - Implementation screenshot: `E:\Project\test\prototype\implementation-option-3.png`
+ - Full-view comparison: `E:\Project\test\prototype\design-qa-comparison.png`
+ - Focused comparison: `E:\Project\test\prototype\design-qa-focus.png`
 - Viewport: `1487 x 1058 CSS px`
 - Source pixels: `1487 x 1058`
 - Implementation pixels: `1487 x 1058`

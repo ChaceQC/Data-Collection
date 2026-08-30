@@ -8,7 +8,7 @@ import { DeleteOriginalDialog, RenameDialog, RemoveIndexDialog } from "./feature
 import { LibraryPanel } from "./features/library/LibraryPanel";
 import { SettingsPanel } from "./features/settings/SettingsPanel";
 import { loadSettings, updateSettings } from "./features/settings/settingsApi";
-import { DEFAULT_SETTINGS } from "./features/settings/settingsModel";
+import { DEFAULT_SETTINGS, normalizeSettings } from "./features/settings/settingsModel";
 import {
   DEFAULT_SORT,
   getExtension,
@@ -27,6 +27,7 @@ import {
   setFavorite,
 } from "./features/library/libraryApi";
 import {
+  ArrowClockwise,
   CheckCircle,
   Clock,
   FolderOpen,
@@ -112,6 +113,8 @@ function App() {
   const [dragActive, setDragActive] = useState(false);
   const [selectedId, setSelectedId] = useState(IS_TAURI_RUNTIME ? "" : "research-plan");
   const [toast, setToast] = useState("");
+  const [floatingWindowError, setFloatingWindowError] = useState("");
+  const [floatingWindowRetrying, setFloatingWindowRetrying] = useState(false);
   const [indexing, setIndexing] = useState(false);
   const [indexReady, setIndexReady] = useState(!IS_TAURI_RUNTIME);
   const [directoryView, setDirectoryView] = useState(null);
@@ -157,6 +160,66 @@ function App() {
       });
     return () => {
       cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!IS_TAURI_RUNTIME) return undefined;
+    let disposed = false;
+    const unlisten = [];
+    const register = (promise) => promise.then((stop) => {
+      if (disposed) stop();
+      else unlisten.push(stop);
+    }).catch(() => undefined);
+    register(getCurrentWindow().listen("floating-recorded", () => void reloadIndexPreservingState()));
+    register(getCurrentWindow().listen("floating-open-file", (event) => void openFromFloating(event.payload)));
+    register(getCurrentWindow().listen("index-changed", () => void reloadIndexPreservingState()));
+    register(getCurrentWindow().listen("open-settings", () => setSettingsOpen(true)));
+    register(getCurrentWindow().listen("tray-unavailable", (event) => {
+      showToast(typeof event.payload === "string" ? event.payload : "系统托盘不可用，请检查设置");
+    }));
+    register(getCurrentWindow().listen("tray-action-error", (event) => {
+      showToast(typeof event.payload === "string" ? event.payload : "托盘操作失败，请重试");
+    }));
+    register(getCurrentWindow().listen("settings-changed", (event) => {
+      const nextSettings = event.payload?.settings;
+      if (nextSettings) {
+        const normalized = normalizeSettings(nextSettings);
+        setSettings(normalized);
+        setSort(normalized.defaultSort);
+        setPageSize(normalized.pageSize);
+      }
+      if (event.payload?.warning) showToast(event.payload.warning);
+    }));
+    register(getCurrentWindow().listen("floating-window-status", (event) => {
+      const status = event.payload;
+      if (status?.available === false) {
+        setFloatingWindowError(status.error || "悬浮球不可用，请重试");
+      } else {
+        setFloatingWindowError("");
+      }
+    }));
+    invoke("floating_window_status")
+      .then((windowStatus) => {
+        if (disposed) return;
+        if (!windowStatus.available) {
+          const message = windowStatus.error || "悬浮球不可用，请重试";
+          setFloatingWindowError(message);
+          showToast(message);
+        } else {
+          setFloatingWindowError("");
+        }
+      })
+      .catch(() => undefined);
+    invoke("tray_status")
+      .then((trayStatus) => {
+        if (disposed || trayStatus?.available) return;
+        showToast(trayStatus.error || "系统托盘不可用，请检查设置");
+      })
+      .catch(() => undefined);
+    return () => {
+      disposed = true;
+      unlisten.forEach((stop) => stop());
     };
   }, []);
 
@@ -209,6 +272,65 @@ function App() {
 
   function showToast(message) {
     setToast(message);
+  }
+
+  async function retryFloatingBall() {
+    if (!IS_TAURI_RUNTIME || floatingWindowRetrying) return;
+    setFloatingWindowRetrying(true);
+    try {
+      const windowStatus = await invoke("retry_floating_ball");
+      if (windowStatus.available) {
+        setFloatingWindowError("");
+        showToast("悬浮球已恢复");
+      } else {
+        const message = windowStatus.error || "悬浮球不可用，请重试";
+        setFloatingWindowError(message);
+        showToast(message);
+      }
+    } catch (error) {
+      const message = getOperationError(error, "悬浮球不可用，请重试");
+      setFloatingWindowError(message);
+      showToast(message);
+    } finally {
+      setFloatingWindowRetrying(false);
+    }
+  }
+
+  async function reloadIndexPreservingState() {
+    try {
+      const loadedFiles = await invoke("load_file_index");
+      setFiles(loadedFiles);
+      setSelectedId((currentId) => loadedFiles.some((file) => file.id === currentId)
+        ? currentId
+        : loadedFiles[0]?.id || "");
+      setPreviewEntryId((currentId) => currentId && loadedFiles.some((file) => file.id === currentId)
+        ? currentId
+        : null);
+    } catch {
+      showToast("无法同步本地资料索引，请重试");
+    }
+  }
+
+  async function openFromFloating(payload) {
+    const fileId = payload?.fileId;
+    if (!fileId) return;
+    try {
+      const loadedFiles = await invoke("load_file_index");
+      const target = loadedFiles.find((file) => file.id === fileId);
+      setFiles(loadedFiles);
+      setDirectoryView(null);
+      setActiveNav("library");
+      setSelectedId(fileId);
+      setPreviewEntryId(target && !target.invalid && target.kind !== "folder" ? fileId : null);
+      if (!target) showToast("资料已从索引中移除");
+      else if (target.invalid) showToast("该资料路径已失效，请重新定位");
+      else if (target.kind === "folder") {
+        showToast("已打开资料库中的文件夹记录");
+        void openDirectory(target, [target]);
+      }
+    } catch {
+      showToast("无法定位悬浮球记录，请重试");
+    }
   }
 
   function selectNav(key) {
@@ -474,7 +596,10 @@ function App() {
       const messages = [];
       if (result.indexedCount) messages.push(`已索引 ${result.indexedCount} 项`);
       if (result.refreshedCount) messages.push(`更新 ${result.refreshedCount} 项`);
-      if (result.skippedCount) messages.push(`跳过 ${result.skippedCount} 项`);
+      if (result.skippedCount) {
+        const reasons = result.skippedReasons?.join("、");
+        messages.push(`跳过 ${result.skippedCount} 项${reasons ? `（${reasons}）` : ""}`);
+      }
       if (result.truncated) messages.push("已达到本次索引上限");
       showToast(messages.join("，") || "没有找到可索引的文件");
     } catch {
@@ -649,14 +774,15 @@ function App() {
 
   return (
     <div className="app-shell">
-      <div className="window-controls" aria-label="窗口控制">
-        <button type="button" aria-label="最小化" title="最小化" onClick={() => void handleWindowAction("minimize")}>
+      <div className="window-drag-strip" aria-hidden="true" data-tauri-drag-region="deep" />
+      <div className="window-controls" aria-label="窗口控制" data-tauri-drag-region="false">
+        <button type="button" data-tauri-drag-region="false" aria-label="最小化" title="最小化" onClick={() => void handleWindowAction("minimize")}>
           <Minus size={14} weight="regular" />
         </button>
-        <button type="button" aria-label="最大化" title="最大化" onClick={() => void handleWindowAction("maximize")}>
+        <button type="button" data-tauri-drag-region="false" aria-label="最大化" title="最大化" onClick={() => void handleWindowAction("maximize")}>
           <Square size={13} weight="regular" />
         </button>
-        <button type="button" aria-label="关闭" title="关闭" className="window-close" onClick={() => void handleWindowAction("close")}>
+        <button type="button" data-tauri-drag-region="false" aria-label="关闭" title="关闭" className="window-close" onClick={() => void handleWindowAction("close")}>
           <X size={16} weight="regular" />
         </button>
       </div>
@@ -710,12 +836,24 @@ function App() {
       </aside>
 
       <main className="main-content">
-        <header className="page-header" data-tauri-drag-region="true">
+        <header className="page-header" data-tauri-drag-region="deep">
           <h1>把资料放进一个可检索的本地库</h1>
         </header>
 
+        {floatingWindowError && (
+          <div className="floating-window-alert" role="alert" data-tauri-drag-region="false">
+            <WarningCircle size={18} weight="fill" aria-hidden="true" />
+            <span>{floatingWindowError}</span>
+            <button type="button" onClick={() => void retryFloatingBall()} disabled={floatingWindowRetrying}>
+              <ArrowClockwise size={16} weight="bold" />
+              <span>{floatingWindowRetrying ? "重试中..." : "重试"}</span>
+            </button>
+          </div>
+        )}
+
         <section
           className={`drop-zone ${dragActive ? "is-dragging" : ""}`}
+          data-tauri-drag-region="false"
           data-testid="drop-zone"
           onDrop={handleDrop}
           onDragOver={handleDragOver}

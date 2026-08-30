@@ -4,6 +4,7 @@ src-tauri/target/
 src-tauri/.tauri/
 src-tauri/preview-cache/
 src-tauri/preview-temp/
+**/floating-ball.json
 output/playwright/
 .playwright-cli/
 tests/output/

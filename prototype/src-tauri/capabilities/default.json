@@ -23,6 +23,12 @@
     "allow-delete-original-file",
     "allow-load-settings",
     "allow-update-settings",
+    "allow-set-floating-window-visible",
+    "allow-show-main-window",
+    "allow-tray-status",
+    "allow-exit-app",
+    "allow-floating-window-status",
+    "allow-retry-floating-ball",
     "allow-can-preview",
     "allow-load-preview",
     "allow-dispose-preview"

@@ -14,6 +14,8 @@ export const DEFAULT_SETTINGS = Object.freeze({
   defaultSort: Object.freeze({ key: "addedAt", direction: "desc" }),
   pageSize: 20,
   confirmBeforeRemove: true,
+  hideToTray: false,
+  showFloatingWindow: true,
   previewLimits: DEFAULT_PREVIEW_LIMITS,
 });
 
@@ -33,6 +35,8 @@ export function normalizeSettings(value) {
     defaultSort,
     pageSize,
     confirmBeforeRemove: source.confirmBeforeRemove !== false,
+    hideToTray: source.hideToTray === true,
+    showFloatingWindow: source.showFloatingWindow !== false,
     previewLimits,
   };
 }

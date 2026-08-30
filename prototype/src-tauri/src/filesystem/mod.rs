@@ -1,5 +1,4 @@
 use std::{
-    cmp::Reverse,
     collections::HashSet,
     fs::{self, Metadata},
     hash::{Hash, Hasher},
@@ -70,14 +69,19 @@ pub struct IndexEntry {
     pub added_at: i64,
     #[serde(default = "default_preview_status")]
     pub preview_status: String,
+    #[serde(default)]
+    pub last_recorded_at: Option<i64>,
 }
 
 #[derive(Debug, Default)]
 pub struct ScanResult {
     pub entries: Vec<IndexEntry>,
     pub skipped_count: usize,
+    pub skipped_reasons: Vec<String>,
     pub truncated: bool,
 }
+
+const MAX_SKIP_REASONS: usize = 32;
 
 fn default_status() -> String {
     "已登记".to_string()
@@ -101,36 +105,33 @@ pub fn scan_paths(paths: &[String]) -> ScanResult {
             break;
         }
 
-        let path = match canonicalize_selected_path(raw_path) {
+        let path = match canonicalize_existing_path(raw_path) {
             Ok(path) => path,
-            Err(_) => {
-                result.skipped_count += 1;
+            Err(error) => {
+                record_skipped(&mut result, path_error_category(error));
                 continue;
             }
         };
 
         let metadata = match fs::symlink_metadata(&path) {
             Ok(metadata) => metadata,
-            Err(_) => {
-                result.skipped_count += 1;
+            Err(error) => {
+                record_skipped(&mut result, path_error_category(map_path_io_error(error)));
                 continue;
             }
         };
 
         if is_unsafe_metadata(&metadata) {
-            result.skipped_count += 1;
+            record_skipped(&mut result, "路径不安全");
         } else if metadata.is_file() {
             add_file_entry(path, metadata, &mut seen_paths, &mut result);
         } else if metadata.is_dir() {
             add_folder_entry(path, metadata, &mut seen_paths, &mut result);
         } else {
-            result.skipped_count += 1;
+            record_skipped(&mut result, "不是普通文件或文件夹");
         }
     }
 
-    result
-        .entries
-        .sort_by_key(|entry| Reverse(entry.modified_at));
     result
 }
 
@@ -273,7 +274,7 @@ fn add_folder_entry(
     if let Some(entry) = build_folder_entry(path, &metadata) {
         result.entries.push(entry);
     } else {
-        result.skipped_count += 1;
+        record_skipped(result, "无法读取文件夹名称");
     }
 }
 
@@ -290,7 +291,16 @@ fn add_file_entry(
     if let Some(entry) = build_file_entry(path, &metadata) {
         result.entries.push(entry);
     } else {
-        result.skipped_count += 1;
+        record_skipped(result, "无法读取文件名称");
+    }
+}
+
+fn record_skipped(result: &mut ScanResult, reason: &str) {
+    result.skipped_count += 1;
+    if result.skipped_reasons.len() < MAX_SKIP_REASONS
+        && !result.skipped_reasons.iter().any(|item| item == reason)
+    {
+        result.skipped_reasons.push(reason.to_string());
     }
 }
 
@@ -328,6 +338,7 @@ fn build_entry(
         favorite: false,
         added_at: current_timestamp(),
         preview_status: default_preview_status(),
+        last_recorded_at: None,
     })
 }
 
@@ -576,6 +587,14 @@ fn map_path_validation_error(error: PathValidationError) -> PreviewPathError {
         PathValidationError::Missing => PreviewPathError::Missing,
         PathValidationError::PermissionDenied => PreviewPathError::PermissionDenied,
         PathValidationError::Invalid => PreviewPathError::Invalid,
+    }
+}
+
+fn path_error_category(error: PathValidationError) -> &'static str {
+    match error {
+        PathValidationError::Missing => "路径不存在",
+        PathValidationError::PermissionDenied => "没有访问权限",
+        PathValidationError::Invalid => "路径不安全或无效",
     }
 }
 

@@ -126,7 +126,7 @@ export function LibraryPanel({
   );
 
   return (
-    <section className="recent-section" aria-labelledby="recent-title">
+    <section className="recent-section" aria-labelledby="recent-title" data-tauri-drag-region="false">
       <div className="section-heading-row">
         {heading}
         <span className="result-count">共 {visibleFiles.length} 项</span>

@@ -15,6 +15,10 @@ fn main() {
         "delete_original_file",
         "load_settings",
         "update_settings",
+        "set_floating_window_visible",
+        "show_main_window",
+        "tray_status",
+        "exit_app",
     ]));
     tauri_build::try_build(attributes).expect("failed to run Tauri build script");
 }

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-tray-status"
+description = "Enables the tray_status command without any pre-configured scope."
+commands.allow = ["tray_status"]
+
+[[permission]]
+identifier = "deny-tray-status"
+description = "Denies the tray_status command without any pre-configured scope."
+commands.deny = ["tray_status"]

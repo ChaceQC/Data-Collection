@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-record-floating-paths"
+description = "Enables the record_floating_paths command without any pre-configured scope."
+commands.allow = ["record_floating_paths"]
+
+[[permission]]
+identifier = "deny-record-floating-paths"
+description = "Denies the record_floating_paths command without any pre-configured scope."
+commands.deny = ["record_floating_paths"]

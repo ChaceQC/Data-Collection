@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-floating-window-status"
+description = "Enables the floating_window_status command without any pre-configured scope."
+commands.allow = ["floating_window_status"]
+
+[[permission]]
+identifier = "deny-floating-window-status"
+description = "Denies the floating_window_status command without any pre-configured scope."
+commands.deny = ["floating_window_status"]

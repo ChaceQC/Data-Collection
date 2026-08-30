@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use serde::Serialize;
-use tauri::State;
+use tauri::{AppHandle, State};
 
 use crate::{
     filesystem::{self, clipboard, external, operations, IndexEntry},
@@ -27,34 +27,25 @@ pub fn set_favorite(
     file_id: String,
     favorite: bool,
     state: State<'_, AppState>,
+    app: AppHandle,
 ) -> Result<Vec<IndexEntry>, String> {
-    if file_id.trim().is_empty() {
-        return Err(storage_message(StorageError::InvalidId));
-    }
-    state
-        .update_entries(|entries| {
-            let entry = entries
-                .iter_mut()
-                .find(|entry| entry.id == file_id)
-                .ok_or(StorageError::EntryNotFound)?;
-            if entry.favorite == favorite {
-                return Ok(false);
-            }
-            entry.favorite = favorite;
-            Ok(true)
-        })
-        .map_err(storage_message)
+    let entries = state
+        .update_entries(|entries| storage::set_favorite(entries, &file_id, favorite))
+        .map_err(storage_message)?;
+    super::emit_index_changed(&app, vec![file_id]);
+    Ok(entries)
 }
 
 #[tauri::command]
 pub fn remove_index_entry(
     file_id: String,
     state: State<'_, AppState>,
+    app: AppHandle,
 ) -> Result<Vec<IndexEntry>, String> {
     if file_id.trim().is_empty() {
         return Err(storage_message(StorageError::InvalidId));
     }
-    state
+    let entries = state
         .update_entries(|entries| {
             let position = entries
                 .iter()
@@ -63,7 +54,9 @@ pub fn remove_index_entry(
             entries.remove(position);
             Ok(true)
         })
-        .map_err(storage_message)
+        .map_err(storage_message)?;
+    super::emit_index_changed(&app, vec![file_id]);
+    Ok(entries)
 }
 
 #[tauri::command]
@@ -143,6 +136,7 @@ pub async fn rename_indexed_file(
     file_id: String,
     new_name: String,
     state: State<'_, AppState>,
+    app: AppHandle,
 ) -> Result<Vec<IndexEntry>, String> {
     if file_id.trim().is_empty() {
         return Err(storage_message(StorageError::InvalidId));
@@ -168,6 +162,7 @@ pub async fn rename_indexed_file(
         replacement.favorite = entry.favorite;
         replacement.added_at = entry.added_at;
         replacement.preview_status = entry.preview_status.clone();
+        replacement.last_recorded_at = entry.last_recorded_at;
         Ok::<(PathBuf, PathBuf, IndexEntry), String>((source, target, replacement))
     })
     .await
@@ -186,7 +181,10 @@ pub async fn rename_indexed_file(
         Ok(true)
     });
     match updated_entries {
-        Ok(entries) => Ok(entries),
+        Ok(entries) => {
+            super::emit_index_changed(&app, vec![file_id]);
+            Ok(entries)
+        }
         Err(error) => {
             if operations::restore_renamed_file(&target, &source) {
                 Err(storage_message(error))
@@ -201,6 +199,7 @@ pub async fn rename_indexed_file(
 pub async fn delete_original_file(
     file_id: String,
     state: State<'_, AppState>,
+    app: AppHandle,
 ) -> Result<Vec<IndexEntry>, String> {
     if file_id.trim().is_empty() {
         return Err(storage_message(StorageError::InvalidId));
@@ -228,7 +227,10 @@ pub async fn delete_original_file(
         entries.remove(position);
         Ok(true)
     }) {
-        Ok(entries) => Ok(entries),
+        Ok(entries) => {
+            super::emit_index_changed(&app, vec![file_id]);
+            Ok(entries)
+        }
         Err(error) => Err(format!(
             "原文件已移入回收站，但索引未同步：{}",
             storage_message(error)

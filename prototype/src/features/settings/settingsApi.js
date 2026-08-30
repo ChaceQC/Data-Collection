@@ -14,6 +14,8 @@ export function updateSettings(settings) {
       defaultSort: normalized.defaultSort,
       pageSize: normalized.pageSize,
       confirmBeforeRemove: normalized.confirmBeforeRemove,
+      hideToTray: normalized.hideToTray,
+      showFloatingWindow: normalized.showFloatingWindow,
     },
   }).then(normalizeSettings);
 }

@@ -1,6 +1,6 @@
 {
   "name": "local-material-workbench",
-  "version": "0.1.0",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -10,10 +10,13 @@
     "test:library": "node --test tests/library-model.test.mjs",
     "test:settings": "node --test tests/settings-model.test.mjs",
     "test:preview": "node --test tests/preview-registry.test.mjs",
+    "test:floating-ball": "node --test tests/floating-ball-model.test.mjs",
+    "test:tray": "node --test tests/tray-model.test.mjs",
     "test:sites": "node --test tests/sites-worker.test.mjs",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
-    "tauri:build": "tauri build"
+    "tauri:build": "tauri build && node scripts/verify-webview2-loader.mjs",
+    "verify:loader": "node scripts/verify-webview2-loader.mjs"
   },
   "dependencies": {
     "@phosphor-icons/react": "^2.1.10",
