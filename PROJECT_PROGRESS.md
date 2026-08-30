@@ -2,6 +2,44 @@
 
 ## 2026-08-30
 
+### GitHub Release 自动发布流程
+
+#### 已完成
+
+- 新增 `.github/workflows/release.yml`，由推送 `vX.Y.Z` 标签触发 Windows x64 发布构建。
+- Action 使用锁定的 `package-lock.json` 和 `Cargo.lock` 安装/构建依赖，并校验标签与前端包、Tauri 配置和 Rust crate 的项目版本一致。
+- Release 自动生成当前版本的 NSIS 安装包，并从 release 应用目录提取主程序和 `WebView2Loader.dll` 生成便携 ZIP。
+- Release 使用 `gh release` 自动创建或更新并发布对应版本，重复执行时会覆盖同名资源。
+- 根目录 README 已补充标签发布命令、Release 资源说明和便携 ZIP 的运行边界。
+
+#### 进行中
+
+- 无；待下一次推送 `vX.Y.Z` 标签时由 GitHub Actions 执行实际的云端发布验证。
+
+#### 阻塞与风险
+
+- 当前 Release 构建未配置代码签名；WebView2 Runtime 仍依赖目标机已有安装，LibreOffice 仍是 DOC 预览可选依赖。
+
+#### 下一步
+
+- 推送下一个与项目版本一致的 `vX.Y.Z` 标签，检查 Action 构建日志、Release 资源下载、安装包安装和便携 ZIP 解压启动。
+
+#### 涉及文件
+
+- `.github/workflows/release.yml`
+- `README.md`
+- `PROJECT_PROGRESS.md`
+
+#### 验证
+
+- `actionlint .github/workflows/release.yml`：通过。
+- `npm.cmd run tauri:build`：通过，生成 `prototype/src-tauri/target/release/bundle/nsis/本地资料工作台_0.3.0_x64-setup.exe`。
+- `npm.cmd run verify:loader`：随 `tauri:build` 通过；确认 `WebView2Loader.dll` 为 Windows x64，大小 `160320` bytes，并与 release 应用主程序同目录。
+- `git diff --check`：待提交前再次执行。
+- GitHub Actions 云端 Windows 构建和 Release 上传：待推送版本标签后执行。
+
+## 2026-08-30
+
 ### 0.3.0 阶段 H 验收完成与发布同步
 
 #### 已完成

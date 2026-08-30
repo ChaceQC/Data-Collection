@@ -1,0 +1,176 @@
+name: 发布 Windows Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-and-release:
+    name: 构建并发布 Windows 版本
+    # GitHub 公共托管的 x64 Windows runner 使用 Server 镜像；Windows 11
+    # 的真实安装和桌面验收不由该构建 runner 代替。
+    runs-on: windows-2022
+
+    steps:
+      - name: 检出源码
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 设置 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: npm
+          cache-dependency-path: prototype/package-lock.json
+
+      - name: 设置 Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable-x86_64-pc-windows-msvc
+
+      - name: 校验 tag 与应用版本
+        id: version
+        shell: pwsh
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          $tag = $env:RELEASE_TAG
+          if ($tag -notmatch '^v\d+\.\d+\.\d+$') {
+            throw "Release tag 必须使用 vX.Y.Z 格式，实际为 $tag"
+          }
+          $tagVersion = $tag.Substring(1)
+
+          $package = Get-Content -LiteralPath 'prototype/package.json' -Raw -Encoding UTF8 | ConvertFrom-Json
+          $lock = Get-Content -LiteralPath 'prototype/package-lock.json' -Raw -Encoding UTF8 | ConvertFrom-Json
+          $tauri = Get-Content -LiteralPath 'prototype/src-tauri/tauri.conf.json' -Raw -Encoding UTF8 | ConvertFrom-Json
+          $lockRoot = $lock.packages.PSObject.Properties |
+            Where-Object { $_.Name -eq '' } |
+            Select-Object -First 1 -ExpandProperty Value
+          $cargoMatch = Select-String -LiteralPath 'prototype/src-tauri/Cargo.toml' -Pattern '^\s*version\s*=\s*"([^"]+)"' |
+            Select-Object -First 1
+
+          if (-not $lockRoot -or -not $cargoMatch) {
+            throw '无法读取 package-lock.json 或 Cargo.toml 的项目版本'
+          }
+
+          $cargoVersion = $cargoMatch.Matches[0].Groups[1].Value
+          $versions = @(
+            $package.version
+            $lockRoot.version
+            $tauri.version
+            $cargoVersion
+          )
+          $uniqueVersions = @($versions | Sort-Object -Unique)
+          if ($uniqueVersions.Count -ne 1 -or $uniqueVersions[0] -ne $tagVersion) {
+            throw "tag 版本 $tagVersion 与项目版本不一致：$($versions -join ', ')"
+          }
+
+          Write-Host "版本校验通过：$tagVersion"
+          "app_version=$tagVersion" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8NoBOM -Append
+
+      - name: 安装前端依赖
+        working-directory: prototype
+        run: npm.cmd ci
+
+      - name: 构建 Windows x64 安装包
+        working-directory: prototype
+        run: npm.cmd run tauri:build
+
+      - name: 准备 Release 文件
+        id: assets
+        shell: pwsh
+        env:
+          APP_VERSION: ${{ steps.version.outputs.app_version }}
+        run: |
+          $releaseDir = Join-Path $env:GITHUB_WORKSPACE 'prototype/src-tauri/target/release'
+          $nsisDir = Join-Path $releaseDir 'bundle/nsis'
+          $installerPattern = "*_$($env:APP_VERSION)_x64-setup.exe"
+          $installers = @(Get-ChildItem -LiteralPath $nsisDir -File -Filter $installerPattern -ErrorAction SilentlyContinue)
+          if ($installers.Count -ne 1) {
+            throw "应找到一个版本为 $($env:APP_VERSION) 的 NSIS 安装包，实际找到 $($installers.Count) 个"
+          }
+
+          $appExe = Join-Path $releaseDir 'local-material-workbench.exe'
+          $loader = Join-Path $releaseDir 'WebView2Loader.dll'
+          foreach ($requiredFile in @($appExe, $loader)) {
+            if (-not (Test-Path -LiteralPath $requiredFile -PathType Leaf)) {
+              throw "缺少 Release 必需文件：$requiredFile"
+            }
+          }
+
+          $assetDir = Join-Path $env:RUNNER_TEMP "local-material-workbench-release-$($env:GITHUB_RUN_ID)"
+          $portableDir = Join-Path $assetDir "本地资料工作台_$($env:APP_VERSION)_x64"
+          New-Item -ItemType Directory -Path $portableDir -Force | Out-Null
+
+          $installerAsset = Join-Path $assetDir $installers[0].Name
+          Copy-Item -LiteralPath $installers[0].FullName -Destination $installerAsset
+          Copy-Item -LiteralPath $appExe -Destination $portableDir
+          Copy-Item -LiteralPath $loader -Destination $portableDir
+
+          $portableZip = Join-Path $assetDir "本地资料工作台_$($env:APP_VERSION)_x64-portable.zip"
+          Compress-Archive -Path (Join-Path $portableDir '*') -DestinationPath $portableZip -CompressionLevel Optimal
+
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $archive = [System.IO.Compression.ZipFile]::OpenRead($portableZip)
+          try {
+            $entries = @(
+              $archive.Entries |
+                Where-Object { -not $_.FullName.EndsWith('/') } |
+                Select-Object -ExpandProperty FullName
+            )
+            $expectedEntries = @('local-material-workbench.exe', 'WebView2Loader.dll')
+            if ($entries.Count -ne $expectedEntries.Count -or
+                $entries -notcontains 'local-material-workbench.exe' -or
+                $entries -notcontains 'WebView2Loader.dll') {
+              throw "便携 ZIP 内容不符合预期：$($entries -join ', ')"
+            }
+          }
+          finally {
+            $archive.Dispose()
+          }
+
+          Write-Host "安装包：$installerAsset"
+          Write-Host "便携 ZIP：$portableZip"
+          "installer=$installerAsset" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8NoBOM -Append
+          "portable_zip=$portableZip" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8NoBOM -Append
+
+      - name: 发布 GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+          INSTALLER: ${{ steps.assets.outputs.installer }}
+          PORTABLE_ZIP: ${{ steps.assets.outputs.portable_zip }}
+        run: |
+          $repo = $env:GITHUB_REPOSITORY
+          gh release view $env:RELEASE_TAG --repo $repo *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $env:RELEASE_TAG $env:INSTALLER $env:PORTABLE_ZIP --repo $repo --clobber
+            if ($LASTEXITCODE -ne 0) {
+              throw "更新 Release 资源失败"
+            }
+            gh release edit $env:RELEASE_TAG --repo $repo --draft=false
+            if ($LASTEXITCODE -ne 0) {
+              throw "发布已有草稿 Release 失败"
+            }
+          }
+          else {
+            gh release create $env:RELEASE_TAG $env:INSTALLER $env:PORTABLE_ZIP `
+              --repo $repo `
+              --title "本地资料工作台 $env:RELEASE_TAG" `
+              --notes '本 Release 包含 Windows x64 NSIS 安装包，以及包含应用主程序和 WebView2Loader.dll 的便携 ZIP。目标设备需要已有 WebView2 Runtime；预览 DOC 文件还需要安装 LibreOffice。' `
+              --generate-notes `
+              --verify-tag
+            if ($LASTEXITCODE -ne 0) {
+              throw "创建 Release 失败"
+            }
+          }

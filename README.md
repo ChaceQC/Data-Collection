@@ -116,6 +116,24 @@ npm.cmd run tauri:build
 npm.cmd run verify:loader
 ```
 
+### 发布 Release
+
+发布流程由 [`release.yml`](.github/workflows/release.yml) 管理。将与项目版本一致的 `vX.Y.Z` 标签推送到 GitHub 后，Action 会在 Windows 2022 runner 上执行依赖安装、Tauri 构建和版本校验，并自动创建或更新对应的 GitHub Release：
+
+```powershell
+git tag v0.3.0
+git push origin v0.3.0
+```
+
+每个 Release 包含两个资源：
+
+- Windows x64 NSIS 安装包：适合正常安装和卸载。
+- Windows x64 便携 ZIP：解压后包含 `local-material-workbench.exe` 和 `WebView2Loader.dll`，适合不运行安装器的场景；目标设备仍需要已有 WebView2 Runtime。
+
+Action 会拒绝版本标签与 `prototype/package.json`、`package-lock.json`、Tauri 配置或 Rust crate 版本不一致的发布请求。便携 ZIP 只包含应用运行所需的主程序和 loader，不包含构建缓存、测试夹具、用户资料或本地配置。
+
+Release 构建使用 GitHub 公共托管的 `windows-2022` x64 runner。该标签对应 Windows Server 2022 构建镜像，GitHub 公共托管环境没有通用的 x64 Windows 11 runner 标签；这不会改变应用以 Windows 11 为目标平台的定位。安装、首次启动、托盘、悬浮窗和安装包目录等真实桌面验收仍应在 Windows 11 上执行。若改用 Windows 11 self-hosted runner，应将 Action 的 `runs-on` 改为实际配置的 runner 标签。
+
 前端针对性测试：
 
 ```powershell
