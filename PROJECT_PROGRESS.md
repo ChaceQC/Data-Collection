@@ -14,7 +14,7 @@
 
 #### 进行中
 
-- 无；待下一次推送 `vX.Y.Z` 标签时由 GitHub Actions 执行实际的云端发布验证。
+- 无；`v0.3.0` GitHub Release 已完成云端构建并正式发布。
 
 #### 阻塞与风险
 
@@ -22,7 +22,7 @@
 
 #### 下一步
 
-- 推送下一个与项目版本一致的 `vX.Y.Z` 标签，检查 Action 构建日志、Release 资源下载、安装包安装和便携 ZIP 解压启动。
+- 下一个版本继续推送与项目版本一致的 `vX.Y.Z` 标签，并检查 Action 构建日志、Release 资源下载、安装包安装和便携 ZIP 解压启动。
 
 #### 涉及文件
 
@@ -35,8 +35,9 @@
 - `actionlint .github/workflows/release.yml`：通过。
 - `npm.cmd run tauri:build`：通过，生成 `prototype/src-tauri/target/release/bundle/nsis/本地资料工作台_0.3.0_x64-setup.exe`。
 - `npm.cmd run verify:loader`：随 `tauri:build` 通过；确认 `WebView2Loader.dll` 为 Windows x64，大小 `160320` bytes，并与 release 应用主程序同目录。
-- `git diff --check`：待提交前再次执行。
-- GitHub Actions 云端 Windows 构建和 Release 上传：待推送版本标签后执行。
+- GitHub Actions 运行 [`33298099961`](https://github.com/ChaceQC/Data-Collection/actions/runs/33298099961)：通过；版本校验、loader 预置、Windows x64 Tauri 构建、NSIS 打包、便携 ZIP 内容检查和 Release 上传均完成。
+- GitHub Release [`v0.3.0`](https://github.com/ChaceQC/Data-Collection/releases/tag/v0.3.0)：已发布，包含一个 Windows `.exe` 安装包和一个便携 `.zip` 压缩包。
+- `git diff --check`：待本次进度记录提交前执行。
 
 ## 2026-08-30
 
