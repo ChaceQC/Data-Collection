@@ -15,16 +15,16 @@
 
 #### 进行中
 
-- 按第 9 节完成文档收尾、`dev` 提交、合并 `main`、推送、`v0.3.6` tag 和 GitHub Release。
+- 无；`v0.3.6` 已完成提交、合并、推送、tag 和 GitHub Release。
 
 #### 阻塞与风险
 
 - 代理已在当前双屏开发环境完成原生拖动回归复现和修复后验证；用户已完成目标 Windows 11 桌面验收。本条确认未提供具体 Windows/WebView2/显示器版本，因此不补写未知信息。
-- GitHub Release 尚未创建，需完成本轮提交、合并、推送和 tag 后再记录 Release 结果。
+- 发布边界保持不变：安装包未签名，目标机需要 WebView2 Runtime，DOC 预览需要 LibreOffice。
 
 #### 下一步
 
-- 完成并核验 `v0.3.6` 的 GitHub Release 资源，然后把最终提交、tag、Action 和 Release 地址写回本文件。
+- 保持 `dev` 与 `main` 的远程分支同步，后续仅处理新的版本或功能。
 
 #### 涉及文件
 
@@ -41,6 +41,8 @@
 - `git diff --check`：通过。
 - 当前双屏开发环境原生回归：旧版本拖动后复现 `state-dragging`；修复后拖动到新位置并释放，状态恢复为可展开，位置文件成功保存。
 - `npm.cmd run tauri:build`：通过，生成 `prototype/src-tauri/target/release/bundle/nsis/本地资料工作台_0.3.6_x64-setup.exe`；`WebView2Loader.dll` 校验通过，160320 bytes，Windows x64。
+- GitHub Actions `33314861233`：通过，Windows x64 构建、便携 ZIP、资源校验和 Release 上传全部完成。
+- GitHub Release [`v0.3.6`](https://github.com/ChaceQC/Data-Collection/releases/tag/v0.3.6)：已正式发布，包含 NSIS 安装包和便携 ZIP。
 
 ## 2026-08-30
 
