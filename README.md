@@ -6,7 +6,7 @@
 
 本地资料工作台用于把分散在电脑中的文件和文件夹集中登记，提供统一的检索、排序、收藏、目录浏览和预览入口。应用遵循 local-first 原则：导入资料时默认只保存路径和文件元数据，不复制原文件，不上传用户内容，也不依赖后端服务或在线账号。
 
-当前版本为 `0.3.6`，已完成悬浮球悬停状态机、工作区几何、边缘方向回退、面板命中和多显示器/DPI 优化；用户已确认 Windows 11 桌面端全部验收场景通过，当前进入正式发布流程。项目源码位于 [`prototype/`](prototype/)，根目录的计划和进度记录分别见 [`PROJECT_PLAN.md`](PROJECT_PLAN.md) 与 [`PROJECT_PROGRESS.md`](PROJECT_PROGRESS.md)。
+当前版本为 `0.3.6`，已完成悬浮球悬停状态机、工作区几何、边缘方向回退、面板命中和多显示器/DPI 优化；用户已确认 Windows 11 桌面端全部验收场景通过，`v0.3.6` 已正式发布。项目源码位于 [`prototype/`](prototype/)，根目录的计划和进度记录分别见 [`PROJECT_PLAN.md`](PROJECT_PLAN.md) 与 [`PROJECT_PROGRESS.md`](PROJECT_PROGRESS.md)。
 
 ## 功能概览
 
