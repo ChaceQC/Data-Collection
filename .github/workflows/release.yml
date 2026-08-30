@@ -50,22 +50,20 @@ jobs:
           $tagVersion = $tag.Substring(1)
 
           $package = Get-Content -LiteralPath 'prototype/package.json' -Raw -Encoding UTF8 | ConvertFrom-Json
-          $lock = Get-Content -LiteralPath 'prototype/package-lock.json' -Raw -Encoding UTF8 | ConvertFrom-Json
+          $lock = Get-Content -LiteralPath 'prototype/package-lock.json' -Raw -Encoding UTF8 | ConvertFrom-Json -AsHashtable
           $tauri = Get-Content -LiteralPath 'prototype/src-tauri/tauri.conf.json' -Raw -Encoding UTF8 | ConvertFrom-Json
-          $lockRoot = $lock.packages.PSObject.Properties |
-            Where-Object { $_.Name -eq '' } |
-            Select-Object -First 1 -ExpandProperty Value
+          $lockVersion = $lock['packages']['']['version']
           $cargoMatch = Select-String -LiteralPath 'prototype/src-tauri/Cargo.toml' -Pattern '^\s*version\s*=\s*"([^"]+)"' |
             Select-Object -First 1
 
-          if (-not $lockRoot -or -not $cargoMatch) {
+          if (-not $lockVersion -or -not $cargoMatch) {
             throw '无法读取 package-lock.json 或 Cargo.toml 的项目版本'
           }
 
           $cargoVersion = $cargoMatch.Matches[0].Groups[1].Value
           $versions = @(
             $package.version
-            $lockRoot.version
+            $lockVersion
             $tauri.version
             $cargoVersion
           )
