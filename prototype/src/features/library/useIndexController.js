@@ -13,6 +13,8 @@ export function useIndexController({
   showToast,
 }) {
   const [files, setFiles] = useState(isTauriRuntime ? [] : initialFiles);
+  const [groups, setGroups] = useState([]);
+  const [undoStatus, setUndoStatus] = useState(null);
   const [indexReady, setIndexReady] = useState(!isTauriRuntime);
   const [indexing, setIndexing] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -36,6 +38,8 @@ export function useIndexController({
     if (revision < latestRevisionRef.current) return false;
     latestRevisionRef.current = revision;
     setFiles(loadedFiles);
+    setGroups(Array.isArray(snapshot?.groups) ? snapshot.groups : []);
+    setUndoStatus(snapshot?.undo || null);
     setIndexRecovery(snapshot?.recovery || null);
     const currentDirectoryEntries = directoryViewRef.current?.entries || [];
     setSelectedId((currentId) => loadedFiles.some((file) => file.id === currentId)
@@ -170,12 +174,14 @@ export function useIndexController({
     diagnosticExporting,
     exportIndexDiagnostic,
     files,
+    groups,
     indexReady,
     indexRecovery,
     indexing,
     latestRevisionRef,
     refreshError,
     refreshing,
+    undoStatus,
     reloadIndexPreservingState,
     resetIndexRecovery,
     setFiles,

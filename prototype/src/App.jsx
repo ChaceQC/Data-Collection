@@ -1,7 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { isTauri } from "@tauri-apps/api/core";
 import { PreviewPane } from "./features/preview/PreviewPane";
-import { DeleteOriginalDialog, RenameDialog, RemoveIndexDialog } from "./features/library/LibraryActions";
+import {
+  BatchRemoveDialog,
+  DeleteOriginalDialog,
+  GroupManagerDialog,
+  RenameDialog,
+  RemoveIndexDialog,
+} from "./features/library/LibraryActions";
 import { LibraryPanel } from "./features/library/LibraryPanel";
 import { useIndexController } from "./features/library/useIndexController";
 import { useLibraryActions } from "./features/library/useLibraryActions";
@@ -29,6 +35,7 @@ import {
 const INITIAL_FILES = [
   {
     id: "research-plan",
+    path: "C:\\资料\\研究计划.md",
     name: "研究计划.md",
     type: "Markdown",
     kind: "markdown",
@@ -38,9 +45,12 @@ const INITIAL_FILES = [
     addedAt: 1787883840,
     size: 2048,
     favorite: true,
+    tags: ["研究"],
+    groupId: null,
   },
   {
     id: "interview-notes",
+    path: "C:\\资料\\访谈记录.docx",
     name: "访谈记录.docx",
     type: "Word 文档",
     kind: "docx",
@@ -50,9 +60,12 @@ const INITIAL_FILES = [
     addedAt: 1787881260,
     size: 8192,
     favorite: false,
+    tags: ["访谈"],
+    groupId: null,
   },
   {
     id: "data-summary",
+    path: "C:\\资料\\数据汇总.xlsx",
     name: "数据汇总.xlsx",
     type: "Excel 工作簿",
     kind: "xlsx",
@@ -62,9 +75,12 @@ const INITIAL_FILES = [
     addedAt: 1787879700,
     size: 16384,
     favorite: true,
+    tags: ["数据"],
+    groupId: null,
   },
   {
     id: "old-project",
+    path: "C:\\资料\\旧项目资料（备份）",
     name: "旧项目资料（备份）",
     type: "文件夹",
     kind: "folder",
@@ -74,6 +90,8 @@ const INITIAL_FILES = [
     addedAt: 1787819520,
     size: 0,
     favorite: false,
+    tags: [],
+    groupId: null,
     invalid: true,
   },
 ];
@@ -91,6 +109,8 @@ function App() {
   const [toast, setToast] = useState("");
   const [sort, setSort] = useState({ key: "addedAt", direction: "desc" });
   const [pageSize, setPageSize] = useState(DEFAULT_SETTINGS.pageSize);
+  const [selectedIds, setSelectedIds] = useState([]);
+  const [groupManagerOpen, setGroupManagerOpen] = useState(false);
   const showToast = useCallback((message) => setToast(message), []);
   const filesRef = useRef([]);
   const navigation = useLibraryNavigation({
@@ -126,6 +146,8 @@ function App() {
     setPreviewEntryId: navigation.setPreviewEntryId,
     openDirectory: navigation.openDirectory,
     applyIndexSnapshot: index.applyIndexSnapshot,
+    reloadIndexPreservingState: index.reloadIndexPreservingState,
+    setSelectedIds,
     setIndexing: index.setIndexing,
     showToast,
   });
@@ -151,10 +173,26 @@ function App() {
     onSettingsChanged: handleSettingsChanged,
     showToast,
   });
-  const { files, indexReady, indexRecovery, indexing, refreshing, refreshError, diagnosticExporting } = index;
+  const { files, groups, indexReady, indexRecovery, indexing, refreshing, refreshError, diagnosticExporting, undoStatus } = index;
   const { activeNav, directoryLoading, directoryView, handleRowClick, handleRowKeyDown, openBreadcrumb, previewEntryId, searchQuery, selectNav, selectedId, setSearchQuery } = navigation;
-  const { busyFileId, choosePaths, closePendingAction, confirmDelete, confirmRemove, confirmRename, dragActive, fileInputRef, folderInputRef, handleCopy, handleDragLeave, handleDragOver, handleDrop, handleFavorite, handleOpenDefault, handleReveal, openRepositionPicker, pendingAction, repositionInputRef, repositionInvalidPath, renameName, renameValidation, requestDelete, requestRemove, requestRename, setRenameName } = actions;
+  const { batchBusy, busyFileId, choosePaths, closePendingAction, confirmBatchRemove, confirmDelete, confirmRemove, confirmRename, createGroup, deleteGroup, dragActive, fileInputRef, folderInputRef, groupBusy, handleBatchFavorite, handleBatchGroup, handleBatchTags, handleCancelBatch, handleCopy, handleCopyLocation, handleDragLeave, handleDragOver, handleDrop, handleFavorite, handleOpenDefault, handleReveal, handleRetryBatch, handleUndo, openRepositionPicker, pendingAction, repositionInputRef, repositionInvalidPath, renameName, renameGroup, renameValidation, requestBatchRemove, requestDelete, requestRemove, requestRename, retryBatch, setRenameName } = actions;
   const { floatingWindowError, floatingWindowRetrying, handleWindowAction, retryFloatingBall } = windowController;
+
+  useEffect(() => {
+    setSelectedIds((current) => current.filter((id) => files.some((file) => file.id === id)));
+  }, [files]);
+
+  const toggleSelection = useCallback((fileId) => {
+    setSelectedIds((current) => current.includes(fileId) ? current.filter((id) => id !== fileId) : [...current, fileId]);
+  }, []);
+
+  const selectPage = useCallback((pageIds, selected) => {
+    setSelectedIds((current) => {
+      const next = new Set(current);
+      pageIds.forEach((id) => selected ? next.add(id) : next.delete(id));
+      return [...next];
+    });
+  }, []);
 
   useEffect(() => {
     if (!toast) return undefined;
@@ -254,6 +292,7 @@ function App() {
 
         <LibraryPanel
           files={files}
+          groups={groups}
           activeNav={activeNav}
           searchQuery={searchQuery}
           onSearchQueryChange={setSearchQuery}
@@ -261,7 +300,10 @@ function App() {
           onSortChange={setSort}
           pageSize={pageSize}
           selectedId={selectedId}
+          selectedIds={selectedIds}
           onSelectionChange={navigation.setSelectedId}
+          onToggleSelection={toggleSelection}
+          onSelectPage={selectPage}
           directoryView={directoryView}
           directoryLoading={directoryLoading}
           indexReady={indexReady}
@@ -269,6 +311,21 @@ function App() {
           refreshError={refreshError}
           onRefresh={index.handleRefreshIndex}
           busyFileId={busyFileId}
+          batchBusy={batchBusy}
+          retryBatch={retryBatch}
+          undoStatus={undoStatus}
+          onBatchFavorite={handleBatchFavorite}
+          onBatchGroup={handleBatchGroup}
+          onBatchTags={handleBatchTags}
+          onBatchRemove={requestBatchRemove}
+          onUndo={handleUndo}
+          onRetryBatch={handleRetryBatch}
+          onCancelBatch={handleCancelBatch}
+          onClearSelection={() => setSelectedIds([])}
+          onManageGroups={() => setGroupManagerOpen(true)}
+          onCopyLocation={handleCopyLocation}
+          onImport={() => void choosePaths("file")}
+          onClearSearch={() => navigation.setSearchQuery("")}
           onRowClick={handleRowClick}
           onRowKeyDown={handleRowKeyDown}
           onOpenBreadcrumb={openBreadcrumb}
@@ -291,8 +348,10 @@ function App() {
 
       {settingsOpen && <SettingsPanel settings={settings} saving={settingsSaving} onCancel={() => setSettingsOpen(false)} onSave={handleSettingsSave} />}
       {pendingAction?.type === "remove" && <RemoveIndexDialog file={pendingAction.file} busy={busyFileId === pendingAction.file.id} onCancel={closePendingAction} onConfirm={() => void confirmRemove()} />}
+      {pendingAction?.type === "batch-remove" && <BatchRemoveDialog files={pendingAction.files} busy={batchBusy} onCancel={closePendingAction} onConfirm={() => void confirmBatchRemove()} />}
       {pendingAction?.type === "rename" && <RenameDialog file={pendingAction.file} value={renameName} validation={renameValidation} busy={busyFileId === pendingAction.file.id} onChange={setRenameName} onCancel={closePendingAction} onConfirm={() => void confirmRename()} />}
       {pendingAction?.type === "delete" && <DeleteOriginalDialog file={pendingAction.file} busy={busyFileId === pendingAction.file.id} onCancel={closePendingAction} onConfirm={() => void confirmDelete()} />}
+      {groupManagerOpen && <GroupManagerDialog groups={groups} busy={groupBusy} onClose={() => setGroupManagerOpen(false)} onCreate={createGroup} onRename={renameGroup} onDelete={deleteGroup} />}
 
       <input ref={folderInputRef} className="hidden-input" type="file" multiple webkitdirectory="true" directory="true" onChange={(event) => { actions.addBrowserFiles(event.target.files); event.target.value = ""; }} aria-hidden="true" tabIndex={-1} />
       <input ref={fileInputRef} className="hidden-input" type="file" multiple onChange={(event) => { actions.addBrowserFiles(event.target.files); event.target.value = ""; }} aria-hidden="true" tabIndex={-1} />

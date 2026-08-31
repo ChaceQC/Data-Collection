@@ -4,7 +4,16 @@ import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { getOperationError } from "../../lib/ipcContracts.js";
 import { getFileKind, getFileType } from "../../lib/fileTypes.js";
 import { libraryRepository } from "./libraryRepository.js";
-import { createBrowserEntries, getNextSelection, validateRename } from "./libraryControllerModel.js";
+import {
+  createBrowserEntries,
+  getNextSelection,
+  getSelectedEntries,
+  normalizeTagInput,
+  summarizeBatchResult,
+  validateRename,
+  validateTagInput,
+} from "./libraryControllerModel.js";
+import { getEntryLocation } from "./libraryModel.js";
 
 export function useLibraryActions({
   isTauriRuntime,
@@ -18,17 +27,25 @@ export function useLibraryActions({
   setPreviewEntryId,
   openDirectory,
   applyIndexSnapshot,
+  reloadIndexPreservingState,
+  setSelectedIds,
   setIndexing,
   showToast,
 }) {
   const [busyFileId, setBusyFileId] = useState("");
   const [pendingAction, setPendingAction] = useState(null);
   const [renameName, setRenameName] = useState("");
+  const [batchBusy, setBatchBusy] = useState(false);
+  const [retryBatch, setRetryBatch] = useState(null);
+  const [groupBusy, setGroupBusy] = useState(false);
   const folderInputRef = useRef(null);
   const fileInputRef = useRef(null);
   const repositionInputRef = useRef(null);
   const repositionTargetIdRef = useRef(null);
   const busyFileIdRef = useRef("");
+  const batchBusyRef = useRef(false);
+  const activeBatchOperationIdRef = useRef("");
+  const groupBusyRef = useRef(false);
   const indexingRef = useRef(false);
   const indexRealPathsRef = useRef(null);
 
@@ -115,7 +132,7 @@ export function useLibraryActions({
   }
 
   function closePendingAction() {
-    if (!busyFileIdRef.current) setPendingAction(null);
+    if (!busyFileIdRef.current && !batchBusyRef.current) setPendingAction(null);
   }
 
   async function removeIndexRecord(file) {
@@ -179,7 +196,21 @@ export function useLibraryActions({
     await runNamedAction(file, libraryRepository.openIndexedFile, "已请求系统默认程序打开", "无法用默认程序打开，请检查文件关联");
   }
 
-  async function handleReveal(file) {
+  async function handleReveal(file, directoryView) {
+    if (directoryView && !file?.path) {
+      if (!isTauriRuntime) {
+        showToast("定位文件夹子项请在桌面应用中执行");
+        return;
+      }
+      if (!file.directoryId || !Array.isArray(file.relativePath)) return;
+      try {
+        const result = await libraryRepository.revealDirectoryChild(file.directoryId, file.relativePath);
+        showToast(`已在资源管理器中定位：${result.name}`);
+      } catch (error) {
+        showActionError(error, "无法在资源管理器中定位，请检查路径");
+      }
+      return;
+    }
     await runNamedAction(file, libraryRepository.revealIndexedFile, "已在资源管理器中定位", "无法在资源管理器中定位，请检查路径");
   }
 
@@ -219,6 +250,214 @@ export function useLibraryActions({
       showActionError(error, "删除原文件失败，索引和原文件状态未确认");
     } finally {
       finishBusy();
+    }
+  }
+
+  function requestBatchRemove(fileIds) {
+    const entries = getSelectedEntries(files, fileIds);
+    if (!entries.length) {
+      showToast("请先选择资料");
+      return;
+    }
+    setPendingAction({
+      type: "batch-remove",
+      fileIds: entries.map((entry) => entry.id),
+      files: entries,
+    });
+  }
+
+  async function confirmBatchRemove() {
+    if (pendingAction?.type !== "batch-remove" || !pendingAction.fileIds?.length) return;
+    const fileIds = [...pendingAction.fileIds];
+    setPendingAction(null);
+    await runBatchAction(
+      fileIds,
+      (ids, operationId) => libraryRepository.batchRemoveIndexEntries(ids, operationId),
+      "批量移除完成",
+      "批量移除失败，请刷新索引确认状态",
+      true,
+    );
+  }
+
+  async function handleBatchFavorite(fileIds, favorite) {
+    await runBatchAction(
+      fileIds,
+      (ids, operationId) => libraryRepository.batchSetFavorite(ids, favorite, operationId),
+      favorite ? "批量收藏完成" : "批量取消收藏完成",
+      "批量更新收藏失败，请重试",
+    );
+  }
+
+  async function handleBatchTags(fileIds, value, add) {
+    const validation = validateTagInput(value);
+    if (!validation.valid) {
+      showToast(validation.message);
+      return;
+    }
+    await runBatchAction(
+      fileIds,
+      (ids, operationId) => libraryRepository.batchUpdateTags(ids, [validation.value], add, operationId),
+      add ? "批量添加标签完成" : "批量移除标签完成",
+      "批量更新标签失败，请重试",
+    );
+  }
+
+  async function handleBatchGroup(fileIds, groupId) {
+    await runBatchAction(
+      fileIds,
+      (ids, operationId) => libraryRepository.batchSetGroup(ids, groupId || null, operationId),
+      groupId ? "批量分组完成" : "已解除所选资料的分组归属",
+      "批量更新分组失败，请重试",
+    );
+  }
+
+  async function runBatchAction(fileIds, action, successPrefix, fallback, removeSuccessful = false) {
+    if (!isTauriRuntime) {
+      showToast("批量操作请在桌面应用中执行");
+      return;
+    }
+    const stableIds = [...new Set(fileIds || [])].filter(Boolean);
+    if (!stableIds.length || batchBusyRef.current) return;
+    const operationId = createOperationId();
+    activeBatchOperationIdRef.current = operationId;
+    setRetryBatch(null);
+    batchBusyRef.current = true;
+    setBatchBusy(true);
+    try {
+      const result = await action(stableIds, operationId);
+      const successIds = (result.results || []).filter((item) => item.status === "success").map((item) => item.id);
+      const retryIds = (result.results || []).filter(isRetryableBatchItem).map((item) => item.id);
+      setRetryBatch(retryIds.length ? { fileIds: retryIds, action, successPrefix, fallback, removeSuccessful } : null);
+      if (result.changedIds?.length || result.revision > 0) await reloadIndexPreservingState(result.revision);
+      if (removeSuccessful) setSelectedIds((current) => current.filter((id) => !successIds.includes(id)));
+      const summary = summarizeBatchResult(result);
+      const details = [`成功 ${summary.success} 项`];
+      if (summary.skipped) details.push(`跳过 ${summary.skipped} 项`);
+      if (summary.failed) details.push(`失败 ${summary.failed} 项`);
+      showToast(`${successPrefix}：${details.join("，")}`);
+    } catch (error) {
+      showActionError(error, fallback);
+    } finally {
+      activeBatchOperationIdRef.current = "";
+      batchBusyRef.current = false;
+      setBatchBusy(false);
+    }
+  }
+
+  async function handleRetryBatch() {
+    if (!retryBatch || batchBusyRef.current) return;
+    const { fileIds, action, successPrefix, fallback, removeSuccessful } = retryBatch;
+    await runBatchAction(fileIds, action, successPrefix, fallback, removeSuccessful);
+  }
+
+  async function handleCancelBatch() {
+    const operationId = activeBatchOperationIdRef.current;
+    if (!isTauriRuntime || !operationId) return;
+    try {
+      await libraryRepository.cancelBatchOperation(operationId);
+      showToast("已请求取消批量操作，正在整理已完成项");
+    } catch (error) {
+      showActionError(error, "无法取消批量操作，请稍候查看结果");
+    }
+  }
+
+  async function handleUndo() {
+    if (!isTauriRuntime || batchBusyRef.current) return;
+    batchBusyRef.current = true;
+    setBatchBusy(true);
+    try {
+      const result = await libraryRepository.undoLast();
+      await reloadIndexPreservingState(result.revision);
+      showToast("已撤销上一项可撤销的索引操作");
+      setSelectedIds([]);
+    } catch (error) {
+      showActionError(error, "撤销不可用，索引可能已经发生变化");
+    } finally {
+      batchBusyRef.current = false;
+      setBatchBusy(false);
+    }
+  }
+
+  async function createGroup(name) {
+    const normalized = validateGroupName(name);
+    if (!normalized) {
+      showToast("分组名称不能为空，且不能超过 64 个字符");
+      return false;
+    }
+    if (!isTauriRuntime) {
+      showToast("分组管理请在桌面应用中执行");
+      return false;
+    }
+    if (groupBusyRef.current) return false;
+    groupBusyRef.current = true;
+    setGroupBusy(true);
+    try {
+      const result = await libraryRepository.createGroup(normalized);
+      await reloadIndexPreservingState(result.revision);
+      showToast(`已创建分组“${normalized}”`);
+      return true;
+    } catch (error) {
+      showActionError(error, "创建分组失败，请重试");
+      return false;
+    } finally {
+      groupBusyRef.current = false;
+      setGroupBusy(false);
+    }
+  }
+
+  async function renameGroup(groupId, name) {
+    const normalized = validateGroupName(name);
+    if (!normalized) {
+      showToast("分组名称不能为空，且不能超过 64 个字符");
+      return false;
+    }
+    if (!isTauriRuntime || groupBusyRef.current) return false;
+    groupBusyRef.current = true;
+    setGroupBusy(true);
+    try {
+      const result = await libraryRepository.renameGroup(groupId, normalized);
+      await reloadIndexPreservingState(result.revision);
+      showToast(`分组已重命名为“${normalized}”`);
+      return true;
+    } catch (error) {
+      showActionError(error, "重命名分组失败，请重试");
+      return false;
+    } finally {
+      groupBusyRef.current = false;
+      setGroupBusy(false);
+    }
+  }
+
+  async function deleteGroup(groupId) {
+    if (!isTauriRuntime || groupBusyRef.current) return false;
+    groupBusyRef.current = true;
+    setGroupBusy(true);
+    try {
+      const result = await libraryRepository.deleteGroup(groupId);
+      await reloadIndexPreservingState(result.revision);
+      showToast("分组已删除，资料记录和原文件未改变");
+      return true;
+    } catch (error) {
+      showActionError(error, "删除分组失败，请重试");
+      return false;
+    } finally {
+      groupBusyRef.current = false;
+      setGroupBusy(false);
+    }
+  }
+
+  async function handleCopyLocation(file, directoryView) {
+    const location = getEntryLocation(file, directoryView);
+    if (!location.fullPath || location.fullPath === "登记文件夹") {
+      showToast("当前位置暂时不可用");
+      return;
+    }
+    try {
+      if (!navigator.clipboard?.writeText) throw new Error("clipboard-unavailable");
+      await navigator.clipboard.writeText(location.fullPath);
+      showToast("资料位置已复制");
+    } catch {
+      showToast("无法复制资料位置，请展开位置后手动选择");
     }
   }
 
@@ -355,6 +594,8 @@ export function useLibraryActions({
     confirmDelete,
     confirmRemove,
     confirmRename,
+    confirmBatchRemove,
+    batchBusy,
     dragActive,
     fileInputRef,
     folderInputRef,
@@ -365,6 +606,13 @@ export function useLibraryActions({
     handleFavorite,
     handleOpenDefault,
     handleReveal,
+    handleBatchFavorite,
+    handleBatchGroup,
+    handleBatchTags,
+    handleCancelBatch,
+    handleCopyLocation,
+    handleRetryBatch,
+    handleUndo,
     indexRealPaths,
     openFromFloating,
     openRepositionPicker,
@@ -374,8 +622,30 @@ export function useLibraryActions({
     renameName,
     renameValidation,
     requestDelete,
+    requestBatchRemove,
     requestRemove,
     requestRename,
     setRenameName,
+    createGroup,
+    deleteGroup,
+    groupBusy,
+    renameGroup,
+    retryBatch,
   };
+}
+
+function validateGroupName(value) {
+  const normalized = String(value ?? "").trim();
+  if (!normalized || normalized.length > 64 || /[\u0000-\u001f\u007f-\u009f]/.test(normalized)) return "";
+  return normalized;
+}
+
+function createOperationId() {
+  if (globalThis.crypto?.randomUUID) return `batch-${globalThis.crypto.randomUUID()}`;
+  return `batch-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function isRetryableBatchItem(item) {
+  return item?.status === "failed"
+    || (item?.status === "skipped" && (item.reason === "用户已取消" || item.reason === "批量操作超时"));
 }

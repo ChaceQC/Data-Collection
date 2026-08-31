@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use serde::Serialize;
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Manager, State};
 
 use crate::storage::repository::IndexRepository;
 use crate::{
@@ -10,8 +10,27 @@ use crate::{
 };
 
 use super::{
-    command_error, storage_message, structured_storage_error, CommandError, IndexMutationResult,
+    command_error, storage_message, structured_storage_error, BatchControl, BatchItemResult,
+    BatchMutationResult, BatchState, CommandError, GroupMutationResult, IndexMutationResult,
 };
+
+const MAX_BATCH_IDS: usize = 500;
+
+#[tauri::command]
+pub fn cancel_batch_operation(
+    operation_id: String,
+    state: State<'_, BatchState>,
+) -> Result<(), CommandError> {
+    if !is_valid_batch_id(&operation_id) {
+        return Err(command_error(
+            "invalid-operation-id",
+            "批量操作标识无效",
+            false,
+            "unchanged",
+        ));
+    }
+    state.cancel(&operation_id)
+}
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -34,7 +53,7 @@ pub fn set_favorite(
 ) -> Result<IndexMutationResult, CommandError> {
     let repository = IndexRepository::new(state.inner());
     let outcome = repository
-        .update_entries_with(|entries| {
+        .update_index_with_undo("favorite", |entries, _groups| {
             let changed = storage::set_favorite(entries, &file_id, favorite)?;
             let entry = entries.iter().find(|entry| entry.id == file_id).cloned();
             Ok((changed, entry))
@@ -66,7 +85,7 @@ pub fn remove_index_entry(
     }
     let repository = IndexRepository::new(state.inner());
     let outcome = repository
-        .update_entries_with(|entries| {
+        .update_index_with_undo("remove-index", |entries, _groups| {
             let position = entries
                 .iter()
                 .position(|entry| entry.id == file_id)
@@ -86,6 +105,530 @@ pub fn remove_index_entry(
         changed_ids: vec![file_id],
         entry: None,
     })
+}
+
+#[tauri::command]
+pub fn set_entry_tags(
+    file_id: String,
+    tags: Vec<String>,
+    state: State<'_, AppState>,
+    app: AppHandle,
+) -> Result<IndexMutationResult, CommandError> {
+    let repository = IndexRepository::new(state.inner());
+    let entry_id = file_id.clone();
+    let outcome = repository
+        .update_index_with_undo("tags", move |entries, _groups| {
+            let changed = storage::set_entry_tags(entries, &entry_id, &tags)?;
+            let entry = entries.iter().find(|entry| entry.id == entry_id).cloned();
+            Ok((changed, entry))
+        })
+        .map_err(structured_storage_error)?;
+    let changed_ids = changed_ids_for_single(&file_id, outcome.changed);
+    if outcome.changed {
+        super::emit_index_changed(&app, outcome.revision, changed_ids.clone(), "tags");
+    }
+    Ok(IndexMutationResult {
+        revision: outcome.revision,
+        changed_ids,
+        entry: outcome.value,
+    })
+}
+
+#[tauri::command]
+pub fn set_entry_group(
+    file_id: String,
+    group_id: Option<String>,
+    state: State<'_, AppState>,
+    app: AppHandle,
+) -> Result<IndexMutationResult, CommandError> {
+    let repository = IndexRepository::new(state.inner());
+    let entry_id = file_id.clone();
+    let outcome = repository
+        .update_index_with_undo("group", move |entries, groups| {
+            let changed =
+                storage::set_entry_group(entries, groups, &entry_id, group_id.as_deref())?;
+            let entry = entries.iter().find(|entry| entry.id == entry_id).cloned();
+            Ok((changed, entry))
+        })
+        .map_err(structured_storage_error)?;
+    let changed_ids = changed_ids_for_single(&file_id, outcome.changed);
+    if outcome.changed {
+        super::emit_index_changed(&app, outcome.revision, changed_ids.clone(), "group");
+    }
+    Ok(IndexMutationResult {
+        revision: outcome.revision,
+        changed_ids,
+        entry: outcome.value,
+    })
+}
+
+#[tauri::command]
+pub fn create_group(
+    name: String,
+    state: State<'_, AppState>,
+    app: AppHandle,
+) -> Result<GroupMutationResult, CommandError> {
+    let repository = IndexRepository::new(state.inner());
+    let outcome = repository
+        .update_index_with_undo("group-create", move |_entries, groups| {
+            let group = storage::create_group(groups, &name)?;
+            Ok((true, group))
+        })
+        .map_err(structured_storage_error)?;
+    let group_id = outcome.value.id.clone();
+    super::emit_index_changed(&app, outcome.revision, vec![group_id.clone()], "group");
+    Ok(GroupMutationResult {
+        revision: outcome.revision,
+        changed_ids: vec![group_id],
+        group: Some(outcome.value),
+    })
+}
+
+#[tauri::command]
+pub fn rename_group(
+    group_id: String,
+    name: String,
+    state: State<'_, AppState>,
+    app: AppHandle,
+) -> Result<GroupMutationResult, CommandError> {
+    let repository = IndexRepository::new(state.inner());
+    let id = group_id.clone();
+    let outcome = repository
+        .update_index_with_undo("group-rename", move |_entries, groups| {
+            let (changed, group) = storage::rename_group(groups, &id, &name)?;
+            Ok((changed, group))
+        })
+        .map_err(structured_storage_error)?;
+    let changed_ids = changed_ids_for_single(&group_id, outcome.changed);
+    if outcome.changed {
+        super::emit_index_changed(&app, outcome.revision, changed_ids.clone(), "group");
+    }
+    Ok(GroupMutationResult {
+        revision: outcome.revision,
+        changed_ids,
+        group: Some(outcome.value),
+    })
+}
+
+#[tauri::command]
+pub fn delete_group(
+    group_id: String,
+    state: State<'_, AppState>,
+    app: AppHandle,
+) -> Result<GroupMutationResult, CommandError> {
+    let repository = IndexRepository::new(state.inner());
+    let id = group_id.clone();
+    let outcome = repository
+        .update_index_with_undo("group-delete", move |entries, groups| {
+            let (group, mut changed_ids) = storage::delete_group(entries, groups, &id)?;
+            changed_ids.push(id.clone());
+            Ok((true, (group, changed_ids)))
+        })
+        .map_err(structured_storage_error)?;
+    let (group, changed_ids) = outcome.value;
+    super::emit_index_changed(&app, outcome.revision, changed_ids.clone(), "group");
+    Ok(GroupMutationResult {
+        revision: outcome.revision,
+        changed_ids,
+        group: Some(group),
+    })
+}
+
+#[tauri::command]
+pub async fn batch_set_favorite(
+    operation_id: String,
+    file_ids: Vec<String>,
+    favorite: bool,
+    _state: State<'_, AppState>,
+    batch_state: State<'_, BatchState>,
+    app: AppHandle,
+) -> Result<BatchMutationResult, CommandError> {
+    let file_ids = normalize_batch_ids(file_ids)?;
+    let ids_for_mutation = file_ids.clone();
+    let outcome = run_batch_mutation(
+        &app,
+        batch_state.inner(),
+        operation_id.clone(),
+        "batch-favorite",
+        move |entries, _groups, control| {
+            let mut results = Vec::with_capacity(ids_for_mutation.len());
+            for (index, id) in ids_for_mutation.iter().enumerate() {
+                if let Some(reason) = control.stop_reason() {
+                    append_stopped_results(&mut results, &ids_for_mutation[index..], reason);
+                    break;
+                }
+                let Some(entry) = entries.iter_mut().find(|entry| entry.id == *id) else {
+                    results.push(batch_skipped(id, "资料已不存在"));
+                    continue;
+                };
+                if entry.favorite == favorite {
+                    results.push(batch_skipped(id, "收藏状态未变化"));
+                    continue;
+                }
+                entry.favorite = favorite;
+                results.push(batch_success(id));
+            }
+            Ok((
+                results.iter().any(|result| result.status == "success"),
+                results,
+            ))
+        },
+    )
+    .await?;
+    let (outcome, cancelled, timed_out) = outcome;
+    emit_batch_result(&app, &outcome, "batch-favorite");
+    Ok(to_batch_result(
+        outcome,
+        &operation_id,
+        "batch-favorite",
+        cancelled,
+        timed_out,
+    ))
+}
+
+#[tauri::command]
+pub async fn batch_remove_index_entries(
+    operation_id: String,
+    file_ids: Vec<String>,
+    _state: State<'_, AppState>,
+    batch_state: State<'_, BatchState>,
+    app: AppHandle,
+) -> Result<BatchMutationResult, CommandError> {
+    let file_ids = normalize_batch_ids(file_ids)?;
+    let ids_for_mutation = file_ids.clone();
+    let outcome = run_batch_mutation(
+        &app,
+        batch_state.inner(),
+        operation_id.clone(),
+        "batch-remove-index",
+        move |entries, _groups, control| {
+            let mut results = Vec::with_capacity(ids_for_mutation.len());
+            for (index, id) in ids_for_mutation.iter().enumerate() {
+                if let Some(reason) = control.stop_reason() {
+                    append_stopped_results(&mut results, &ids_for_mutation[index..], reason);
+                    break;
+                }
+                let Some(position) = entries.iter().position(|entry| entry.id == *id) else {
+                    results.push(batch_skipped(id, "资料已不存在"));
+                    continue;
+                };
+                entries.remove(position);
+                results.push(batch_success(id));
+            }
+            Ok((
+                results.iter().any(|result| result.status == "success"),
+                results,
+            ))
+        },
+    )
+    .await?;
+    let (outcome, cancelled, timed_out) = outcome;
+    emit_batch_result(&app, &outcome, "batch-remove-index");
+    Ok(to_batch_result(
+        outcome,
+        &operation_id,
+        "batch-remove-index",
+        cancelled,
+        timed_out,
+    ))
+}
+
+#[tauri::command]
+pub async fn batch_update_tags(
+    operation_id: String,
+    file_ids: Vec<String>,
+    tags: Vec<String>,
+    add: bool,
+    _state: State<'_, AppState>,
+    batch_state: State<'_, BatchState>,
+    app: AppHandle,
+) -> Result<BatchMutationResult, CommandError> {
+    let file_ids = normalize_batch_ids(file_ids)?;
+    let tags = storage::normalize_tags(&tags).map_err(structured_storage_error)?;
+    if tags.is_empty() {
+        return Err(structured_storage_error(StorageError::InvalidTag));
+    }
+    let ids_for_mutation = file_ids.clone();
+    let tags_for_mutation = tags.clone();
+    let outcome = run_batch_mutation(
+        &app,
+        batch_state.inner(),
+        operation_id.clone(),
+        "batch-tags",
+        move |entries, _groups, control| {
+            let mut results = Vec::with_capacity(ids_for_mutation.len());
+            for (index, id) in ids_for_mutation.iter().enumerate() {
+                if let Some(reason) = control.stop_reason() {
+                    append_stopped_results(&mut results, &ids_for_mutation[index..], reason);
+                    break;
+                }
+                let Some(entry) = entries.iter_mut().find(|entry| entry.id == *id) else {
+                    results.push(batch_skipped(id, "资料已不存在"));
+                    continue;
+                };
+                let mut next_tags = entry.tags.clone();
+                if add {
+                    for tag in &tags_for_mutation {
+                        if !next_tags
+                            .iter()
+                            .any(|current| current.eq_ignore_ascii_case(tag))
+                        {
+                            next_tags.push(tag.clone());
+                        }
+                    }
+                    if next_tags.len() > storage::MAX_TAGS_PER_ENTRY {
+                        results.push(batch_skipped(id, "标签数量已达上限"));
+                        continue;
+                    }
+                } else {
+                    next_tags.retain(|current| {
+                        !tags_for_mutation
+                            .iter()
+                            .any(|tag| current.eq_ignore_ascii_case(tag))
+                    });
+                }
+                if next_tags == entry.tags {
+                    results.push(batch_skipped(id, "标签状态未变化"));
+                    continue;
+                }
+                entry.tags = next_tags;
+                results.push(batch_success(id));
+            }
+            Ok((
+                results.iter().any(|result| result.status == "success"),
+                results,
+            ))
+        },
+    )
+    .await?;
+    let (outcome, cancelled, timed_out) = outcome;
+    emit_batch_result(&app, &outcome, "batch-tags");
+    Ok(to_batch_result(
+        outcome,
+        &operation_id,
+        "batch-tags",
+        cancelled,
+        timed_out,
+    ))
+}
+
+#[tauri::command]
+pub async fn batch_set_group(
+    operation_id: String,
+    file_ids: Vec<String>,
+    group_id: Option<String>,
+    _state: State<'_, AppState>,
+    batch_state: State<'_, BatchState>,
+    app: AppHandle,
+) -> Result<BatchMutationResult, CommandError> {
+    let file_ids = normalize_batch_ids(file_ids)?;
+    let ids_for_mutation = file_ids.clone();
+    let outcome = run_batch_mutation(
+        &app,
+        batch_state.inner(),
+        operation_id.clone(),
+        "batch-group",
+        move |entries, groups, control| {
+            if let Some(group_id) = group_id.as_deref() {
+                if !groups.iter().any(|group| group.id == group_id) {
+                    return Err(StorageError::GroupNotFound);
+                }
+            }
+            let mut results = Vec::with_capacity(ids_for_mutation.len());
+            for (index, id) in ids_for_mutation.iter().enumerate() {
+                if let Some(reason) = control.stop_reason() {
+                    append_stopped_results(&mut results, &ids_for_mutation[index..], reason);
+                    break;
+                }
+                match storage::set_entry_group(entries, groups, id, group_id.as_deref()) {
+                    Ok(true) => results.push(batch_success(id)),
+                    Ok(false) => results.push(batch_skipped(id, "分组状态未变化")),
+                    Err(StorageError::EntryNotFound) => {
+                        results.push(batch_skipped(id, "资料已不存在"))
+                    }
+                    Err(error) => return Err(error),
+                }
+            }
+            Ok((
+                results.iter().any(|result| result.status == "success"),
+                results,
+            ))
+        },
+    )
+    .await?;
+    let (outcome, cancelled, timed_out) = outcome;
+    emit_batch_result(&app, &outcome, "batch-group");
+    Ok(to_batch_result(
+        outcome,
+        &operation_id,
+        "batch-group",
+        cancelled,
+        timed_out,
+    ))
+}
+
+#[tauri::command]
+pub fn undo_last(
+    state: State<'_, AppState>,
+    app: AppHandle,
+) -> Result<IndexMutationResult, CommandError> {
+    let repository = IndexRepository::new(state.inner());
+    let outcome = repository.undo_last().map_err(structured_storage_error)?;
+    let changed_ids = outcome.value.clone();
+    super::emit_index_changed(&app, outcome.revision, changed_ids.clone(), "undo");
+    Ok(IndexMutationResult {
+        revision: outcome.revision,
+        changed_ids,
+        entry: None,
+    })
+}
+
+fn changed_ids_for_single(file_id: &str, changed: bool) -> Vec<String> {
+    if changed {
+        vec![file_id.to_string()]
+    } else {
+        Vec::new()
+    }
+}
+
+fn normalize_batch_ids(file_ids: Vec<String>) -> Result<Vec<String>, CommandError> {
+    let mut normalized = Vec::with_capacity(file_ids.len());
+    for file_id in file_ids {
+        if !is_valid_batch_id(&file_id) {
+            return Err(structured_storage_error(StorageError::InvalidId));
+        }
+        if !normalized.iter().any(|current| current == &file_id) {
+            normalized.push(file_id);
+        }
+    }
+    if normalized.is_empty() {
+        return Err(command_error(
+            "invalid-batch",
+            "请先选择资料",
+            false,
+            "unchanged",
+        ));
+    }
+    if normalized.len() > MAX_BATCH_IDS {
+        return Err(command_error(
+            "batch-too-large",
+            format!("一次最多操作 {MAX_BATCH_IDS} 项资料"),
+            false,
+            "unchanged",
+        ));
+    }
+    Ok(normalized)
+}
+
+fn is_valid_batch_id(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 96
+        && !value.contains('/')
+        && !value.contains('\\')
+        && !value.contains(':')
+        && !value.contains("..")
+        && !value
+            .chars()
+            .any(|character| character.is_whitespace() || character.is_control())
+}
+
+fn batch_success(id: &str) -> BatchItemResult {
+    BatchItemResult {
+        id: id.to_string(),
+        status: "success".to_string(),
+        reason: None,
+    }
+}
+
+fn batch_skipped(id: &str, reason: &str) -> BatchItemResult {
+    BatchItemResult {
+        id: id.to_string(),
+        status: "skipped".to_string(),
+        reason: Some(reason.to_string()),
+    }
+}
+
+async fn run_batch_mutation<T, F>(
+    app: &AppHandle,
+    batch_state: &BatchState,
+    operation_id: String,
+    operation: &'static str,
+    mutation: F,
+) -> Result<(storage::MutationResult<T>, bool, bool), CommandError>
+where
+    T: Send + 'static,
+    F: FnOnce(
+            &mut Vec<IndexEntry>,
+            &mut Vec<storage::Group>,
+            &BatchControl,
+        ) -> Result<(bool, T), StorageError>
+        + Send
+        + 'static,
+{
+    let control = batch_state.begin(&operation_id)?;
+    let control_for_task = control.clone();
+    let app_for_task = app.clone();
+    let operation_name = operation.to_string();
+    let joined = tauri::async_runtime::spawn_blocking(move || {
+        let state = app_for_task.state::<AppState>();
+        state
+            .inner()
+            .update_index_with_undo(&operation_name, |entries, groups| {
+                mutation(entries, groups, control_for_task.as_ref())
+            })
+    })
+    .await;
+    let cancelled = control.cancelled();
+    let timed_out = control.timed_out();
+    batch_state.finish(&operation_id);
+    let outcome = joined
+        .map_err(|_| command_error("task-failed", "批量操作任务未完成，请重试", true, "unknown"))?
+        .map_err(structured_storage_error)?;
+    Ok((outcome, cancelled, timed_out))
+}
+
+fn append_stopped_results(results: &mut Vec<BatchItemResult>, ids: &[String], reason: &str) {
+    results.extend(ids.iter().map(|id| batch_skipped(id, reason)));
+}
+
+fn emit_batch_result(
+    app: &AppHandle,
+    outcome: &storage::MutationResult<Vec<BatchItemResult>>,
+    change_type: &str,
+) {
+    if outcome.changed {
+        let ids = outcome
+            .value
+            .iter()
+            .filter(|result| result.status == "success")
+            .map(|result| result.id.clone())
+            .collect::<Vec<_>>();
+        super::emit_index_changed(app, outcome.revision, ids, change_type);
+    }
+}
+
+fn to_batch_result(
+    outcome: storage::MutationResult<Vec<BatchItemResult>>,
+    operation_id: &str,
+    operation: &str,
+    cancelled: bool,
+    timed_out: bool,
+) -> BatchMutationResult {
+    let changed_ids = outcome
+        .value
+        .iter()
+        .filter(|result| result.status == "success")
+        .map(|result| result.id.clone())
+        .collect();
+    BatchMutationResult {
+        operation_id: operation_id.to_string(),
+        revision: outcome.revision,
+        changed_ids,
+        operation: operation.to_string(),
+        results: outcome.value,
+        cancelled,
+        timed_out,
+    }
 }
 
 #[tauri::command]
@@ -246,6 +789,8 @@ pub async fn rename_indexed_file(
         replacement.added_at = entry.added_at;
         replacement.preview_status = entry.preview_status.clone();
         replacement.last_recorded_at = entry.last_recorded_at;
+        replacement.tags = entry.tags.clone();
+        replacement.group_id = entry.group_id.clone();
         Ok::<(PathBuf, PathBuf, IndexEntry), CommandError>((source, target, replacement))
     })
     .await

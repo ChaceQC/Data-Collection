@@ -268,6 +268,8 @@ mod tests {
             added_at: 0,
             preview_status: "idle".to_string(),
             last_recorded_at: None,
+            tags: Vec::new(),
+            group_id: None,
         };
         assert!(matches!(
             validate_indexed_file(&entry),

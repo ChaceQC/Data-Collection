@@ -22,8 +22,38 @@ export function createBrowserEntries(fileList, now = Date.now()) {
       addedAt: timestamp,
       size: Number.isFinite(file.size) ? file.size : 0,
       favorite: false,
+      tags: [],
+      groupId: null,
     };
   });
+}
+
+export function getSelectedEntries(entries, selectedIds) {
+  const selected = new Set(selectedIds || []);
+  return (entries || []).filter((entry) => selected.has(entry.id));
+}
+
+export function summarizeBatchResult(result) {
+  const results = Array.isArray(result?.results) ? result.results : [];
+  const summary = results.reduce((counts, item) => {
+    if (item?.status === "success") counts.success += 1;
+    else if (item?.status === "failed") counts.failed += 1;
+    else counts.skipped += 1;
+    return counts;
+  }, { success: 0, failed: 0, skipped: 0 });
+  return summary;
+}
+
+export function normalizeTagInput(value) {
+  return String(value ?? "").trim().replace(/\s+/g, " ");
+}
+
+export function validateTagInput(value) {
+  const tag = normalizeTagInput(value);
+  if (!tag) return { valid: false, message: "标签不能为空" };
+  if (tag.length > 32) return { valid: false, message: "标签不能超过 32 个字符" };
+  if (/[\u0000-\u001f\u007f-\u009f]/.test(tag)) return { valid: false, message: "标签不能包含控制字符" };
+  return { valid: true, value: tag, message: "" };
 }
 
 export function getNextSelection(entries, currentId) {

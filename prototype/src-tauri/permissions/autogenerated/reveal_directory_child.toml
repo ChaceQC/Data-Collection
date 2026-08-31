@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-reveal-directory-child"
+description = "Enables the reveal_directory_child command without any pre-configured scope."
+commands.allow = ["reveal_directory_child"]
+
+[[permission]]
+identifier = "deny-reveal-directory-child"
+description = "Denies the reveal_directory_child command without any pre-configured scope."
+commands.deny = ["reveal_directory_child"]

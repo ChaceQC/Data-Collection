@@ -107,6 +107,10 @@ pub struct IndexEntry {
     pub preview_status: String,
     #[serde(default)]
     pub last_recorded_at: Option<i64>,
+    #[serde(default)]
+    pub tags: Vec<String>,
+    #[serde(default)]
+    pub group_id: Option<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -125,6 +129,8 @@ pub struct DirectoryEntry {
     pub added_at: i64,
     pub preview_status: String,
     pub last_recorded_at: Option<i64>,
+    pub tags: Vec<String>,
+    pub group_id: Option<String>,
     pub directory_id: String,
     pub relative_path: Vec<String>,
 }
@@ -148,6 +154,8 @@ impl DirectoryEntry {
             added_at: entry.added_at,
             preview_status: entry.preview_status,
             last_recorded_at: entry.last_recorded_at,
+            tags: entry.tags,
+            group_id: entry.group_id,
             directory_id,
             relative_path,
         }
@@ -461,6 +469,8 @@ fn build_entry(
         added_at: current_timestamp(),
         preview_status: default_preview_status(),
         last_recorded_at: None,
+        tags: Vec::new(),
+        group_id: None,
     })
 }
 

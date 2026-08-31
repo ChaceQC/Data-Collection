@@ -1,6 +1,8 @@
 use crate::filesystem::{self, IndexEntry};
 
-use super::{AppState, IndexMergeMode, IndexSnapshot, MergeStats, MutationResult, StorageError};
+use super::{
+    AppState, Group, IndexMergeMode, IndexSnapshot, MergeStats, MutationResult, StorageError,
+};
 
 pub struct IndexRepository<'a> {
     state: &'a AppState,
@@ -36,6 +38,21 @@ impl<'a> IndexRepository<'a> {
         F: FnOnce(&mut Vec<IndexEntry>) -> Result<(bool, T), StorageError>,
     {
         self.state.update_entries_with(mutation)
+    }
+
+    pub fn update_index_with_undo<F, T>(
+        &self,
+        operation: &str,
+        mutation: F,
+    ) -> Result<MutationResult<T>, StorageError>
+    where
+        F: FnOnce(&mut Vec<IndexEntry>, &mut Vec<Group>) -> Result<(bool, T), StorageError>,
+    {
+        self.state.update_index_with_undo(operation, mutation)
+    }
+
+    pub fn undo_last(&self) -> Result<MutationResult<Vec<String>>, StorageError> {
+        self.state.undo_last()
     }
 
     pub fn merge_entries(

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-undo-last"
+description = "Enables the undo_last command without any pre-configured scope."
+commands.allow = ["undo_last"]
+
+[[permission]]
+identifier = "deny-undo-last"
+description = "Denies the undo_last command without any pre-configured scope."
+commands.deny = ["undo_last"]

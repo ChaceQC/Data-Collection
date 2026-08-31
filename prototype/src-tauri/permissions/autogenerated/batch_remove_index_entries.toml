@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-batch-remove-index-entries"
+description = "Enables the batch_remove_index_entries command without any pre-configured scope."
+commands.allow = ["batch_remove_index_entries"]
+
+[[permission]]
+identifier = "deny-batch-remove-index-entries"
+description = "Denies the batch_remove_index_entries command without any pre-configured scope."
+commands.deny = ["batch_remove_index_entries"]

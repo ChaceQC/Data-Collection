@@ -1,4 +1,12 @@
-use std::path::PathBuf;
+use std::{
+    collections::HashMap,
+    path::PathBuf,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
+    },
+    time::{Duration, Instant},
+};
 
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Runtime, State};
@@ -7,13 +15,106 @@ use crate::storage::repository::IndexRepository;
 use crate::{
     filesystem::{self, DirectoryEntry, IndexEntry},
     preview::{self, PreviewOptions, PreviewResult, PreviewState, PreviewSupport},
-    storage::{self, AppState, IndexSnapshot, StorageError},
+    storage::{self, AppState, Group, IndexSnapshot, StorageError},
 };
 
 pub(crate) mod floating_ball;
 pub(crate) mod library;
 pub(crate) mod settings;
 pub(crate) mod window;
+
+const BATCH_TIMEOUT: Duration = Duration::from_secs(10);
+
+#[derive(Debug, Default)]
+pub struct BatchState {
+    operations: Mutex<HashMap<String, Arc<BatchControl>>>,
+}
+
+#[derive(Debug)]
+pub(crate) struct BatchControl {
+    cancelled: AtomicBool,
+    started_at: Instant,
+}
+
+impl BatchState {
+    pub(crate) fn begin(&self, operation_id: &str) -> Result<Arc<BatchControl>, CommandError> {
+        if !is_valid_operation_id(operation_id) {
+            return Err(command_error(
+                "invalid-operation-id",
+                "批量操作标识无效",
+                false,
+                "unchanged",
+            ));
+        }
+        let control = Arc::new(BatchControl {
+            cancelled: AtomicBool::new(false),
+            started_at: Instant::now(),
+        });
+        let mut operations = self
+            .operations
+            .lock()
+            .map_err(|_| command_error("batch-state", "批量操作状态不可用", true, "unknown"))?;
+        if operations.contains_key(operation_id) {
+            return Err(command_error(
+                "batch-busy",
+                "相同的批量操作正在进行",
+                true,
+                "unchanged",
+            ));
+        }
+        operations.insert(operation_id.to_string(), control.clone());
+        Ok(control)
+    }
+
+    pub(crate) fn cancel(&self, operation_id: &str) -> Result<(), CommandError> {
+        let operations = self
+            .operations
+            .lock()
+            .map_err(|_| command_error("batch-state", "批量操作状态不可用", true, "unknown"))?;
+        if let Some(control) = operations.get(operation_id) {
+            control.cancelled.store(true, Ordering::Release);
+        }
+        Ok(())
+    }
+
+    pub(crate) fn finish(&self, operation_id: &str) {
+        if let Ok(mut operations) = self.operations.lock() {
+            operations.remove(operation_id);
+        }
+    }
+}
+
+impl BatchControl {
+    pub(crate) fn stop_reason(&self) -> Option<&'static str> {
+        if self.cancelled.load(Ordering::Acquire) {
+            return Some("用户已取消");
+        }
+        if self.started_at.elapsed() >= BATCH_TIMEOUT {
+            return Some("批量操作超时");
+        }
+        None
+    }
+
+    pub(crate) fn cancelled(&self) -> bool {
+        self.cancelled.load(Ordering::Acquire)
+    }
+
+    pub(crate) fn timed_out(&self) -> bool {
+        self.started_at.elapsed() >= BATCH_TIMEOUT && !self.cancelled()
+    }
+}
+
+fn is_valid_operation_id(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 96
+        && !value.contains('/')
+        && !value.contains('\\')
+        && !value.contains(':')
+        && !value.contains("..")
+        && !value
+            .chars()
+            .any(|character| character.is_whitespace() || character.is_control())
+}
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -33,6 +134,34 @@ pub struct IndexMutationResult {
     pub revision: u64,
     pub changed_ids: Vec<String>,
     pub entry: Option<IndexEntry>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GroupMutationResult {
+    pub revision: u64,
+    pub changed_ids: Vec<String>,
+    pub group: Option<Group>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BatchItemResult {
+    pub id: String,
+    pub status: String,
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BatchMutationResult {
+    pub operation_id: String,
+    pub revision: u64,
+    pub changed_ids: Vec<String>,
+    pub operation: String,
+    pub results: Vec<BatchItemResult>,
+    pub cancelled: bool,
+    pub timed_out: bool,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -63,6 +192,12 @@ pub(crate) fn structured_storage_error(error: StorageError) -> CommandError {
         StorageError::InvalidId => ("invalid-id", false, "unchanged"),
         StorageError::EntryNotFound => ("entry-not-found", false, "unchanged"),
         StorageError::DuplicateEntry => ("duplicate-entry", false, "unchanged"),
+        StorageError::DuplicateGroup => ("duplicate-group", false, "unchanged"),
+        StorageError::GroupNotFound => ("group-not-found", false, "unchanged"),
+        StorageError::InvalidGroupName => ("invalid-group-name", false, "unchanged"),
+        StorageError::InvalidTag => ("invalid-tag", false, "unchanged"),
+        StorageError::UndoUnavailable => ("undo-unavailable", false, "unchanged"),
+        StorageError::UndoConflict => ("undo-conflict", false, "unchanged"),
         StorageError::Write => ("storage-write", true, "unchanged"),
         StorageError::Recovery => ("recovery-required", true, "unknown"),
         StorageError::DataDirectory | StorageError::Read | StorageError::State => {
@@ -151,6 +286,32 @@ pub async fn list_directory(
 }
 
 #[tauri::command]
+pub async fn reveal_directory_child(
+    target: DirectoryTarget,
+    state: State<'_, AppState>,
+) -> Result<library::ExternalOpenResult, String> {
+    let (_root, path) = resolve_registered_directory_child(&state, &target)?;
+    let metadata = std::fs::symlink_metadata(&path)
+        .map_err(|_| "登记的文件夹子项已失效，请刷新索引".to_string())?;
+    if filesystem::is_unsafe_metadata(&metadata) || (!metadata.is_file() && !metadata.is_dir()) {
+        return Err("目标不是可访问的登记文件夹子项".to_string());
+    }
+    let is_directory = metadata.is_dir();
+    let name = path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .ok_or_else(|| "文件夹子项名称不可用".to_string())?
+        .to_string();
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::filesystem::external::reveal_in_explorer(&path, is_directory)
+            .map_err(|_| "无法在资源管理器中定位，请检查路径".to_string())
+    })
+    .await
+    .map_err(|_| "定位文件夹子项任务未完成，请重试".to_string())??;
+    Ok(library::ExternalOpenResult { name })
+}
+
+#[tauri::command]
 pub async fn index_paths(
     paths: Vec<String>,
     state: State<'_, AppState>,
@@ -230,12 +391,16 @@ pub async fn reposition_file(
             let added_at = entries[position].added_at;
             let preview_status = entries[position].preview_status.clone();
             let last_recorded_at = entries[position].last_recorded_at;
+            let tags = entries[position].tags.clone();
+            let group_id = entries[position].group_id.clone();
             let mut replacement = replacement;
             replacement.id = id;
             replacement.favorite = favorite;
             replacement.added_at = added_at;
             replacement.preview_status = preview_status;
             replacement.last_recorded_at = last_recorded_at;
+            replacement.tags = tags;
+            replacement.group_id = group_id;
             entries[position] = replacement;
             storage::sort_entries(entries);
             Ok((true, Some(entries[position].clone())))
@@ -434,6 +599,19 @@ fn resolve_directory_target(
     state: &AppState,
     target: &DirectoryTarget,
 ) -> Result<(IndexEntry, PathBuf), String> {
+    let (root, path) = resolve_registered_directory_child(state, target)?;
+    let metadata =
+        std::fs::symlink_metadata(&path).map_err(|_| "文件夹路径已失效，请刷新索引".to_string())?;
+    if !metadata.is_dir() {
+        return Err("目标不是可访问的登记文件夹".to_string());
+    }
+    Ok((root, path))
+}
+
+fn resolve_registered_directory_child(
+    state: &AppState,
+    target: &DirectoryTarget,
+) -> Result<(IndexEntry, PathBuf), String> {
     if target.directory_id.trim().is_empty() {
         return Err(storage_message(StorageError::InvalidId));
     }
@@ -448,10 +626,10 @@ fn resolve_directory_target(
     }
     let path = filesystem::resolve_directory_child(&root.path, &target.relative_path)
         .map_err(directory_path_message)?;
-    let metadata =
-        std::fs::symlink_metadata(&path).map_err(|_| "文件夹路径已失效，请刷新索引".to_string())?;
-    if filesystem::is_unsafe_metadata(&metadata) || !metadata.is_dir() {
-        return Err("目标不是可访问的登记文件夹".to_string());
+    let metadata = std::fs::symlink_metadata(&path)
+        .map_err(|_| "登记的文件夹子项已失效，请刷新索引".to_string())?;
+    if filesystem::is_unsafe_metadata(&metadata) || (!metadata.is_file() && !metadata.is_dir()) {
+        return Err("目标不是可访问的登记文件夹子项".to_string());
     }
     Ok((root, path))
 }
