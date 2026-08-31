@@ -9,6 +9,7 @@ use tauri::{AppHandle, Manager, PhysicalPosition, Runtime};
 
 pub(crate) mod floating_ball;
 pub(crate) mod lifecycle;
+pub(crate) mod lifecycle_policy;
 pub(crate) mod monitor;
 pub(crate) mod tray;
 pub(crate) mod tray_model;

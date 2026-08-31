@@ -3,6 +3,9 @@ mod commands;
 #[cfg_attr(test, allow(dead_code))]
 mod filesystem;
 #[cfg(test)]
+#[path = "windows/lifecycle_policy.rs"]
+mod lifecycle_policy_tests;
+#[cfg(test)]
 #[path = "windows/monitor.rs"]
 mod monitor_tests;
 #[cfg_attr(test, allow(dead_code))]

@@ -3,12 +3,14 @@ import { CaretLeft, CaretRight, MagnifyingGlassMinus, MagnifyingGlassPlus } from
 import * as pdfjsLib from "pdfjs-dist";
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { normalizePreviewResourceUrl } from "./previewTypes";
+import {
+  getPdfCanvasMetrics,
+  PDF_CANVAS_PIXEL_LIMIT,
+} from "./pdfRenderModel";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl;
 
 const MAX_PDF_PAGES = 200;
-const MAX_PDF_PAGE_DIMENSION = 8192;
-const MAX_PDF_CANVAS_PIXELS = 16_777_216;
 
 export function PdfPreviewer({ content }) {
   const canvasRef = useRef(null);
@@ -30,7 +32,10 @@ export function PdfPreviewer({ content }) {
       url: normalizePreviewResourceUrl(content.resourceUrl),
       isEvalSupported: false,
       disableAutoFetch: false,
-      maxImageSize: MAX_PDF_CANVAS_PIXELS,
+      cMapUrl: new URL("pdfjs/cmaps/", globalThis.document.baseURI).href,
+      cMapPacked: true,
+      standardFontDataUrl: new URL("pdfjs/standard_fonts/", globalThis.document.baseURI).href,
+      maxImageSize: PDF_CANVAS_PIXEL_LIMIT,
     });
     loadingTask.promise
       .then((document) => {
@@ -66,6 +71,7 @@ export function PdfPreviewer({ content }) {
     if (!document) return undefined;
     let cancelled = false;
     let renderTask;
+    let renderedCanvas;
     const sequence = renderSequence.current + 1;
     renderSequence.current = sequence;
     async function renderPage() {
@@ -73,21 +79,32 @@ export function PdfPreviewer({ content }) {
         const pdfPage = await document.getPage(page);
         if (cancelled || renderSequence.current !== sequence) return;
         const viewport = pdfPage.getViewport({ scale });
-        const width = Math.ceil(viewport.width);
-        const height = Math.ceil(viewport.height);
-        if (width < 1 || height < 1 || width > MAX_PDF_PAGE_DIMENSION || height > MAX_PDF_PAGE_DIMENSION
-          || width * height > MAX_PDF_CANVAS_PIXELS) {
+        const metrics = getPdfCanvasMetrics(viewport, globalThis.devicePixelRatio);
+        if (!metrics) {
           throw new Error("page-too-large");
         }
-        const canvas = canvasRef.current;
-        if (!canvas) return;
-        canvas.width = width;
-        canvas.height = height;
+        // 先在不可见画布中完成整页绘制，避免异步绘制过程暴露半成品。
+        renderedCanvas = globalThis.document.createElement("canvas");
+        renderedCanvas.width = metrics.pixelWidth;
+        renderedCanvas.height = metrics.pixelHeight;
+        const renderContext = renderedCanvas.getContext("2d", { alpha: false, willReadFrequently: true });
+        if (!renderContext) throw new Error("canvas-context");
         renderTask = pdfPage.render({
-          canvasContext: canvas.getContext("2d", { alpha: false }),
+          canvasContext: renderContext,
           viewport,
+          transform: [metrics.outputScale, 0, 0, metrics.outputScale, 0, 0],
         });
         await renderTask.promise;
+        if (cancelled || renderSequence.current !== sequence) return;
+        const canvas = canvasRef.current;
+        if (!canvas) return;
+        canvas.width = metrics.pixelWidth;
+        canvas.height = metrics.pixelHeight;
+        canvas.style.width = `${metrics.cssWidth}px`;
+        canvas.style.height = `${metrics.cssHeight}px`;
+        const visibleContext = canvas.getContext("2d", { alpha: false, willReadFrequently: true });
+        if (!visibleContext) throw new Error("canvas-context");
+        visibleContext.drawImage(renderedCanvas, 0, 0);
       } catch (error) {
         if (!cancelled && renderSequence.current === sequence && error?.name !== "RenderingCancelledException") {
           setDocumentState((current) => ({
@@ -105,6 +122,10 @@ export function PdfPreviewer({ content }) {
       cancelled = true;
       renderSequence.current += 1;
       renderTask?.cancel();
+      if (renderedCanvas) {
+        renderedCanvas.width = 0;
+        renderedCanvas.height = 0;
+      }
       if (canvasRef.current) {
         canvasRef.current.width = 0;
         canvasRef.current.height = 0;

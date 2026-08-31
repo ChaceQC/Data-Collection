@@ -2,6 +2,42 @@
 
 ## 2026-08-31
 
+### PDF 渲染与关闭退出生命周期修复
+
+#### 已完成
+
+- PDF.js 构建时从锁定的 `pdfjs-dist@4.10.38` 输出 CMap 和标准字体资源，PDF 加载时显式配置资源目录，覆盖需要 CMap/标准字体的 PDF 字符绘制场景。
+- PDF 页面使用设备像素比创建受限的后台 canvas，等待 `RenderTask` 完成后再复制到可见 canvas；保留页数、页面尺寸、像素上限、分页、缩放、取消和资源释放逻辑，避免 WebView2 在异步绘制期间显示缺字或半成品页面。
+- 修复 `hideToTray=false` 时主窗口关闭只销毁 `main` 窗口的问题：现在通过统一退出路径幂等关闭悬浮球、释放预览资源、移除托盘并退出应用；`hideToTray=true` 的托盘驻留行为保持不变，托盘不可用时仍保留主窗口并提示。
+- 增加 PDF canvas 尺寸模型测试和关闭策略测试；没有修改索引格式、设置格式或预览资源协议。
+
+#### 进行中
+
+- 等待用户在 Windows 11 Tauri/WebView2 桌面环境使用截图中的真实多页 PDF 复测字符完整性、翻页和缩放，并验证关闭隐藏未勾选时托盘/悬浮球均消失、应用可正常退出；当前不把自动化结果写成原生桌面验收。
+
+#### 阻塞与风险
+
+- 当前自动化环境未代替用户执行真实 Windows 11 安装包、托盘、悬浮球和目标 PDF 的手工验收；PDF 特殊字体、WebView2 版本和显示器 DPI 仍需由用户记录。
+
+#### 下一步
+
+- 用户安装或启动本分支最新构建，使用同一 PDF 检查首页、截图中的第 2 页、其他含公式/字体页面、缩放和快速翻页；再分别以 `hideToTray` 勾选/未勾选复测关闭和托盘菜单退出。
+
+#### 涉及文件
+
+- `prototype/vite.config.mjs`、`prototype/src/features/preview/PdfPreviewer.jsx`、`prototype/src/features/preview/pdfRenderModel.js`
+- `prototype/src-tauri/src/windows/lifecycle.rs`、`prototype/src-tauri/src/windows/lifecycle_policy.rs`、`prototype/src-tauri/src/lib.rs`
+- `prototype/tests/pdf-render-model.test.mjs`、`prototype/README.md`、`README.md`
+
+#### 验证
+
+- `npm.cmd run test:preview`：9 项通过，包含 PDF canvas 尺寸模型、预览注册表、安全边界和工作簿夹具。
+- `npm.cmd run build`：通过；`dist/client/pdfjs/` 输出 185 个 CMap/标准字体资源，总计 1,948,053 bytes，并保留 Sites 所需的 `dist/client/index.html`、`dist/server/index.js` 和 `dist/.openai/hosting.json`。
+- 临时 Vite 服务端的 `GB-V.bcmap` 和 `FoxitSymbol.pfb` 请求均返回 `200`，响应体长度与资源文件一致；验证端口已关闭。
+- `cargo fmt --all -- --check`：通过；`cargo test --all-targets`：57 项通过；`cargo clippy --all-targets --all-features -- -D warnings`：通过。
+- `npm.cmd run tauri:build`：通过，生成 `prototype/src-tauri/target/release/bundle/nsis/本地资料工作台_0.3.6_x64-setup.exe`；最终安装器为 8,522,230 bytes，SHA-256 为 `B2032E991003D0D68A8096F5F19F6634CD842183F6E7FC32E8D8FB13C231EC8C`；`verify-webview2-loader.mjs` 通过，x64 loader 为 160320 bytes，SHA-256 为 `8427b1fc58ec707813e5c0a51eb5d69397bb333250a7b891be4d3b123f1e0f1c`。
+- PDF skill 的临时两页 PDF 已使用 Poppler 渲染并逐页检查，页面、公式文本、第二页表格和边界正常；本轮仍未代替用户完成真实 Windows 11 PDF/托盘/悬浮球手工验收。
+
 ### 新总体计划阶段 A-D 代码实现
 
 #### 已完成

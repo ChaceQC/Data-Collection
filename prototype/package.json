@@ -10,7 +10,7 @@
     "test:library": "node --test tests/library-model.test.mjs",
     "test:contracts": "node --test tests/ipc-contracts.test.mjs tests/library-controller.test.mjs",
     "test:settings": "node --test tests/settings-model.test.mjs",
-    "test:preview": "node --test tests/preview-registry.test.mjs tests/preview-security.test.mjs",
+    "test:preview": "node --test tests/preview-registry.test.mjs tests/preview-security.test.mjs tests/pdf-render-model.test.mjs",
     "test:floating-ball": "node --test tests/floating-ball-*.test.mjs",
     "test:tray": "node --test tests/tray-model.test.mjs",
     "test:sites": "node --test tests/sites-worker.test.mjs",
