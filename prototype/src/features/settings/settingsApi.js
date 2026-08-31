@@ -1,15 +1,15 @@
-import { invoke, isTauri } from "@tauri-apps/api/core";
+import { invokeCommand, isDesktopRuntime, parseSettings } from "../../lib/ipcContracts.js";
 import { DEFAULT_SETTINGS, normalizeSettings } from "./settingsModel";
 
 export function loadSettings() {
-  if (!isTauri()) return Promise.resolve(normalizeSettings(DEFAULT_SETTINGS));
-  return invoke("load_settings").then(normalizeSettings);
+  if (!isDesktopRuntime()) return Promise.resolve(normalizeSettings(DEFAULT_SETTINGS));
+  return invokeCommand("load_settings", undefined, parseSettings).then(normalizeSettings);
 }
 
 export function updateSettings(settings) {
   const normalized = normalizeSettings(settings);
-  if (!isTauri()) return Promise.resolve(normalized);
-  return invoke("update_settings", {
+  if (!isDesktopRuntime()) return Promise.resolve(normalized);
+  return invokeCommand("update_settings", {
     settings: {
       defaultSort: normalized.defaultSort,
       pageSize: normalized.pageSize,
@@ -17,5 +17,5 @@ export function updateSettings(settings) {
       hideToTray: normalized.hideToTray,
       showFloatingWindow: normalized.showFloatingWindow,
     },
-  }).then(normalizeSettings);
+  }, parseSettings).then(normalizeSettings);
 }

@@ -12,6 +12,25 @@
   --green-dark: #0d7d45;
   --blue: #2469a8;
   --orange: #ef7919;
+  --surface-subtle: #f7fafb;
+  --surface-hover: #f4faf6;
+  --surface-selected: #eef7f1;
+  --surface-control: #ffffff;
+  --muted: #67737b;
+  --muted-strong: #56656b;
+  --danger: #bd5148;
+  --line-strong: #dce4e7;
+  --focus-ring: rgba(36, 105, 168, 0.28);
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --control-height: 36px;
+  --dialog-shadow: 0 20px 60px rgba(25, 41, 48, 0.2);
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  color-scheme: light;
 }
 
 html[data-window="floating-ball"],
@@ -60,7 +79,7 @@ button {
 button:focus-visible,
 input:focus-visible,
 [role="button"]:focus-visible {
-  outline: 3px solid rgba(36, 105, 168, 0.28);
+  outline: 3px solid var(--focus-ring);
   outline-offset: 2px;
 }
 
@@ -657,11 +676,66 @@ input:focus-visible,
   overflow: auto;
 }
 
-.file-table-scroll .file-row-header {
+.file-table-grid {
+  width: 100%;
+  min-width: 0;
+  table-layout: fixed;
+  border-collapse: collapse;
+}
+
+.file-table-grid thead {
   position: sticky;
   z-index: 1;
   top: 0;
   background: #fbfcfd;
+}
+
+.file-table-grid th:nth-child(1) { width: 25%; }
+.file-table-grid th:nth-child(2) { width: 13%; }
+.file-table-grid th:nth-child(3) { width: 9%; }
+.file-table-grid th:nth-child(4) { width: 14%; }
+.file-table-grid th:nth-child(5) { width: 14%; }
+.file-table-grid th:nth-child(6) { width: 25%; }
+
+.file-table-grid th,
+.file-table-grid td {
+  height: 64px;
+  padding: 0 3px;
+  overflow: visible;
+  text-align: left;
+  vertical-align: middle;
+  border-bottom: 1px solid var(--line);
+}
+
+.file-table-grid thead th {
+  height: 44px;
+  color: #7f898f;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.file-table-grid tbody th {
+  font-weight: inherit;
+}
+
+.file-table-grid tbody tr {
+  cursor: pointer;
+  transition: background-color 160ms ease;
+}
+
+.file-table-grid tbody tr:hover {
+  background: var(--surface-hover);
+}
+
+.file-table-grid tbody tr.is-selected {
+  background: var(--surface-selected);
+}
+
+.file-table-grid tbody tr:focus-visible {
+  position: relative;
+  z-index: 2;
+  outline: 3px solid var(--focus-ring);
+  outline-offset: -3px;
 }
 
 .pagination {
@@ -705,34 +779,7 @@ input:focus-visible,
 }
 
 .file-row {
-  display: grid;
-  grid-template-columns: minmax(175px, 2fr) minmax(95px, 0.9fr) minmax(72px, 0.65fr) minmax(130px, 1.1fr) minmax(128px, 150px) 222px;
-  align-items: center;
-  min-height: 64px;
-  column-gap: 12px;
-  min-width: 894px;
-  padding: 0 3px;
-  border-bottom: 1px solid var(--line);
-}
-
-.file-row:not(.file-row-header) {
-  cursor: pointer;
-  transition: background-color 160ms ease;
-}
-
-.file-row:not(.file-row-header):hover {
-  background: #f4faf6;
-}
-
-.file-row.is-selected {
-  background: #eef7f1;
-}
-
-.file-row-header {
-  min-height: 44px;
-  color: #7f898f;
-  font-size: 14px;
-  font-weight: 500;
+  min-width: 0;
 }
 
 .sort-header {
@@ -802,12 +849,60 @@ input:focus-visible,
 }
 
 .file-row-actions {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: flex-start;
   gap: 2px;
   flex-wrap: nowrap;
   min-width: 0;
+}
+
+.file-actions-cell {
+  overflow: visible;
+}
+
+.row-action-menu {
+  position: absolute;
+  z-index: 10;
+  top: calc(100% + 5px);
+  right: 0;
+  width: min(248px, calc(100vw - 32px));
+  padding: 5px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-md);
+  background: var(--surface-control);
+  box-shadow: var(--dialog-shadow);
+}
+
+.row-action-menu-item {
+  display: flex;
+  width: 100%;
+  min-height: 36px;
+  align-items: center;
+  gap: 9px;
+  padding: 0 9px;
+  color: var(--ink);
+  font-size: 13px;
+  text-align: left;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  cursor: pointer;
+}
+
+.row-action-menu-item:hover,
+.row-action-menu-item:focus-visible {
+  background: var(--surface-subtle);
+}
+
+.row-action-menu-item.is-danger {
+  color: var(--danger);
+}
+
+.row-action-menu-danger {
+  margin-top: 5px;
+  padding-top: 5px;
+  border-top: 1px solid var(--line);
 }
 
 .row-action-button {
@@ -968,10 +1063,10 @@ input:focus-visible,
 .library-dialog {
   width: min(480px, 100%);
   overflow: hidden;
-  border: 1px solid #dce4e7;
-  border-radius: 8px;
-  background: #ffffff;
-  box-shadow: 0 20px 60px rgba(25, 41, 48, 0.2);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-md);
+  background: var(--surface-control);
+  box-shadow: var(--dialog-shadow);
 }
 
 .settings-dialog {
@@ -1158,7 +1253,7 @@ input:focus-visible,
 }
 
 .dialog-field input {
-  min-height: 40px;
+  min-height: var(--control-height);
   padding: 0 11px;
   color: var(--ink);
   border: 1px solid #cdd8dc;
@@ -1170,6 +1265,21 @@ input:focus-visible,
   border-color: #8db8d7;
   outline: 0;
   box-shadow: 0 0 0 3px rgba(36, 105, 168, 0.1);
+}
+
+.dialog-field input[aria-invalid="true"] {
+  border-color: var(--danger);
+  box-shadow: 0 0 0 3px rgba(189, 81, 72, 0.12);
+}
+
+.dialog-errors {
+  display: grid;
+  gap: 4px;
+  margin: 12px 0 0;
+  padding: 0 0 0 18px;
+  color: var(--danger);
+  font-size: 13px;
+  line-height: 1.5;
 }
 
 .dialog-hint {
@@ -1256,7 +1366,7 @@ input:focus-visible,
 
 .dialog-button-danger {
   color: #ffffff;
-  background: #bd5148;
+  background: var(--danger);
 }
 
 .dialog-button-danger:hover:not(:disabled) {
@@ -2105,9 +2215,7 @@ input:focus-visible,
     padding-inline: 32px;
   }
 
-  .file-row {
-    grid-template-columns: minmax(190px, 1.7fr) minmax(95px, 0.9fr) minmax(75px, 0.7fr) minmax(140px, 1.2fr) minmax(130px, 150px) 222px;
-    column-gap: 12px;
+  .file-table-grid {
     min-width: 918px;
   }
 }
@@ -2216,8 +2324,93 @@ input:focus-visible,
     overflow: hidden;
   }
 
-  .file-row {
-    min-width: 918px;
+  .file-table-grid {
+    display: block;
+    min-width: 0;
+  }
+
+  .file-table-grid thead {
+    display: none;
+  }
+
+  .file-table-grid tbody {
+    display: grid;
+    gap: var(--space-2);
+  }
+
+  .file-table-grid tbody tr {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas: "name actions" "type actions" "status actions";
+    align-items: center;
+    min-height: 0;
+    padding: 10px 12px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-md);
+    background: var(--surface-control);
+  }
+
+  .file-table-grid tbody th,
+  .file-table-grid tbody td {
+    display: block;
+    width: auto;
+    height: auto;
+    min-width: 0;
+    padding: 3px 0;
+    border: 0;
+  }
+
+  .file-table-grid tbody th[data-label="名称"] {
+    grid-area: name;
+  }
+
+  .file-table-grid tbody td.file-type {
+    grid-area: type;
+    color: var(--muted);
+    font-size: 13px;
+  }
+
+  .file-table-grid tbody td.file-type::before {
+    content: attr(data-label) "：";
+    color: #8b979c;
+  }
+
+  .file-table-grid tbody td[data-label="状态"] {
+    grid-area: status;
+    display: flex;
+    min-height: 25px;
+    align-items: center;
+  }
+
+  .file-table-grid tbody td[data-label="状态"]::before {
+    content: attr(data-label) "：";
+    flex: 0 0 auto;
+    color: #8b979c;
+    font-size: 12px;
+    font-weight: 500;
+  }
+
+  .file-table-grid tbody td.file-size,
+  .file-table-grid tbody td.file-modified {
+    display: none;
+  }
+
+  .file-table-grid tbody td.file-actions-cell {
+    grid-area: actions;
+    align-self: center;
+    padding-left: 10px;
+  }
+
+  .file-table-grid tbody .file-name-cell {
+    gap: 9px;
+  }
+
+  .file-table-grid tbody .file-name {
+    font-size: 15px;
+  }
+
+  .file-table-grid tbody .file-row-actions {
+    justify-content: flex-end;
   }
 
   .settings-grid {
@@ -2288,5 +2481,137 @@ input:focus-visible,
 
   .dialog-button {
     flex: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --ink: #e7edef;
+    --line: #2d3a3f;
+    --line-strong: #405157;
+    --surface: #172023;
+    --surface-subtle: #202b2f;
+    --surface-hover: #24352e;
+    --surface-selected: #294536;
+    --surface-control: #1d292d;
+    --muted: #b0bec2;
+    --muted-strong: #c5d0d3;
+    --green: #55c98a;
+    --green-dark: #79dfa5;
+    --blue: #78b9ed;
+    --orange: #f4a15d;
+    --danger: #f08078;
+    --focus-ring: rgba(120, 185, 237, 0.55);
+    --dialog-shadow: 0 20px 60px rgba(0, 0, 0, 0.45);
+  }
+
+  body,
+  #root {
+    background: var(--surface-subtle);
+  }
+
+  .app-shell,
+  .sidebar,
+  .main-content,
+  .drop-zone,
+  .library-dialog,
+  .preview-dialog,
+  .preview-dialog-header,
+  .search-field,
+  .sort-control select,
+  .sort-direction-button,
+  .dialog-field input,
+  .settings-field select,
+  .file-table-grid tbody tr {
+    color: var(--ink);
+    background: var(--surface-control);
+  }
+
+  .main-content {
+    background: var(--surface-subtle);
+  }
+
+  .page-header h1,
+  .section-heading-row h2,
+  .file-name,
+  .library-dialog-header h2,
+  .settings-dialog-title h2,
+  .settings-section h3,
+  .dialog-field,
+  .settings-checkbox,
+  .settings-field,
+  .dialog-details dd {
+    color: var(--ink);
+  }
+
+  .file-table-grid thead,
+  .file-table-grid tbody tr:hover {
+    background: #263237;
+  }
+
+  .file-type,
+  .file-size,
+  .file-modified,
+  .result-count,
+  .pagination-status,
+  .dialog-hint,
+  .settings-hint {
+    color: var(--muted);
+  }
+
+  .file-table-grid th,
+  .file-table-grid td,
+  .file-table,
+  .pagination,
+  .library-dialog-header,
+  .dialog-details,
+  .settings-limit-list,
+  .settings-limit-list li,
+  .preview-dialog-header,
+  .preview-media-toolbar,
+  .preview-source,
+  .preview-markdown-body,
+  .preview-docx-body,
+  .preview-table-scroll {
+    border-color: var(--line);
+  }
+
+  .row-action-menu,
+  .dialog-details,
+  .settings-limit-list,
+  .preview-source,
+  .preview-markdown-body,
+  .preview-docx-body,
+  .preview-table-scroll {
+    background: var(--surface-control);
+  }
+
+  .drop-zone.is-dragging,
+  .floating-window-alert,
+  .index-recovery-alert {
+    background: #2d2925;
+  }
+
+  .preview-dialog-body {
+    background: #11191c;
+  }
+
+  .preview-markdown-body pre,
+  .preview-docx-body pre,
+  .preview-spreadsheet-table thead th,
+  .preview-spreadsheet-table tbody th {
+    background: #263237;
   }
 }

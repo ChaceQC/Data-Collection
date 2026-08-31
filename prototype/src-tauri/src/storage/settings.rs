@@ -10,7 +10,7 @@ use atomic_write_file::AtomicWriteFile;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::config::PREVIEW_LIMITS;
+use crate::filesystem;
 
 pub const SETTINGS_FORMAT_VERSION: u32 = 2;
 const LEGACY_SETTINGS_FORMAT_VERSION: u32 = 1;
@@ -222,10 +222,10 @@ impl AppSettings {
             confirm_before_remove: settings.confirm_before_remove,
             hide_to_tray: settings.hide_to_tray,
             show_floating_window: settings.show_floating_window,
-            preview_limits: PREVIEW_LIMITS
+            preview_limits: filesystem::preview_limits()
                 .iter()
                 .map(|limit| PreviewLimitView {
-                    label: limit.label.to_string(),
+                    label: limit.label.clone(),
                     max_bytes: limit.max_bytes,
                     max_pixels: limit.max_pixels,
                 })

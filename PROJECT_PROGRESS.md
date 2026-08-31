@@ -69,6 +69,56 @@
 - `verify-webview2-loader`：通过；`WebView2Loader.dll` 为 `160320` bytes，x64，和 release 主程序位于同一目录。
 - `git diff --check`：通过；构建产物仍被 `.gitignore` 忽略，没有执行 commit、push、tag 或 Release。
 
+### 新总体计划阶段 E-F 代码实现
+
+#### 已完成
+
+- 先将阶段 A-D 的现状提交为 `2adeb67`（`feat: 完成阶段A-D代码实现`），再从 `dev` 的 `86b20ae` 快进合并到本地 `dev`；之后在独立分支 `codex/implement-phases-e-f` 继续实现，本轮没有 push、tag 或 Release。
+- 阶段 E：将 `App.jsx` 从约 1,169 行收敛为页面组合层；索引加载/revision 刷新/恢复、资料目录导航、文件操作/选择器、设置状态和窗口事件分别下沉到 controller/hook。
+- 新增 `prototype/shared/file-types.json`，统一扩展名、kind、文件类型、预览器、媒体类型、编码语言和预览限制；前端 `fileTypes.js`、预览注册表、设置限制和 Rust `filesystem` 均从该 manifest 派生。
+- 新增 IPC contract runtime validator 与 `ipcContracts.d.ts`，统一 opaque ID、相对路径、索引 snapshot/mutation、revision 事件、预览状态、设置、托盘和悬浮窗结果；前端 command 通过 `libraryRepository`、预览/设置/悬浮球 API 收口。
+- Rust 新增 `storage/repository.rs`，集中索引快照、导入合并、刷新、原子 mutation、恢复和待同步文件操作委托；command 只负责编排后台任务、参数边界和事件发布。索引 v3、设置 v2、数据目录和事件 revision 保持不变。
+- 阶段 F：资料库改用语义化 `<table>`/`thead`/`tbody`/`th scope`/`rowheader`；行操作收进更多菜单并将原文件删除放在独立“危险操作”分组。
+- 新增统一 `Dialog` 组件和焦点陷阱，覆盖打开焦点、Tab 循环、Escape、背景点击、`aria-labelledby`、`aria-describedby` 和关闭后的触发点焦点返回；预览、设置、移除、重命名和删除确认均复用该组件。
+- 重命名输入增加非法字符、Windows 保留名、尾部空格/点、长度、扩展名、未变化和同目录冲突的逐项内联提示；图片使用文件名生成可访问名称，视频补充带文件名的 `aria-label`。
+- 窄窗口在 `680px`/`360px` 下切换为紧凑资料卡片，只保留文件名、类型、状态和高频操作；样式集中增加颜色/间距/圆角/控件/阴影 token，并明确 `prefers-reduced-motion` 与深色模式策略。
+- 前端托盘模型保留为 Rust 托盘菜单 ID 的唯一跨层契约测试用途，并在文件内标注；实际托盘菜单继续由 Rust 创建。
+
+#### 进行中
+
+- 阶段 E-F 代码和开发侧自动验证已完成，实际版本入口仍为 `0.3.6`；等待用户在 Windows 11 Tauri/WebView2 桌面环境执行阶段 E-F 手工验收，未将浏览器回退检查写成桌面验收。
+
+#### 阻塞与风险
+
+- 本轮没有代替用户执行 Windows 11 原生窗口、托盘、悬浮球、文件选择器、真实预览和文件操作验收；这些仍需用户记录目标窗口尺寸、显示器/DPI、文件类型、路径形态和复现步骤。
+- `xlsx@0.18.5` 的既有 Prototype Pollution/ReDoS 风险仍未消失；LibreOffice、WebView2 Runtime、视频编码和未签名安装包仍是既有发布边界。
+- 当前前端项目仍是 JavaScript/JSX；本阶段提供 `.d.ts` 类型声明和运行时校验，没有一次性迁移全部 JSX，完整 lint/typecheck 仍属于阶段 J。
+
+#### 下一步
+
+- 用户使用当前分支启动 `npm.cmd run tauri:dev`，验证键盘导入/搜索/排序/行选择/预览/弹窗确认、语义表读屏关系、窄窗口无覆盖、托盘/悬浮球同步及现有 A-D 场景。
+- 收到桌面验收结果后先修复阻断项；只有阶段门禁、版本入口和用户验收证据一致且获得明确授权，才提升 `0.3.11`/`0.3.12` 候选版本或执行发布流程。
+
+#### 涉及文件
+
+- `prototype/shared/file-types.json`、`prototype/src/lib/`、`prototype/src/components/Dialog.jsx`
+- `prototype/src/App.jsx`、`prototype/src/features/library/`、`prototype/src/features/preview/`、`prototype/src/features/settings/`、`prototype/src/features/window/`
+- `prototype/src/features/floating-ball/floatingBallApi.js`、`prototype/src/features/tray/trayModel.js`、`prototype/src/styles.css`
+- `prototype/src-tauri/src/storage/repository.rs`、`filesystem/mod.rs`、`preview/`、`commands/`、`build.rs`
+- `prototype/tests/ipc-contracts.test.mjs`、`prototype/tests/library-controller.test.mjs`、`prototype/tests/fixtures/`
+- `PROJECT_PLAN.md`、`README.md`、`prototype/README.md`、`prototype/package.json`
+
+#### 验证
+
+- `npm.cmd run test:contracts`：6 项通过；覆盖共享 manifest、重命名规则、opaque ID、相对路径、revision 事件、预览状态和结构化错误映射。
+- `npm.cmd run test:library`：6 项通过；`test:settings`：4 项通过；`test:preview`：6 项通过；`test:floating-ball`：17 项通过；`test:tray`：3 项通过；`test:sites`：4 项通过。
+- `npm.cmd run build`：通过，生成 `dist/client/index.html`、`dist/server/index.js` 和 `dist/.openai/hosting.json`；仅有既有大 chunk 警告。
+- `cargo fmt --all -- --check`、`cargo test`、`cargo clippy --all-targets --all-features -- -D warnings`：均通过；Rust 共 55 项测试通过。
+- Browser 回退检查：1280px 无页面/表格横向滚动；680px 和 360px 切换紧凑列表，名称/操作矩形无交叠；设置、预览和重命名 Dialog 的焦点、Escape、内联错误和危险操作菜单可见；页面 error/warning 日志为空。临时服务端口 `49219` 已关闭。
+- `npm.cmd run tauri:build`：通过，生成 Windows x64 NSIS 安装包 `prototype/src-tauri/target/release/bundle/nsis/本地资料工作台_0.3.6_x64-setup.exe`；大小 `7046540` bytes，SHA-256 为 `A7E3DA3D073A0B533F0B7619453F5862D8B176276EF3D71914AC2E6BFDD21F6C`。
+- `WebView2Loader.dll` 校验通过：`160320` bytes，SHA-256 为 `8427b1fc58ec707813e5c0a51eb5d69397bb333250a7b891be4d3b123f1e0f1c`，x64 loader 与 release 主程序位于同一目录。
+- `git diff --check`：通过；正式版本仍为 `0.3.6`，没有执行安装器启动/卸载或 Windows 桌面手工验收。
+
 ## 2026-08-30
 
 ### 悬浮球拖动后无法展开与收起闪烁修复

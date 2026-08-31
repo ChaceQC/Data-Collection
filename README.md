@@ -8,7 +8,7 @@
 
 当前版本为 `0.3.6`，已完成悬浮球悬停状态机、工作区几何、边缘方向回退、面板命中和多显示器/DPI 优化；用户已确认 Windows 11 桌面端全部验收场景通过，`v0.3.6` 已正式发布。项目源码位于 [`prototype/`](prototype/)，根目录的计划和进度记录分别见 [`PROJECT_PLAN.md`](PROJECT_PLAN.md) 与 [`PROJECT_PROGRESS.md`](PROJECT_PROGRESS.md)。
 
-当前开发分支已实现新计划阶段 A-D 的代码和阶段级自动验证，包括登记路径授权、索引 revision 刷新、索引恢复、文件操作待同步记录和可取消预览；这些改动尚未提升正式版本，也未替代对应的 Windows 11 手工验收。
+当前开发分支已实现新计划阶段 A-F 的代码和阶段级自动验证，包括登记路径授权、索引 revision 刷新、索引恢复、文件操作待同步记录、可取消预览、共享 IPC 契约、语义资料表和统一 Dialog；这些改动尚未提升正式版本，也未替代对应的 Windows 11 手工验收。
 
 ## 功能概览
 
@@ -24,6 +24,8 @@
 - 在桌面端提供明确触发的复制、重命名、回收站删除、默认程序打开和资源管理器定位操作，并在执行前进行必要确认。
 - 提供默认排序、分页数量、关闭时隐藏到托盘和悬浮窗可见性等设置。
 - 桌面端刷新入口会保留当前选择、目录面包屑、页码和滚动位置；关闭或切换预览时会取消未完成的 DOC、XLSX、PDF 和媒体任务。
+- 资料库使用语义化表格，行操作通过更多菜单分组；重命名会在输入框内显示非法字符、扩展名、冲突和空值原因，预览/设置/确认窗口共享键盘焦点管理。
+- 文件类型和预览限制由 `prototype/shared/file-types.json` 统一提供，前端 IPC/API 通过运行时契约校验；窄窗口会切换为保留名称、类型、状态和高频操作的紧凑列表。
 
 ## 使用者说明
 
@@ -144,6 +146,7 @@ Release 构建使用 GitHub 公共托管的 `windows-2022` x64 runner。该标�
 
 ```powershell
 npm.cmd run test:library
+npm.cmd run test:contracts
 npm.cmd run test:settings
 npm.cmd run test:preview
 npm.cmd run test:floating-ball
@@ -167,6 +170,8 @@ cargo clippy --all-targets --all-features -- -D warnings
 ```text
 prototype/
   src/                 # React 页面与各功能模块
+    components/        # 通用 Dialog 和界面基础组件
+    lib/               # 跨 feature 的文件类型与 IPC 契约
     features/library/  # 文件索引、列表、搜索和目录浏览
     features/preview/  # 各格式预览器及资源安全边界
     features/settings/ # 设置状态和设置面板
@@ -178,6 +183,7 @@ prototype/
     src/preview/       # 预览适配器和受控资源协议
     src/storage/       # 本地索引、设置和位置存储
     src/windows/       # 托盘、窗口生命周期和 Windows 集成
+  shared/              # 前端与 Rust 共用的文件类型/预览限制 manifest
   tests/               # 模型测试与无敏感测试夹具
 ```
 

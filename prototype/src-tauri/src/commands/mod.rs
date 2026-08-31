@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Runtime, State};
 
+use crate::storage::repository::IndexRepository;
 use crate::{
     filesystem::{self, DirectoryEntry, IndexEntry},
     preview::{self, PreviewOptions, PreviewResult, PreviewState, PreviewSupport},
@@ -106,55 +107,21 @@ pub fn load_file_index(
     state: State<'_, AppState>,
     app: AppHandle,
 ) -> Result<IndexSnapshot, String> {
-    let recovered_count = state
-        .reconcile_pending_operations()
-        .map_err(storage_message)
-        .map(usize::from)?;
-    let outcome = state
-        .update_entries_with(|entries| {
-            let mut changed_ids = Vec::new();
-            let mut changed = false;
-            for entry in entries.iter_mut() {
-                if filesystem::refresh_entry(entry) {
-                    changed = true;
-                    changed_ids.push(entry.id.clone());
-                }
-            }
-            let before_sort = entries
-                .iter()
-                .map(|entry| entry.id.clone())
-                .collect::<Vec<_>>();
-            storage::sort_entries(entries);
-            let sorted_changed = before_sort
-                != entries
-                    .iter()
-                    .map(|entry| entry.id.clone())
-                    .collect::<Vec<_>>();
-            if sorted_changed {
-                changed = true;
-                let additional_ids = entries
-                    .iter()
-                    .map(|entry| entry.id.clone())
-                    .filter(|id| !changed_ids.contains(id))
-                    .collect::<Vec<_>>();
-                changed_ids.extend(additional_ids);
-            }
-            Ok((changed, changed_ids))
-        })
-        .map_err(storage_message)?;
-    if outcome.changed || recovered_count > 0 {
+    let repository = IndexRepository::new(state.inner());
+    let outcome = repository.load_and_refresh().map_err(storage_message)?;
+    if outcome.changed || outcome.recovered_count > 0 {
         emit_index_changed(
             &app,
-            outcome.revision,
-            outcome.value,
-            if recovered_count > 0 {
+            outcome.snapshot.revision,
+            outcome.changed_ids,
+            if outcome.recovered_count > 0 {
                 "recovery"
             } else {
                 "refresh"
             },
         );
     }
-    state.snapshot_with_revision().map_err(storage_message)
+    Ok(outcome.snapshot)
 }
 
 #[tauri::command]
@@ -199,16 +166,9 @@ pub async fn index_paths(
     let skipped_count = scan.skipped_count;
     let skipped_reasons = scan.skipped_reasons.clone();
     let truncated = scan.truncated;
-    let outcome = state
-        .update_entries_with(|entries| {
-            let merge_stats = storage::merge_index_entries(
-                entries,
-                scan.entries,
-                storage::IndexMergeMode::RegularImport,
-            );
-            let changed = merge_stats.accepted_count > 0;
-            Ok((changed, merge_stats))
-        })
+    let repository = IndexRepository::new(state.inner());
+    let outcome = repository
+        .merge_entries(scan.entries, storage::IndexMergeMode::RegularImport)
         .map_err(storage_message)?;
     let merge_stats = outcome.value;
 
@@ -245,7 +205,8 @@ pub async fn reposition_file(
             .map_err(|_| "重新定位任务未完成，请重试".to_string())?
             .map_err(|error| error.to_string())?;
 
-    let outcome = state
+    let repository = IndexRepository::new(state.inner());
+    let outcome = repository
         .update_entries_with(|entries| {
             let position = entries
                 .iter()
@@ -358,7 +319,8 @@ pub fn cancel_preview_task(task_id: String, state: State<'_, PreviewState>) -> R
 pub fn get_index_recovery(
     state: State<'_, AppState>,
 ) -> Result<Option<storage::IndexRecoveryStatus>, String> {
-    state.recovery_status().map_err(storage_message)
+    let repository = IndexRepository::new(state.inner());
+    repository.recovery_status().map_err(storage_message)
 }
 
 #[tauri::command]
@@ -366,7 +328,8 @@ pub fn reset_index_recovery(
     state: State<'_, AppState>,
     app: AppHandle,
 ) -> Result<IndexSnapshot, String> {
-    let snapshot = state.reset_index_recovery().map_err(storage_message)?;
+    let repository = IndexRepository::new(state.inner());
+    let snapshot = repository.reset_index_recovery().map_err(storage_message)?;
     emit_index_changed(&app, snapshot.revision, Vec::new(), "recovery");
     Ok(snapshot)
 }
@@ -376,7 +339,8 @@ pub fn export_index_diagnostic(
     destination: String,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    state
+    let repository = IndexRepository::new(state.inner());
+    repository
         .export_recovery_diagnostic(&PathBuf::from(destination))
         .map_err(storage_message)
 }
@@ -386,7 +350,8 @@ pub async fn refresh_index(
     state: State<'_, AppState>,
     app: AppHandle,
 ) -> Result<IndexRefreshResult, String> {
-    let entries = state.snapshot().map_err(storage_message)?;
+    let repository = IndexRepository::new(state.inner());
+    let entries = repository.snapshot().map_err(storage_message)?;
     let checked = tauri::async_runtime::spawn_blocking(move || {
         entries
             .iter()
@@ -395,22 +360,23 @@ pub async fn refresh_index(
     })
     .await
     .map_err(|_| "索引刷新任务未完成，请重试".to_string())?;
-    apply_refresh_result(&state, &app, checked)
+    apply_refresh_result(&repository, &app, checked)
 }
 
 pub(crate) fn refresh_index_sync<R: Runtime>(
     state: &AppState,
     app: &AppHandle<R>,
 ) -> Result<IndexRefreshResult, String> {
-    let reconciled = state
+    let repository = IndexRepository::new(state);
+    let reconciled = repository
         .reconcile_pending_operations()
         .map_err(storage_message)?;
-    let entries = state.snapshot().map_err(storage_message)?;
+    let entries = repository.snapshot().map_err(storage_message)?;
     let checked = entries
         .iter()
         .map(filesystem::refresh_entry_snapshot)
         .collect::<Vec<_>>();
-    let mut result = apply_refresh_result_without_reconcile(state, checked)?;
+    let mut result = apply_refresh_result_without_reconcile(&repository, checked)?;
     if result.changed_count > 0 {
         emit_index_changed(app, result.revision, result.changed_ids.clone(), "refresh");
     }
@@ -424,14 +390,14 @@ pub(crate) fn refresh_index_sync<R: Runtime>(
 }
 
 fn apply_refresh_result<R: Runtime>(
-    state: &AppState,
+    repository: &IndexRepository<'_>,
     app: &AppHandle<R>,
     checked: Vec<IndexEntry>,
 ) -> Result<IndexRefreshResult, String> {
-    let reconciled = state
+    let reconciled = repository
         .reconcile_pending_operations()
         .map_err(storage_message)?;
-    let mut result = apply_refresh_result_without_reconcile(state, checked)?;
+    let mut result = apply_refresh_result_without_reconcile(repository, checked)?;
     if result.changed_count > 0 {
         emit_index_changed(app, result.revision, result.changed_ids.clone(), "refresh");
     }
@@ -445,29 +411,10 @@ fn apply_refresh_result<R: Runtime>(
 }
 
 fn apply_refresh_result_without_reconcile(
-    state: &AppState,
+    repository: &IndexRepository<'_>,
     checked: Vec<IndexEntry>,
 ) -> Result<IndexRefreshResult, String> {
-    let outcome = state
-        .update_entries_with(|entries| {
-            let mut changed_ids = Vec::new();
-            for refreshed in checked {
-                let Some(current) = entries.iter_mut().find(|entry| {
-                    entry.id == refreshed.id && filesystem::same_path(&entry.path, &refreshed.path)
-                }) else {
-                    continue;
-                };
-                if filesystem::apply_refreshed_metadata(current, &refreshed) {
-                    changed_ids.push(current.id.clone());
-                }
-            }
-            let changed = !changed_ids.is_empty();
-            if changed {
-                storage::sort_entries(entries);
-            }
-            Ok((changed, changed_ids))
-        })
-        .map_err(storage_message)?;
+    let outcome = repository.apply_refresh(checked).map_err(storage_message)?;
     let invalid_count = outcome.entries.iter().filter(|entry| entry.invalid).count();
     let changed_ids = outcome.value;
     Ok(IndexRefreshResult {

@@ -1,14 +1,9 @@
 import { SORT_OPTIONS } from "../library/libraryModel.js";
+import { PREVIEW_LIMITS } from "../../lib/fileTypes.js";
 
 export const PAGE_SIZE_OPTIONS = Object.freeze([10, 20, 50]);
 
-export const DEFAULT_PREVIEW_LIMITS = Object.freeze([
-  Object.freeze({ label: "纯文本和 Markdown", maxBytes: 2 * 1024 * 1024, maxPixels: null }),
-  Object.freeze({ label: "DOCX 和 XLSX", maxBytes: 20 * 1024 * 1024, maxPixels: null }),
-  Object.freeze({ label: "PDF", maxBytes: 50 * 1024 * 1024, maxPixels: null }),
-  Object.freeze({ label: "图片", maxBytes: 50 * 1024 * 1024, maxPixels: 100_000_000 }),
-  Object.freeze({ label: "视频", maxBytes: 512 * 1024 * 1024, maxPixels: null }),
-]);
+export const DEFAULT_PREVIEW_LIMITS = PREVIEW_LIMITS.map(({ key, ...limit }) => Object.freeze(limit));
 
 export const DEFAULT_SETTINGS = Object.freeze({
   defaultSort: Object.freeze({ key: "addedAt", direction: "desc" }),

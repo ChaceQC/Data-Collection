@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use serde::Serialize;
 use tauri::{AppHandle, State};
 
+use crate::storage::repository::IndexRepository;
 use crate::{
     filesystem::{self, clipboard, external, operations, IndexEntry},
     storage::{self, AppState, StorageError},
@@ -31,7 +32,8 @@ pub fn set_favorite(
     state: State<'_, AppState>,
     app: AppHandle,
 ) -> Result<IndexMutationResult, CommandError> {
-    let outcome = state
+    let repository = IndexRepository::new(state.inner());
+    let outcome = repository
         .update_entries_with(|entries| {
             let changed = storage::set_favorite(entries, &file_id, favorite)?;
             let entry = entries.iter().find(|entry| entry.id == file_id).cloned();
@@ -62,7 +64,8 @@ pub fn remove_index_entry(
     if file_id.trim().is_empty() {
         return Err(structured_storage_error(StorageError::InvalidId));
     }
-    let outcome = state
+    let repository = IndexRepository::new(state.inner());
+    let outcome = repository
         .update_entries_with(|entries| {
             let position = entries
                 .iter()
@@ -93,7 +96,8 @@ pub async fn copy_indexed_file(
     if file_id.trim().is_empty() {
         return Err(structured_storage_error(StorageError::InvalidId));
     }
-    let entry = find_entry(&state, &file_id)?;
+    let repository = IndexRepository::new(state.inner());
+    let entry = find_entry(&repository, &file_id)?;
     if entry.kind == "folder" {
         return Err(command_error(
             "folder-not-supported",
@@ -129,7 +133,8 @@ pub async fn open_indexed_file(
     if file_id.trim().is_empty() {
         return Err(structured_storage_error(StorageError::InvalidId));
     }
-    let entry = find_entry(&state, &file_id)?;
+    let repository = IndexRepository::new(state.inner());
+    let entry = find_entry(&repository, &file_id)?;
     if entry.kind == "folder" {
         return Err(command_error(
             "folder-not-supported",
@@ -165,7 +170,8 @@ pub async fn reveal_indexed_file(
     if file_id.trim().is_empty() {
         return Err(structured_storage_error(StorageError::InvalidId));
     }
-    let entry = find_entry(&state, &file_id)?;
+    let repository = IndexRepository::new(state.inner());
+    let entry = find_entry(&repository, &file_id)?;
     let is_directory = entry.kind == "folder";
     let name = entry.name.clone();
     tauri::async_runtime::spawn_blocking(move || {
@@ -209,7 +215,8 @@ pub async fn rename_indexed_file(
     if file_id.trim().is_empty() {
         return Err(structured_storage_error(StorageError::InvalidId));
     }
-    let entry = find_entry(&state, &file_id)?;
+    let repository = IndexRepository::new(state.inner());
+    let entry = find_entry(&repository, &file_id)?;
     if entry.kind == "folder" {
         return Err(command_error(
             "folder-not-supported",
@@ -244,7 +251,7 @@ pub async fn rename_indexed_file(
     .await
     .map_err(|_| command_error("task-failed", "重命名任务未完成，请重试", true, "unchanged"))??;
     let (source, target, replacement) = operation;
-    let outcome = state.update_entries_with(|entries| {
+    let outcome = repository.update_entries_with(|entries| {
         let current = entries
             .iter_mut()
             .find(|entry| entry.id == file_id)
@@ -289,7 +296,8 @@ pub async fn delete_original_file(
     if file_id.trim().is_empty() {
         return Err(structured_storage_error(StorageError::InvalidId));
     }
-    let entry = find_entry(&state, &file_id)?;
+    let repository = IndexRepository::new(state.inner());
+    let entry = find_entry(&repository, &file_id)?;
     if entry.kind == "folder" {
         return Err(command_error(
             "folder-not-supported",
@@ -307,7 +315,7 @@ pub async fn delete_original_file(
         ));
     }
     let (source, _) = operations::validate_indexed_file(&entry).map_err(operation_error)?;
-    state
+    repository
         .prepare_delete(&file_id, &source)
         .map_err(structured_storage_error)?;
     let delete_result = tauri::async_runtime::spawn_blocking(move || {
@@ -316,14 +324,14 @@ pub async fn delete_original_file(
     .await
     .map_err(|_| command_error("task-failed", "删除任务未完成，请重试", true, "unknown"))?;
     if let Err(error) = delete_result {
-        let _ = state.clear_pending_delete(&file_id);
+        let _ = repository.clear_pending_delete(&file_id);
         return Err(error);
     }
-    state
+    repository
         .mark_delete_complete(&file_id)
         .map_err(|error| command_error("partial-success", error.to_string(), false, "unknown"))?;
 
-    match state.update_entries_with(|entries| {
+    match repository.update_entries_with(|entries| {
         let position = entries
             .iter()
             .position(|entry| entry.id == file_id)
@@ -333,7 +341,7 @@ pub async fn delete_original_file(
     }) {
         Ok(outcome) => {
             let revision = outcome.revision;
-            if state.clear_pending_delete(&file_id).is_err() {
+            if repository.clear_pending_delete(&file_id).is_err() {
                 return Err(command_error(
                     "partial-success",
                     "原文件已移入回收站，索引已更新但待同步记录未清理",
@@ -360,8 +368,8 @@ pub async fn delete_original_file(
     }
 }
 
-fn find_entry(state: &State<'_, AppState>, file_id: &str) -> Result<IndexEntry, CommandError> {
-    state
+fn find_entry(repository: &IndexRepository<'_>, file_id: &str) -> Result<IndexEntry, CommandError> {
+    repository
         .snapshot()
         .map_err(structured_storage_error)?
         .into_iter()

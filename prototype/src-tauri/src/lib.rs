@@ -1,6 +1,5 @@
 #[cfg(not(test))]
 mod commands;
-mod config;
 #[cfg_attr(test, allow(dead_code))]
 mod filesystem;
 #[cfg(test)]

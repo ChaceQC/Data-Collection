@@ -1,4 +1,14 @@
-import { ArrowSquareOut, Copy, FolderOpen, PencilSimple, Star, TrashSimple, X } from "@phosphor-icons/react";
+import { useEffect, useRef, useState } from "react";
+import {
+  ArrowSquareOut,
+  Copy,
+  DotsThree,
+  FolderOpen,
+  PencilSimple,
+  Star,
+  TrashSimple,
+} from "@phosphor-icons/react";
+import { Dialog } from "../../components/Dialog.jsx";
 import { formatFileSize } from "./libraryModel";
 
 export function LibraryRowActions({
@@ -13,12 +23,43 @@ export function LibraryRowActions({
   onOpenDefault,
   onReveal,
 }) {
-  if (!persistent) return null;
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef(null);
+  const menuTriggerRef = useRef(null);
   const isFavorite = Boolean(file.favorite);
   const isFolder = file.kind === "folder";
   const isInvalid = Boolean(file.invalid);
+
+  useEffect(() => {
+    if (!menuOpen) return undefined;
+    function handlePointerDown(event) {
+      if (!menuRef.current?.contains(event.target)) setMenuOpen(false);
+    }
+    function handleKeyDown(event) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setMenuOpen(false);
+      }
+    }
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [menuOpen]);
+
+  if (!persistent) return null;
+
+  function run(action) {
+    document.querySelectorAll("[data-dialog-return-focus=\"true\"]").forEach((element) => element.removeAttribute("data-dialog-return-focus"));
+    menuTriggerRef.current?.setAttribute("data-dialog-return-focus", "true");
+    setMenuOpen(false);
+    action(file);
+  }
+
   return (
-    <div className="file-row-actions" onClick={(event) => event.stopPropagation()}>
+    <div className="file-row-actions" ref={menuRef} onClick={(event) => event.stopPropagation()}>
       <button
         type="button"
         className={`row-action-button ${isFavorite ? "is-favorite" : ""}`}
@@ -28,79 +69,49 @@ export function LibraryRowActions({
         disabled={busy}
         onClick={() => onFavorite(file)}
       >
-        <Star size={18} weight={isFavorite ? "fill" : "regular"} />
+        <Star size={18} weight={isFavorite ? "fill" : "regular"} aria-hidden="true" />
       </button>
       <button
         type="button"
-        className="row-action-button row-action-danger"
-        aria-label="从资料库移除"
-        title="从资料库移除"
+        className="row-action-button row-action-menu-trigger"
+        ref={menuTriggerRef}
+        aria-label="打开资料操作菜单"
+        title="更多操作"
+        aria-haspopup="menu"
+        aria-expanded={menuOpen}
         disabled={busy}
-        onClick={() => onRemove(file)}
+        onClick={() => setMenuOpen((value) => !value)}
       >
-        <TrashSimple size={18} weight="regular" />
+        <DotsThree size={20} weight="bold" aria-hidden="true" />
       </button>
-      {!isInvalid && (
-        <>
-          {!isFolder && (
-            <button
-              type="button"
-              className="row-action-button"
-              aria-label="用默认程序打开"
-              title="用默认程序打开"
-              disabled={busy}
-              onClick={() => onOpenDefault(file)}
-            >
-              <ArrowSquareOut size={18} weight="regular" />
-            </button>
+      {menuOpen && (
+        <div className="row-action-menu" role="menu" aria-label={`${file.name} 的操作`}>
+          <div role="group" aria-label="常用操作">
+            {!isInvalid && !isFolder && (
+              <MenuAction icon={ArrowSquareOut} label="用默认程序打开" onClick={() => run(onOpenDefault)} />
+            )}
+            {!isInvalid && <MenuAction icon={FolderOpen} label="在资源管理器中定位" onClick={() => run(onReveal)} />}
+            {!isInvalid && !isFolder && <MenuAction icon={Copy} label="复制到剪贴板" onClick={() => run(onCopy)} />}
+            {!isInvalid && !isFolder && <MenuAction icon={PencilSimple} label="重命名文件" onClick={() => run(onRename)} />}
+            <MenuAction icon={TrashSimple} label="从资料库移除" danger onClick={() => run(onRemove)} />
+          </div>
+          {!isInvalid && !isFolder && (
+            <div className="row-action-menu-danger" role="group" aria-label="危险操作">
+              <MenuAction icon={TrashSimple} label="删除原文件并移入回收站" danger onClick={() => run(onDelete)} />
+            </div>
           )}
-          <button
-            type="button"
-            className="row-action-button"
-            aria-label="在资源管理器中定位"
-            title="在资源管理器中定位"
-            disabled={busy}
-            onClick={() => onReveal(file)}
-          >
-            <FolderOpen size={18} weight="regular" />
-          </button>
-          {!isFolder && (
-            <>
-              <button
-                type="button"
-                className="row-action-button"
-                aria-label="复制到剪贴板"
-                title="复制到剪贴板"
-                disabled={busy}
-                onClick={() => onCopy(file)}
-              >
-                <Copy size={18} weight="regular" />
-              </button>
-              <button
-                type="button"
-                className="row-action-button"
-                aria-label="重命名文件"
-                title="重命名文件"
-                disabled={busy}
-                onClick={() => onRename(file)}
-              >
-                <PencilSimple size={18} weight="regular" />
-              </button>
-              <button
-                type="button"
-                className="row-action-button row-action-danger"
-                aria-label="删除原文件"
-                title="删除原文件"
-                disabled={busy}
-                onClick={() => onDelete(file)}
-              >
-                <TrashSimple size={18} weight="fill" />
-              </button>
-            </>
-          )}
-        </>
+        </div>
       )}
     </div>
+  );
+}
+
+function MenuAction({ icon: Icon, label, danger = false, onClick }) {
+  return (
+    <button type="button" className={`row-action-menu-item ${danger ? "is-danger" : ""}`} role="menuitem" onClick={onClick}>
+      <Icon size={16} weight="regular" aria-hidden="true" />
+      <span>{label}</span>
+    </button>
   );
 }
 
@@ -113,61 +124,63 @@ export function LibraryActionDialog({
   onCancel,
   onConfirm,
   children,
+  confirmDisabled = false,
+  initialFocusRef,
 }) {
   return (
-    <div
-      className="library-dialog-backdrop"
-      role="presentation"
-      onMouseDown={(event) => {
-        if (event.currentTarget === event.target && !busy) onCancel();
-      }}
-    >
-      <section className="library-dialog" role="dialog" aria-modal="true" aria-labelledby="library-dialog-title">
-        <header className="library-dialog-header">
-          <h2 id="library-dialog-title">{title}</h2>
-          <button type="button" className="dialog-close-button" aria-label="关闭" title="关闭" disabled={busy} onClick={onCancel}>
-            <X size={18} weight="regular" />
-          </button>
-        </header>
-        <div className="library-dialog-body">
-          <p className="library-dialog-description">{description}</p>
-          {children}
-        </div>
-        <footer className="library-dialog-actions">
-          <button type="button" className="dialog-button dialog-button-secondary" disabled={busy} onClick={onCancel}>
-            取消
-          </button>
-          <button
-            type="button"
-            className={`dialog-button ${danger ? "dialog-button-danger" : "dialog-button-primary"}`}
-            disabled={busy}
-            onClick={onConfirm}
-          >
+    <Dialog
+      title={title}
+      description={description}
+      busy={busy}
+      onClose={onCancel}
+      initialFocusRef={initialFocusRef}
+      footer={(
+        <>
+          <button type="button" className="dialog-button dialog-button-secondary" disabled={busy} onClick={onCancel}>取消</button>
+          <button type="button" className={`dialog-button ${danger ? "dialog-button-danger" : "dialog-button-primary"}`} disabled={busy || confirmDisabled} onClick={onConfirm}>
             {busy ? "处理中..." : confirmLabel}
           </button>
-        </footer>
-      </section>
-    </div>
+        </>
+      )}
+    >
+      {children}
+    </Dialog>
   );
 }
 
-export function RenameDialog({ file, value, busy, onChange, onCancel, onConfirm }) {
+export function RenameDialog({ file, value, validation = { valid: true, errors: [] }, busy, onChange, onCancel, onConfirm }) {
+  const inputRef = useRef(null);
+  const hasErrors = validation.errors.length > 0;
   return (
     <LibraryActionDialog
       title="重命名文件"
       description={`只修改“${file.name}”的文件名，文件内容和所在文件夹不变。`}
       confirmLabel="重命名"
       busy={busy}
+      confirmDisabled={!validation.valid}
+      initialFocusRef={inputRef}
       onCancel={onCancel}
       onConfirm={onConfirm}
     >
       <label className="dialog-field">
         <span>新文件名</span>
-        <input autoFocus value={value} onChange={(event) => onChange(event.target.value)} onKeyDown={(event) => {
-          if (event.key === "Enter" && value.trim() && !busy) onConfirm();
-        }} />
+        <input
+          ref={inputRef}
+          value={value}
+          aria-invalid={hasErrors}
+          aria-describedby={hasErrors ? "rename-errors rename-hint" : "rename-hint"}
+          onChange={(event) => onChange(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" && validation.valid && !busy) onConfirm();
+          }}
+        />
       </label>
-      <p className="dialog-hint">文件扩展名必须保持不变。</p>
+      <p id="rename-hint" className="dialog-hint">文件扩展名必须保持不变；文件名不能包含 Windows 不允许的字符。</p>
+      {hasErrors && (
+        <ul id="rename-errors" className="dialog-errors" role="alert">
+          {validation.errors.map((error) => <li key={error.code}>{error.message}</li>)}
+        </ul>
+      )}
     </LibraryActionDialog>
   );
 }
@@ -198,18 +211,9 @@ export function DeleteOriginalDialog({ file, busy, onCancel, onConfirm }) {
       onConfirm={onConfirm}
     >
       <dl className="dialog-details">
-        <div>
-          <dt>类型</dt>
-          <dd>{file.type || file.fileType || "文件"}</dd>
-        </div>
-        <div>
-          <dt>大小</dt>
-          <dd>{formatFileSize(file.size)}</dd>
-        </div>
-        <div>
-          <dt>位置</dt>
-          <dd title={file.path || "桌面应用中的资料"}>{file.path || "桌面应用中的资料"}</dd>
-        </div>
+        <div><dt>类型</dt><dd>{file.type || file.fileType || "文件"}</dd></div>
+        <div><dt>大小</dt><dd>{formatFileSize(file.size)}</dd></div>
+        <div><dt>位置</dt><dd title={file.path || "桌面应用中的资料"}>{file.path || "桌面应用中的资料"}</dd></div>
       </dl>
     </LibraryActionDialog>
   );

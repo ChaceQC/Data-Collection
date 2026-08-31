@@ -1,6 +1,6 @@
 use std::{fs::File, io::Read, path::Path};
 
-use crate::{config::TEXT_PREVIEW_LIMIT, filesystem::FileTypeInfo};
+use crate::filesystem::FileTypeInfo;
 
 use super::operations::PreviewFailure;
 use super::{doc, image, result, spreadsheet, video};
@@ -16,7 +16,7 @@ pub(super) fn load_text(
     if cancellation.is_cancelled() {
         return result::result_cancelled(preview_id, info.kind.to_string());
     }
-    let bytes = match read_bounded(&path, TEXT_PREVIEW_LIMIT) {
+    let bytes = match read_bounded(&path, info.max_bytes) {
         Ok(bytes) => bytes,
         Err(failure) => return result::result_failure(preview_id, info.kind.to_string(), failure),
     };
@@ -43,7 +43,7 @@ pub(super) fn load_text(
         PreviewContent::Text {
             value: decoded.value,
             encoding: decoded.encoding.to_string(),
-            language: info.language.map(str::to_string),
+            language: info.language,
         },
     )
 }
@@ -60,7 +60,7 @@ pub(super) fn load_resource(
         return result::result_cancelled(preview_id, info.kind.to_string());
     }
     if (info.kind == "docx" || info.kind == "xlsx")
-        && !spreadsheet::has_supported_container(&path, info.extension).unwrap_or(false)
+        && !spreadsheet::has_supported_container(&path, &info.extension).unwrap_or(false)
     {
         return result::result_failure(
             preview_id,
@@ -71,7 +71,7 @@ pub(super) fn load_resource(
             },
         );
     }
-    let Some(media_type) = info.media_type else {
+    let Some(media_type) = info.media_type.as_deref() else {
         return result::result_failure(
             preview_id,
             info.kind.to_string(),
@@ -81,7 +81,7 @@ pub(super) fn load_resource(
             },
         );
     };
-    if info.kind == "video" && !video::is_registered_media_type(info.extension, media_type) {
+    if info.kind == "video" && !video::is_registered_media_type(&info.extension, media_type) {
         return result::result_failure(
             preview_id,
             info.kind.to_string(),
@@ -92,7 +92,7 @@ pub(super) fn load_resource(
         );
     }
     let dimensions = if info.kind == "image" {
-        match image::dimensions(&path, info.extension) {
+        match image::dimensions(&path, &info.extension, info.max_pixels) {
             Ok(dimensions) => Some(dimensions),
             Err(image::ImageValidationError::TooLarge) => {
                 return result::result_failure(

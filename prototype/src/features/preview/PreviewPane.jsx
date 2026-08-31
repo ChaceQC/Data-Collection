@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { X } from "@phosphor-icons/react";
+import { Dialog, DialogCloseButton } from "../../components/Dialog.jsx";
 import {
   cancelPreviewTask,
   canPreview,
@@ -22,14 +22,14 @@ function initialState(entry) {
   return { status: "loading", kind: entry?.kind || "other", content: null, reason: "" };
 }
 
-function PreviewContent({ result }) {
+function PreviewContent({ result, entryName }) {
   if (!result?.content) return null;
   if (result.content.type === "text") {
     return result.kind === "markdown" ? <MarkdownPreviewer content={result.content} /> : <TextPreviewer content={result.content} />;
   }
   if (result.content.type === "convertedPdf") return <PdfPreviewer content={result.content} />;
-  if (result.kind === "image") return <ImagePreviewer content={result.content} />;
-  if (result.kind === "video") return <VideoPreviewer content={result.content} />;
+  if (result.kind === "image") return <ImagePreviewer content={result.content} title={entryName} />;
+  if (result.kind === "video") return <VideoPreviewer content={result.content} title={entryName} />;
   if (result.kind === "xlsx") return <SpreadsheetPreviewer content={result.content} />;
   if (result.kind === "docx") return <OfficePreviewer content={result.content} />;
   if (result.kind === "pdf") return <PdfPreviewer content={result.content} />;
@@ -116,49 +116,30 @@ export function PreviewPane({ entry, onClose }) {
     };
   }, [definition, entry?.id, entry?.invalid, entry?.kind, entry?.name, entry?.path]);
 
-  useEffect(() => {
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    function handleKeyDown(event) {
-      if (event.key === "Escape") onClose();
-    }
-    window.addEventListener("keydown", handleKeyDown);
-    return () => {
-      document.body.style.overflow = previousOverflow;
-      window.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [onClose]);
-
   const isReady = result.status === "ready" && result.content;
   return (
-    <div
-      className="preview-modal-backdrop"
-      role="presentation"
-      onMouseDown={(event) => {
-        if (event.currentTarget === event.target) onClose();
-      }}
-    >
-      <section className="preview-dialog" role="dialog" aria-modal="true" aria-labelledby="preview-dialog-title" data-testid="preview-dialog">
+    <Dialog
+      title={entry.name}
+      description={<span className="sr-only">只读预览内容，关闭后返回资料列表。</span>}
+      className="preview-dialog"
+      backdropClassName="preview-modal-backdrop"
+      bodyClassName={`preview-dialog-body ${isReady ? "is-ready" : ""}`}
+      onClose={onClose}
+      dialogProps={{ "data-testid": "preview-dialog" }}
+      header={({ titleId }) => (
         <header className="preview-dialog-header">
           <div className="preview-dialog-heading">
-            <h2 id="preview-dialog-title" title={entry.name}>{entry.name}</h2>
+            <h2 id={titleId} title={entry.name}>{entry.name}</h2>
             <span>{definition?.displayType || entry.type || "未知格式"}</span>
           </div>
           <div className="preview-dialog-status">{getPreviewStatusLabel(result.status)}</div>
-          <button type="button" className="preview-close-button" aria-label="关闭预览" title="关闭预览" onClick={onClose}>
-            <X size={20} />
-          </button>
+          <DialogCloseButton label="关闭预览" className="preview-close-button" onClick={onClose} />
         </header>
-        <div className={`preview-dialog-body ${isReady ? "is-ready" : ""}`} aria-busy={result.status === "loading"}>
-          {result.status === "ready" && result.content ? (
-            <PreviewContent result={result} />
-          ) : result.status === "loading" ? (
-            <div className="preview-loading-state">正在准备预览...</div>
-          ) : (
-            <UnsupportedPreviewer status={result.status} reason={result.reason} />
-          )}
-        </div>
-      </section>
-    </div>
+      )}
+    >
+      <div aria-busy={result.status === "loading"}>
+        {result.status === "ready" && result.content ? <PreviewContent result={result} entryName={entry.name} /> : result.status === "loading" ? <div className="preview-loading-state">正在准备预览...</div> : <UnsupportedPreviewer status={result.status} reason={result.reason} />}
+      </div>
+    </Dialog>
   );
 }

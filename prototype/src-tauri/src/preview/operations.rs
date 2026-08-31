@@ -1,12 +1,6 @@
 use std::path::Path;
 
-use crate::{
-    config::{
-        IMAGE_PREVIEW_LIMIT, OFFICE_PREVIEW_LIMIT, PDF_PREVIEW_LIMIT, TEXT_PREVIEW_LIMIT,
-        VIDEO_PREVIEW_LIMIT,
-    },
-    filesystem::{self, FileTypeInfo},
-};
+use crate::filesystem::{self, FileTypeInfo};
 
 use super::{doc, image, loaders, result};
 use super::{PreviewCancellation, PreviewOptions, PreviewResult, PreviewState, PreviewSupport};
@@ -122,7 +116,7 @@ fn extra_validation(
         });
     }
     if info.kind == "image" {
-        match image::dimensions(path, info.extension) {
+        match image::dimensions(path, &info.extension, info.max_pixels) {
             Ok(_) => {}
             Err(image::ImageValidationError::TooLarge) => {
                 return Err(PreviewFailure {
@@ -142,14 +136,7 @@ fn extra_validation(
 }
 
 fn limit_for(info: &FileTypeInfo) -> u64 {
-    match info.limit {
-        "text" => TEXT_PREVIEW_LIMIT,
-        "docx" | "xlsx" => OFFICE_PREVIEW_LIMIT,
-        "pdf" => PDF_PREVIEW_LIMIT,
-        "image" => IMAGE_PREVIEW_LIMIT,
-        "video" => VIDEO_PREVIEW_LIMIT,
-        _ => 0,
-    }
+    info.max_bytes
 }
 
 fn safe_kind(kind: &str) -> String {

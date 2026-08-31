@@ -1,6 +1,7 @@
 use tauri_build::{AppManifest, Attributes};
 
 fn main() {
+    println!("cargo:rerun-if-changed=../shared/file-types.json");
     let attributes = Attributes::new().app_manifest(AppManifest::new().commands(&[
         "load_file_index",
         "list_directory",

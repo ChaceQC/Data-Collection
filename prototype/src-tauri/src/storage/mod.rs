@@ -16,6 +16,8 @@ use thiserror::Error;
 use crate::filesystem::IndexEntry;
 
 pub(crate) mod floating_ball;
+#[cfg(not(test))]
+pub(crate) mod repository;
 pub(crate) mod settings;
 
 pub const INDEX_FORMAT_VERSION: u32 = 3;

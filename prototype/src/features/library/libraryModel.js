@@ -1,3 +1,9 @@
+import {
+  getExtension,
+  getFileKind,
+  getFileType,
+} from "../../lib/fileTypes.js";
+
 const COLLATOR = new Intl.Collator("zh-CN", {
   numeric: true,
   sensitivity: "base",
@@ -23,70 +29,12 @@ export function normalizeSearchQuery(value) {
     .toLocaleLowerCase("zh-CN");
 }
 
-export function getFileKind(fileName = "") {
-  const extension = getExtension(fileName);
-  if (["png", "jpg", "jpeg", "webp", "gif", "bmp"].includes(extension)) return "image";
-  if (["mp4", "webm"].includes(extension)) return "video";
-  if (extension === "doc") return "doc";
-  if (extension === "docx") return "docx";
-  if (["xls", "xlsx"].includes(extension)) return "xlsx";
-  if (extension === "pdf") return "pdf";
-  if (["md", "markdown"].includes(extension)) return "markdown";
-  if (["txt", "text"].includes(extension)) return "text";
-  if (
-    [
-      "js",
-      "jsx",
-      "ts",
-      "tsx",
-      "py",
-      "c",
-      "h",
-      "cc",
-      "cpp",
-      "cxx",
-      "hpp",
-      "rs",
-      "go",
-      "java",
-      "css",
-      "html",
-      "xml",
-      "yaml",
-      "yml",
-      "toml",
-      "ini",
-      "conf",
-      "sql",
-      "json",
-      "jsonl",
-    ].includes(extension)
-  ) {
-    return "text";
-  }
-  return "other";
-}
-
-export function getFileType(fileName, kind) {
-  if (kind === "folder") return "文件夹";
-  if (kind === "doc" || kind === "docx") return "Word 文档";
-  if (kind === "xlsx") return "Excel 工作簿";
-  if (kind === "pdf") return "PDF 文档";
-  if (kind === "image") return "图片";
-  if (kind === "video") return "视频";
-  if (kind === "markdown") return "Markdown";
-  if (kind === "text") return "文本文件";
-  return "其他文件";
-}
+export { getExtension, getFileKind, getFileType };
 
 export function getDisplayType(entry) {
   return entry?.type || entry?.fileType || getFileType(entry?.name, entry?.kind);
 }
 
-export function getExtension(fileName = "") {
-  const dotIndex = String(fileName).lastIndexOf(".");
-  return dotIndex >= 0 ? String(fileName).slice(dotIndex + 1).toLowerCase() : "";
-}
 
 export function matchesNavigation(entry, activeNav) {
   if (activeNav === "favorites") return Boolean(entry.favorite);

@@ -9,7 +9,7 @@ use std::{
 
 use uuid::Uuid;
 
-use crate::{config::PDF_PREVIEW_LIMIT, filesystem};
+use crate::filesystem;
 
 use super::PreviewCancellation;
 
@@ -168,8 +168,11 @@ pub(crate) fn convert_to_pdf(
         remove_temporary_directory(&temporary_directory);
         return Err(DocConversionError::Failed);
     }
-    if metadata.len() == 0 || metadata.len() > PDF_PREVIEW_LIMIT || !has_pdf_signature(&output_path)
-    {
+    let Some(pdf_limit) = filesystem::preview_limit_bytes("pdf") else {
+        remove_temporary_directory(&temporary_directory);
+        return Err(DocConversionError::Failed);
+    };
+    if metadata.len() == 0 || metadata.len() > pdf_limit || !has_pdf_signature(&output_path) {
         remove_temporary_directory(&temporary_directory);
         return Err(DocConversionError::OutputTooLarge);
     }

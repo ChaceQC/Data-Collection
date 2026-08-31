@@ -8,6 +8,7 @@
     "build": "vite build && node scripts/prepare-sites-build.mjs",
     "preview": "vite preview",
     "test:library": "node --test tests/library-model.test.mjs",
+    "test:contracts": "node --test tests/ipc-contracts.test.mjs tests/library-controller.test.mjs",
     "test:settings": "node --test tests/settings-model.test.mjs",
     "test:preview": "node --test tests/preview-registry.test.mjs tests/preview-security.test.mjs",
     "test:floating-ball": "node --test tests/floating-ball-*.test.mjs",
