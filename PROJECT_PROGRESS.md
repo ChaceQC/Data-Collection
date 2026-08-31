@@ -1,8 +1,8 @@
 # 项目进度
 
-## 2026-08-31
+## 2026-09-01
 
-### 阶段 A-J Windows 验收完成与 0.3.16 发布准备
+### 阶段 A-J Windows 验收完成与 0.3.16 发布完成
 
 #### 已完成
 
@@ -10,19 +10,18 @@
 - 根据用户对发布版本的确认，本次使用 `0.3.16` 作为 `v0.3.6` 后的最终阶段版本。计划表中的 `0.3.7`-`0.3.15` 保留为前置阶段规划编号，本次不连续创建这些版本的 Release。
 - 将前端 package、package-lock 根包、Tauri 配置、Rust crate、Cargo.lock 根包、根 README、原型 README 和本计划的当前状态统一切换到 `0.3.16` 发布口径；阶段 J 的质量门禁与发布验收纳入本次版本。
 
-#### 进行中
+#### 分支同步与发布
 
-- 当前分支已完成版本和文档同步；待按用户指定顺序将本分支并入 `dev`，再将 `dev` 合并入 `main`，推送分支并创建 `v0.3.16` Release。
+- 已按用户指定顺序完成 `codex/implement-phases-g-i` → `dev` → `main`：当前分支版本/文档提交为 `e9b543c`，合入 `dev` 的提交为 `0616d46`，合入 `main` 的提交为 `c986ba4`；两个分支均已推送到远端。
 
 #### 阻塞与风险
 
 - 阶段 J 的用户发布验收已完成；自动化质量门禁、依赖审计、安装包签名评估和 Release 依赖链仍按仓库实际能力记录，不将未执行的检查写成已执行。
 - 安装包未签名、目标机需要 WebView2、DOC 预览需要 LibreOffice、视频编码依赖 WebView2，以及 `xlsx@0.18.5` 的既有依赖风险保持不变。
 
-#### 下一步
+#### 后续维护
 
-- 完成版本一致性和文档检查后提交当前分支；将当前分支并入 `dev` 并推送，再将 `dev` 合并入 `main` 并推送。
-- 在 `main` 上推送 `v0.3.16` 标签，等待 Windows Release workflow 完成并核验 NSIS 安装包和便携 ZIP。
+- `v0.3.16` 已发布并完成资产核验；后续仅按需维护已知外部依赖边界、未签名安装包和计划外问题。
 
 #### 涉及文件
 
@@ -36,7 +35,11 @@
 - `git diff --check`：通过。
 - `npm.cmd run build`：通过；生成 `dist/client/index.html`、`dist/server/index.js` 和 `dist/.openai/hosting.json`，保留既有大 chunk 提示。
 - `cargo check --locked`：通过，Rust crate 使用锁定依赖并按 `0.3.16` 编译。
-- 分支同步和 Release workflow 结果在后续发布步骤补记。
+- 分支同步完成：`origin/dev` 指向 `0616d46`，`origin/main` 在发布 tag 时指向 `c986ba4`；`v0.3.16` tag 指向 `c986ba4`。
+- GitHub Actions workflow `33412380544`（`发布 Windows Release`）运行成功，版本校验、loader 预置、Windows x64 NSIS 构建、便携 ZIP 内容校验和 Release 上传步骤全部通过。
+- GitHub Release [`v0.3.16`](https://github.com/ChaceQC/Data-Collection/releases/tag/v0.3.16) 已公开发布，非草稿、非预发布，包含 `_0.3.16_x64-setup.exe`（`5174648` bytes，SHA-256 `9866df9907a847208bc3364444eba1a2681a7db5ed75f0cce9e43d8c28270c44`）和 `_0.3.16_x64-portable.zip`（`6440933` bytes，SHA-256 `34b6883eab41cc76bae2d8c2ecb3abf261b8b5399363128a3128bbc02cfcfe48`）。
+
+## 2026-08-31
 
 ### 筛选菜单自动关闭与 Windows 扩展路径显示修复
 
