@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   ArrowLeft,
+  ArrowClockwise,
   CaretDown,
   CaretLeft,
   CaretRight,
@@ -70,6 +71,9 @@ export function LibraryPanel({
   directoryView,
   directoryLoading,
   indexReady,
+  refreshing,
+  refreshError,
+  onRefresh,
   busyFileId,
   onRowClick,
   onRowKeyDown,
@@ -85,19 +89,21 @@ export function LibraryPanel({
 }) {
   const [currentPage, setCurrentPage] = useState(1);
   const sourceEntries = directoryView?.entries || files;
+  const directoryViewKey = directoryView?.trail?.map((folder) => folder.id).join("/") || "";
   const visibleFiles = useMemo(() => {
     const filtered = filterEntries(sourceEntries, {
       activeNav,
       query: searchQuery,
       directory: Boolean(directoryView),
     });
-    return sortEntries(filtered, sort);
+    const directorySort = sort.key === "addedAt" ? { key: "name", direction: "asc" } : sort;
+    return sortEntries(filtered, directoryView ? directorySort : sort);
   }, [activeNav, directoryView, searchQuery, sort, sourceEntries]);
   const page = useMemo(() => paginateEntries(visibleFiles, currentPage, pageSize), [currentPage, pageSize, visibleFiles]);
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [activeNav, directoryView, pageSize, searchQuery, sort]);
+  }, [activeNav, directoryViewKey, pageSize, searchQuery, sort]);
 
   useEffect(() => {
     if (selectedId && visibleFiles.some((file) => file.id === selectedId)) return;
@@ -121,7 +127,7 @@ export function LibraryPanel({
     </nav>
   ) : (
     <div>
-      <h2 id="recent-title">{activeNav === "library" ? "最近添加" : getNavigationLabel(activeNav)}</h2>
+      <h2 id="recent-title">{activeNav === "library" ? "资料库" : getNavigationLabel(activeNav)}</h2>
     </div>
   );
 
@@ -129,8 +135,24 @@ export function LibraryPanel({
     <section className="recent-section" aria-labelledby="recent-title" data-tauri-drag-region="false">
       <div className="section-heading-row">
         {heading}
-        <span className="result-count">共 {visibleFiles.length} 项</span>
+        <div className="section-heading-actions">
+          <span className="result-count">共 {visibleFiles.length} 项</span>
+          {onRefresh && (
+            <button
+              type="button"
+              className="icon-button"
+              aria-label="刷新索引"
+              title="刷新索引"
+              aria-busy={refreshing}
+              disabled={refreshing || !indexReady}
+              onClick={onRefresh}
+            >
+              <ArrowClockwise size={17} weight="bold" className={refreshing ? "is-spinning" : ""} />
+            </button>
+          )}
+        </div>
       </div>
+      {refreshError && <div className="inline-error" role="alert">{refreshError}</div>}
       <div className="library-toolbar">
         <label className="search-field">
           <MagnifyingGlass size={17} weight="regular" aria-hidden="true" />

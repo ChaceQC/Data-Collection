@@ -32,7 +32,11 @@ pub fn run() {
         })
         .manage(storage::AppState::default())
         .manage(storage::settings::SettingsState::default())
-        .manage(preview::PreviewState::default())
+        .manage({
+            let state = preview::PreviewState::default();
+            state.start_cleanup_task();
+            state
+        })
         .manage(windows::FloatingBallState::default())
         .manage(windows::lifecycle::LifecycleState::default())
         .manage(windows::tray::TrayState::default())
@@ -83,6 +87,10 @@ pub fn run() {
             commands::load_file_index,
             commands::list_directory,
             commands::index_paths,
+            commands::refresh_index,
+            commands::get_index_recovery,
+            commands::reset_index_recovery,
+            commands::export_index_diagnostic,
             commands::reposition_file,
             commands::floating_ball::record_floating_paths,
             commands::floating_ball::get_floating_recent,
@@ -106,7 +114,8 @@ pub fn run() {
             commands::window::exit_app,
             commands::can_preview,
             commands::load_preview,
-            commands::dispose_preview
+            commands::dispose_preview,
+            commands::cancel_preview_task,
         ])
         .build(tauri::generate_context!())
         .map(|app| {

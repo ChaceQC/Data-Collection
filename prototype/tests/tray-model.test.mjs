@@ -12,6 +12,7 @@ test("keeps the tray static menu order stable", () => {
   assert.deepEqual(TRAY_STATIC_MENU_IDS, [
     "tray-open-main",
     "tray-toggle-floating",
+    "tray-refresh-index",
     "tray-recent-tasks",
     "tray-open-settings",
     "tray-exit",

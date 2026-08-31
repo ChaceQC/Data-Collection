@@ -9,7 +9,7 @@ use crate::{
 };
 
 use super::{doc, image, loaders, result};
-use super::{PreviewOptions, PreviewResult, PreviewState, PreviewSupport};
+use super::{PreviewCancellation, PreviewOptions, PreviewResult, PreviewState, PreviewSupport};
 
 #[derive(Clone, Copy, Debug)]
 pub(super) struct PreviewFailure {
@@ -35,30 +35,48 @@ pub(crate) fn can_preview(raw_path: &str, requested_kind: &str) -> PreviewSuppor
     }
 }
 
+#[cfg(test)]
 pub(crate) fn load_preview(
     raw_path: &str,
     requested_kind: &str,
     options: PreviewOptions,
     state: &PreviewState,
 ) -> PreviewResult {
+    let cancellation = PreviewCancellation::never_cancelled();
+    load_preview_with_cancellation(raw_path, requested_kind, options, state, &cancellation)
+}
+
+pub(crate) fn load_preview_with_cancellation(
+    raw_path: &str,
+    requested_kind: &str,
+    options: PreviewOptions,
+    state: &PreviewState,
+    cancellation: &PreviewCancellation,
+) -> PreviewResult {
     let _ = (&options.page, &options.scale, &options.mode);
     let preview_id = super::resources::new_preview_id();
     let kind = safe_kind(requested_kind);
+    if cancellation.is_cancelled() {
+        return result::result_cancelled(preview_id, kind);
+    }
     let (path, metadata, info) = match inspect_file(raw_path, &kind) {
         Ok(value) => value,
         Err(failure) => return result::result_failure(preview_id, kind, failure),
     };
+    if cancellation.is_cancelled() {
+        return result::result_cancelled(preview_id, kind);
+    }
     if let Err(failure) = extra_validation(&path, &metadata, &info) {
         return result::result_failure(preview_id, kind, failure);
     }
 
     if info.kind == "text" || info.kind == "markdown" {
-        return loaders::load_text(preview_id, path, metadata.len(), info);
+        return loaders::load_text(preview_id, path, metadata.len(), info, cancellation);
     }
     if info.kind == "doc" {
-        return loaders::load_doc(preview_id, path, kind, state);
+        return loaders::load_doc(preview_id, path, kind, state, cancellation);
     }
-    loaders::load_resource(preview_id, path, metadata.len(), info, state)
+    loaders::load_resource(preview_id, path, metadata.len(), info, state, cancellation)
 }
 
 pub(super) fn dispose_preview(state: &PreviewState, preview_id: &str) {

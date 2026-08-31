@@ -54,8 +54,12 @@ const ALLOWED_TAGS = [
 ];
 const ALLOWED_ATTRIBUTES = ["alt", "class", "colspan", "height", "href", "id", "rel", "rowspan", "src", "start", "title", "width"];
 
-function isLocalReference(value) {
-  return value.startsWith("#") || value.startsWith("/") || value.startsWith("./") || value.startsWith("../");
+export function isSafeLocalReference(value) {
+  const normalized = String(value || "").trim();
+  if (!normalized || normalized.includes("\\") || normalized.startsWith("/")) return false;
+  if (normalized.startsWith("#")) return true;
+  if (/^[a-z][a-z\d+.-]*:/i.test(normalized) || normalized.startsWith("//")) return false;
+  return true;
 }
 
 function isEmbeddedImage(value) {
@@ -70,7 +74,7 @@ function sanitizeHtml(html, { allowEmbeddedImages = false } = {}) {
       data.keepAttr = false;
       return;
     }
-    if (attributeName === "href" && !isLocalReference(attributeValue)) {
+    if (attributeName === "href" && !isSafeLocalReference(attributeValue)) {
       data.keepAttr = false;
       return;
     }

@@ -183,6 +183,12 @@
           "markdownDescription": "Enables the can_preview command without any pre-configured scope."
         },
         {
+          "description": "Enables the cancel_preview_task command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-cancel-preview-task",
+          "markdownDescription": "Enables the cancel_preview_task command without any pre-configured scope."
+        },
+        {
           "description": "Enables the copy_indexed_file command without any pre-configured scope.",
           "type": "string",
           "const": "allow-copy-indexed-file",
@@ -207,6 +213,12 @@
           "markdownDescription": "Enables the exit_app command without any pre-configured scope."
         },
         {
+          "description": "Enables the export_index_diagnostic command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-export-index-diagnostic",
+          "markdownDescription": "Enables the export_index_diagnostic command without any pre-configured scope."
+        },
+        {
           "description": "Enables the floating_window_status command without any pre-configured scope.",
           "type": "string",
           "const": "allow-floating-window-status",
@@ -217,6 +229,12 @@
           "type": "string",
           "const": "allow-get-floating-recent",
           "markdownDescription": "Enables the get_floating_recent command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_index_recovery command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-index-recovery",
+          "markdownDescription": "Enables the get_index_recovery command without any pre-configured scope."
         },
         {
           "description": "Enables the index_paths command without any pre-configured scope.",
@@ -273,6 +291,12 @@
           "markdownDescription": "Enables the record_floating_paths command without any pre-configured scope."
         },
         {
+          "description": "Enables the refresh_index command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-refresh-index",
+          "markdownDescription": "Enables the refresh_index command without any pre-configured scope."
+        },
+        {
           "description": "Enables the remove_index_entry command without any pre-configured scope.",
           "type": "string",
           "const": "allow-remove-index-entry",
@@ -289,6 +313,12 @@
           "type": "string",
           "const": "allow-reposition-file",
           "markdownDescription": "Enables the reposition_file command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the reset_index_recovery command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-reset-index-recovery",
+          "markdownDescription": "Enables the reset_index_recovery command without any pre-configured scope."
         },
         {
           "description": "Enables the retry_floating_ball command without any pre-configured scope.",
@@ -345,6 +375,12 @@
           "markdownDescription": "Denies the can_preview command."
         },
         {
+          "description": "Denies the cancel_preview_task command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-cancel-preview-task",
+          "markdownDescription": "Denies the cancel_preview_task command without any pre-configured scope."
+        },
+        {
           "description": "Denies the copy_indexed_file command without any pre-configured scope.",
           "type": "string",
           "const": "deny-copy-indexed-file",
@@ -369,6 +405,12 @@
           "markdownDescription": "Denies the exit_app command without any pre-configured scope."
         },
         {
+          "description": "Denies the export_index_diagnostic command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-export-index-diagnostic",
+          "markdownDescription": "Denies the export_index_diagnostic command without any pre-configured scope."
+        },
+        {
           "description": "Denies the floating_window_status command without any pre-configured scope.",
           "type": "string",
           "const": "deny-floating-window-status",
@@ -379,6 +421,12 @@
           "type": "string",
           "const": "deny-get-floating-recent",
           "markdownDescription": "Denies the get_floating_recent command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_index_recovery command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-index-recovery",
+          "markdownDescription": "Denies the get_index_recovery command without any pre-configured scope."
         },
         {
           "description": "Denies the index_paths command without any pre-configured scope.",
@@ -435,6 +483,12 @@
           "markdownDescription": "Denies the record_floating_paths command without any pre-configured scope."
         },
         {
+          "description": "Denies the refresh_index command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-refresh-index",
+          "markdownDescription": "Denies the refresh_index command without any pre-configured scope."
+        },
+        {
           "description": "Denies the remove_index_entry command without any pre-configured scope.",
           "type": "string",
           "const": "deny-remove-index-entry",
@@ -451,6 +505,12 @@
           "type": "string",
           "const": "deny-reposition-file",
           "markdownDescription": "Denies the reposition_file command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the reset_index_recovery command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-reset-index-recovery",
+          "markdownDescription": "Denies the reset_index_recovery command without any pre-configured scope."
         },
         {
           "description": "Denies the retry_floating_ball command without any pre-configured scope.",

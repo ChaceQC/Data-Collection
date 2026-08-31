@@ -8,10 +8,11 @@ export function OfficePreviewer({ content }) {
 
   useEffect(() => {
     let cancelled = false;
+    const controller = new AbortController();
     setState({ status: "loading", html: "", warningCount: 0, reason: "" });
     async function convert() {
       try {
-        const response = await fetch(normalizePreviewResourceUrl(content.resourceUrl));
+        const response = await fetch(normalizePreviewResourceUrl(content.resourceUrl), { signal: controller.signal });
         if (!response.ok) throw new Error("resource unavailable");
         const arrayBuffer = await response.arrayBuffer();
         const result = await mammoth.convertToHtml({ arrayBuffer });
@@ -35,6 +36,7 @@ export function OfficePreviewer({ content }) {
     void convert();
     return () => {
       cancelled = true;
+      controller.abort();
     };
   }, [content.resourceUrl]);
 

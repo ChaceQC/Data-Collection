@@ -13,13 +13,29 @@ export function canUsePreviewRuntime() {
   return isTauri();
 }
 
+export function getPreviewTarget(entry) {
+  if (entry?.directoryId && Array.isArray(entry.relativePath)) {
+    return {
+      directoryId: entry.directoryId,
+      relativePath: entry.relativePath,
+    };
+  }
+  return { fileId: entry?.id || "" };
+}
+
+export function listDirectory(directoryId, relativePath = []) {
+  return invoke("list_directory", {
+    target: { directoryId, relativePath },
+  });
+}
+
 export async function canPreview(entry) {
-  if (!canUsePreviewRuntime() || !entry?.path) return browserPreviewState(entry);
-  return invoke("can_preview", { path: entry.path, kind: entry.kind });
+  if (!canUsePreviewRuntime() || !entry?.id) return browserPreviewState(entry);
+  return invoke("can_preview", { target: getPreviewTarget(entry), kind: entry.kind });
 }
 
 export async function loadPreview(entry, options = {}) {
-  if (!canUsePreviewRuntime() || !entry?.path) {
+  if (!canUsePreviewRuntime() || !entry?.id) {
     return {
       previewId: "",
       kind: entry?.kind || "other",
@@ -30,10 +46,20 @@ export async function loadPreview(entry, options = {}) {
     };
   }
   return invoke("load_preview", {
-    path: entry.path,
+    target: getPreviewTarget(entry),
     kind: entry.kind,
     options,
   });
+}
+
+export function createPreviewTaskId() {
+  if (globalThis.crypto?.randomUUID) return `preview-task-${globalThis.crypto.randomUUID()}`;
+  return `preview-task-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+export function cancelPreviewTask(taskId) {
+  if (!canUsePreviewRuntime() || !taskId) return Promise.resolve();
+  return invoke("cancel_preview_task", { taskId });
 }
 
 export function disposePreview(previewId) {

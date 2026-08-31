@@ -1,5 +1,74 @@
 # 项目进度
 
+## 2026-08-31
+
+### 新总体计划阶段 A-D 代码实现
+
+#### 已完成
+
+- 在独立分支 `codex/implement-phases-a-d`（基线 HEAD `86b20ae`）完成 `PROJECT_PLAN.md` 阶段 A-D 的代码级实现；保留用户已有的未提交计划改动，没有执行 commit、merge、push、tag 或 Release。
+- 阶段 A：`can_preview`、`load_preview` 改用 `fileId` 或“登记文件夹 ID + 相对路径片段”，`list_directory` 后端重新校验登记归属、规范化路径、普通文件/文件夹、符号链接和 Windows reparse point；Markdown 链接 sanitizer 拒绝网络协议、绝对路径、协议相对 URL 和反斜杠变体。
+- 阶段 B：索引状态增加单调 `revision`，新增 `refresh_index` 和托盘刷新入口；主窗口使用 single-flight/revision 丢弃旧响应，刷新时保留选择、目录面包屑、页码和滚动容器；“最近添加”按持久化 `addedAt` 限制最近 50 条，目录视图不再按临时添加时间排序。
+- 阶段 C：索引加载增加字段、类型、状态、时间、ID 和路径结构校验，重复 ID/路径按稳定顺序合并；损坏、未知版本和迁移写入失败会先备份并进入可操作恢复状态；设置损坏会备份并写回安全默认值；删除原文件增加 `pending-operations.json` 待同步记录，库操作错误返回结构化类别和文件状态。
+- 阶段 D：增加 Rust 预览任务取消注册表和退出清理；DOC 使用隔离 LibreOffice profile、输出 PDF 签名/大小校验和取消清理；Office ZIP 增加 `zip` 容器条目/解压后体积限制；XLSX Worker 按工作表惰性解析并限制首屏/单元格；PDF 增加页数、页面尺寸和 canvas 像素上限，图片/视频旧媒体事件通过稳定节点和资源切换隔离，预览资源按活动时间定时回收。
+- 同步根 README、`prototype/README.md`、阶段清单和前端/ Rust 测试夹具；实际版本入口仍为 `0.3.6`，没有把 `0.3.7`-`0.3.10` 候选写入构建配置。
+
+#### 进行中
+
+- 等待用户在 Windows 11 Tauri 开发版完成阶段 A-D 手工验收，然后按阶段决定是否分别提升到 `0.3.7`、`0.3.8`、`0.3.9`、`0.3.10`；当前不能把自动测试当作桌面验收。
+
+#### 阻塞与风险
+
+- 本轮未代替用户完成真实 Windows 11 桌面验收；目录/预览授权的中文、空格、深层路径，外部移动/删除后的刷新，索引损坏恢复，重命名/回收站部分成功，DOC 转换取消，XLSX/PDF 大文件和托盘/悬浮球跨窗口同步仍需用户执行。
+- `xlsx@0.18.5` 的既有 Prototype Pollution/ReDoS 风险仍在；当前通过 Rust Office ZIP 边界、Worker 惰性解析、单元格/超时限制降低暴露面，未宣称依赖风险消失。
+- DOC 仍依赖用户本机 LibreOffice，WebView2 Runtime 仍由目标机提供，安装包仍未签名；本轮没有执行 Release 发布流程。
+
+#### 下一步
+
+- 用户使用当前分支启动 `npm.cmd run tauri:dev`，按 `PROJECT_PLAN.md` 阶段 A-D 完成真实文件和窗口验收，记录失败项的文件类型、路径形态、显示器/DPI 和复现步骤。
+- 收到验收结果后，先修复阻断项并重新执行对应阶段最小验证；只有阶段门禁和版本入口一致后，才在明确授权下更新候选版本或执行 Git 发布流程。
+
+#### 涉及文件
+
+- `prototype/src-tauri/src/commands/`、`prototype/src-tauri/src/filesystem/`、`prototype/src-tauri/src/storage/`
+- `prototype/src-tauri/src/preview/`、`prototype/src-tauri/src/windows/tray.rs`、`prototype/src-tauri/src/windows/tray_model.rs`
+- `prototype/src/App.jsx`、`prototype/src/features/library/`、`prototype/src/features/preview/`、`prototype/src/features/floating-ball/`
+- `prototype/tests/preview-security.test.mjs`、`prototype/tests/library-model.test.mjs`、`prototype/tests/tray-model.test.mjs`
+- `PROJECT_PLAN.md`、`README.md`、`prototype/README.md`、`prototype/package.json`、`prototype/src-tauri/Cargo.toml`、`prototype/src-tauri/Cargo.lock`
+
+#### 验证
+
+- `cargo fmt --check`：通过。
+- `cargo check`：通过。
+- `cargo check --tests`：通过。
+- `cargo test`：54 项通过，包含 Deflate 压缩 DOCX 容器回归测试。
+- `cargo clippy --all-targets --all-features -- -D warnings`：通过。
+- `npm.cmd run build`：通过，并生成 Sites 所需的 `dist/client/index.html`、`dist/server/index.js` 和 `dist/.openai/hosting.json`。
+- `npm.cmd run test:preview`：6 项通过，包含 Markdown 链接安全边界测试。
+- 其他前端针对性测试通过：`test:library` 6 项、`test:settings` 4 项、`test:floating-ball` 17 项、`test:tray` 3 项、`test:sites` 4 项。
+- `npm.cmd run tauri:build`：通过，生成 `prototype/src-tauri/target/release/bundle/nsis/本地资料工作台_0.3.6_x64-setup.exe`；安装器大小 `7021782` bytes，SHA-256 为 `91003AAD2C88804087C1B0D689424C22712BBE8B9055B83F8CFD8AAD290B0850`。
+- 构建后的 `WebView2Loader.dll` 校验通过：`160320` bytes，SHA-256 为 `8427b1fc58ec707813e5c0a51eb5d69397bb333250a7b891be4d3b123f1e0f1c`，与 `local-material-workbench.exe` 位于同一 release 目录。
+- 当前未执行 Windows 11 手工验收、commit、远程推送、tag 或 Release。
+
+### ACL 权限修复与安装包重建
+
+#### 已完成
+
+- 修复 `refresh_index` 已注册但未进入 Tauri command manifest/capability 的问题；同步 `src-tauri/build.rs`、`capabilities/default.json` 和自动生成的 ACL schema/permission 文件。
+- 同步主窗口实际使用的 `dialog:allow-save` 和 `allow-cancel-preview-task` 权限，避免索引诊断导出和预览取消在安装包中再次被 ACL 拦截。
+- 修复 `zip` 依赖缺少 `deflate` feature 导致合法 DOCX 被 Rust Office ZIP 预检判为 `UnsupportedArchive` 的问题，并保留 Deflate DOCX 容器回归测试。
+- `mammoth@1.12.2` 自带 `single-paragraph.docx` 和 `strict-format.docx` 夹具均可直接转换；仓库没有用户 DOCX 测试样本，因此未读取用户真实文档。
+
+#### 进行中
+
+- 等待用户安装最新 `0.3.6` 包后复测截图中的刷新按钮和 DOCX 预览；若仍失败，请记录预览状态文案和文件是否为普通 DOCX/加密文档/超限文件。
+
+#### 验证
+
+- `npm.cmd run tauri:build`：通过，生成 `prototype/src-tauri/target/release/bundle/nsis/本地资料工作台_0.3.6_x64-setup.exe`；安装器大小 `7027983` bytes，SHA-256 为 `55932E545FBE50F31C37077C06205E0811C3233BC182EC2B3BE69F81DD1B4E81`。
+- `verify-webview2-loader`：通过；`WebView2Loader.dll` 为 `160320` bytes，x64，和 release 主程序位于同一目录。
+- `git diff --check`：通过；构建产物仍被 `.gitignore` 忽略，没有执行 commit、push、tag 或 Release。
+
 ## 2026-08-30
 
 ### 悬浮球拖动后无法展开与收起闪烁修复

@@ -13,6 +13,7 @@ export const SORT_OPTIONS = Object.freeze([
 ]);
 
 export const DEFAULT_SORT = Object.freeze({ key: "addedAt", direction: "desc" });
+export const RECENT_ENTRY_LIMIT = 50;
 
 export function normalizeSearchQuery(value) {
   return String(value || "")
@@ -95,12 +96,14 @@ export function matchesNavigation(entry, activeNav) {
 }
 
 export function getNavigationCount(entries, activeNav) {
+  if (activeNav === "recent") return getRecentEntries(entries).length;
   return entries.filter((entry) => matchesNavigation(entry, activeNav)).length;
 }
 
 export function filterEntries(entries, { activeNav = "library", query = "", directory = false } = {}) {
   const normalizedQuery = normalizeSearchQuery(query);
-  return entries.filter((entry) => {
+  const sourceEntries = !directory && activeNav === "recent" ? getRecentEntries(entries) : entries;
+  return sourceEntries.filter((entry) => {
     const matchesNav = directory || activeNav === "library" || matchesNavigation(entry, activeNav);
     if (!matchesNav) return false;
     if (!normalizedQuery) return true;
@@ -114,6 +117,16 @@ export function filterEntries(entries, { activeNav = "library", query = "", dire
       .join(" ");
     return normalizedQuery.split(" ").every((token) => token && searchable.includes(token));
   });
+}
+
+export function getRecentEntries(entries) {
+  return entries
+    .filter((entry) => Number.isFinite(entry.addedAt) && entry.addedAt > 0 && !entry.invalid)
+    .sort((left, right) => (
+      Number(right.addedAt) - Number(left.addedAt)
+      || COLLATOR.compare(String(left.id || ""), String(right.id || ""))
+    ))
+    .slice(0, RECENT_ENTRY_LIMIT);
 }
 
 export function sortEntries(entries, { key = DEFAULT_SORT.key, direction = DEFAULT_SORT.direction } = {}) {

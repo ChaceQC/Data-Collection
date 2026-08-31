@@ -43,6 +43,7 @@ export function FloatingBallWindow() {
   const openWindowRef = useRef(null);
   const closeWindowRef = useRef(null);
   const hoverErrorRef = useRef(null);
+  const latestRevisionRef = useRef(0);
 
   if (!controllerRef.current) {
     controllerRef.current = createFloatingBallHoverController({
@@ -108,7 +109,12 @@ export function FloatingBallWindow() {
       nearRef.current = Boolean(event.payload);
       hoverController.nearChanged(nearRef.current);
     }));
-    register(listenFloatingEvent("index-changed", () => void records.refreshRecent()));
+    register(listenFloatingEvent("index-changed", (event) => {
+      const revision = Number(event.payload?.revision || 0);
+      if (revision <= latestRevisionRef.current) return;
+      latestRevisionRef.current = revision;
+      void records.refreshRecent();
+    }));
     return () => {
       disposed = true;
       unlisten.forEach((stop) => stop());
@@ -158,7 +164,8 @@ export function FloatingBallWindow() {
       if (!await hoverController.explicitClose()) return;
       await openMainFromFloating(entry.id);
     } catch (error) {
-      showFeedback(typeof error === "string" ? error : "主窗口无法打开该资料", "error");
+      const message = typeof error === "string" ? error : error?.message;
+      showFeedback(typeof message === "string" && message.length <= 180 ? message : "主窗口无法打开该资料", "error");
     }
   }
 

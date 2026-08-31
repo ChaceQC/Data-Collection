@@ -9,7 +9,7 @@
     "preview": "vite preview",
     "test:library": "node --test tests/library-model.test.mjs",
     "test:settings": "node --test tests/settings-model.test.mjs",
-    "test:preview": "node --test tests/preview-registry.test.mjs",
+    "test:preview": "node --test tests/preview-registry.test.mjs tests/preview-security.test.mjs",
     "test:floating-ball": "node --test tests/floating-ball-*.test.mjs",
     "test:tray": "node --test tests/tray-model.test.mjs",
     "test:sites": "node --test tests/sites-worker.test.mjs",

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { normalizePreviewResourceUrl } from "./previewTypes";
 
 function columnLabel(index) {
@@ -15,74 +15,99 @@ function columnLabel(index) {
 export function SpreadsheetPreviewer({ content }) {
   const [state, setState] = useState({ status: "loading", workbook: null, reason: "" });
   const [selectedSheet, setSelectedSheet] = useState(0);
+  const workerRef = useRef(null);
+  const selectedSheetRef = useRef(0);
+  const requestIdRef = useRef(0);
+  const sheetTimeoutRef = useRef(null);
+
+  selectedSheetRef.current = selectedSheet;
 
   useEffect(() => {
     let cancelled = false;
     const controller = new AbortController();
     let worker;
+    let workerTimeout;
+
+    function setFailure(reason) {
+      if (cancelled) return;
+      setState({ status: "parse-error", workbook: null, reason });
+    }
+
+    function resetTimeout() {
+      window.clearTimeout(workerTimeout);
+      workerTimeout = window.setTimeout(() => {
+        worker?.terminate();
+        setFailure("工作簿解析超时，已终止解析任务。");
+      }, 30000);
+    }
+
     try {
       worker = new Worker(new URL("./xlsxWorker.js", import.meta.url), { type: "module" });
+      workerRef.current = worker;
     } catch {
-      setState({
-        status: "parse-error",
-        workbook: null,
-        reason: "当前 WebView2 无法启动工作簿解析器。",
-      });
+      setFailure("当前 WebView2 无法启动工作簿解析器。");
       return () => controller.abort();
     }
-    const workerTimeout = window.setTimeout(() => {
-      worker.terminate();
-      if (!cancelled) {
-        setState({
-          status: "parse-error",
-          workbook: null,
-          reason: "工作簿解析超时，已终止解析任务。",
-        });
-      }
-    }, 30000);
     setState({ status: "loading", workbook: null, reason: "" });
     setSelectedSheet(0);
+    requestIdRef.current = 0;
+    resetTimeout();
     async function loadWorkbook() {
       try {
         const response = await fetch(normalizePreviewResourceUrl(content.resourceUrl), { signal: controller.signal });
         if (!response.ok) throw new Error("resource unavailable");
         const arrayBuffer = await response.arrayBuffer();
-        worker.postMessage(arrayBuffer, [arrayBuffer]);
+        worker.postMessage({ type: "load", buffer: arrayBuffer, requestId: 0 }, [arrayBuffer]);
       } catch (error) {
         if (cancelled || error?.name === "AbortError") return;
         window.clearTimeout(workerTimeout);
         worker.terminate();
-        setState({
-          status: "parse-error",
-          workbook: null,
-          reason: error?.message === "resource unavailable"
-            ? "工作簿资源读取失败，请重试。"
-            : "工作簿无法解析，请检查文件是否损坏、加密或超出限制。",
-        });
+        setFailure(error?.message === "resource unavailable"
+          ? "工作簿资源读取失败，请重试。"
+          : "工作簿无法解析，请检查文件是否损坏、加密或超出限制。");
       }
     }
     worker.onmessage = (event) => {
       if (cancelled) return;
-      window.clearTimeout(workerTimeout);
-      if (event.data.type === "ready") {
-        setState({ status: "ready", workbook: event.data.workbook, reason: "" });
-      } else {
+      if (event.data.type === "metadata") {
+        resetTimeout();
+        if (!event.data.sheetNames.length) window.clearTimeout(workerTimeout);
         setState({
-          status: "parse-error",
-          workbook: null,
-          reason: "工作簿无法解析，请检查文件是否损坏、加密或超出限制。",
+          status: event.data.sheetNames.length ? "loading" : "ready",
+          workbook: {
+            sheets: event.data.sheetNames.map((name) => ({ name, rows: [], columns: 0, startColumn: 0, truncated: false })),
+            truncatedSheets: Boolean(event.data.truncatedSheets),
+          },
+          reason: "",
         });
+      } else if (event.data.type === "sheet"
+        && event.data.requestId === requestIdRef.current
+        && event.data.index === selectedSheetRef.current) {
+        window.clearTimeout(workerTimeout);
+        window.clearTimeout(sheetTimeoutRef.current);
+        setState((current) => ({
+          status: "ready",
+          workbook: current.workbook
+            ? {
+              ...current.workbook,
+              sheets: current.workbook.sheets.map((sheet, index) => (
+                index === event.data.index ? event.data.sheet : sheet
+              )),
+            }
+            : current.workbook,
+          reason: "",
+        }));
+      } else if (event.data.type === "error") {
+        window.clearTimeout(workerTimeout);
+        worker.terminate();
+        setFailure("工作簿无法解析，请检查文件是否损坏、加密或超出限制。");
       }
     };
     worker.onerror = () => {
       if (!cancelled) {
         window.clearTimeout(workerTimeout);
         worker.terminate();
-        setState({
-          status: "parse-error",
-          workbook: null,
-          reason: "工作簿解析器未能完成，请重试。",
-        });
+        setFailure("工作簿解析器未能完成，请重试。");
       }
     };
     void loadWorkbook();
@@ -91,8 +116,25 @@ export function SpreadsheetPreviewer({ content }) {
       window.clearTimeout(workerTimeout);
       controller.abort();
       worker.terminate();
+      if (workerRef.current === worker) workerRef.current = null;
     };
   }, [content.resourceUrl]);
+
+  useEffect(() => {
+    if (!workerRef.current || !state.workbook?.sheets?.length) return;
+    const requestId = requestIdRef.current + 1;
+    requestIdRef.current = requestId;
+    const worker = workerRef.current;
+    setState((current) => ({ ...current, status: "loading" }));
+    window.clearTimeout(sheetTimeoutRef.current);
+    sheetTimeoutRef.current = window.setTimeout(() => {
+      if (requestIdRef.current !== requestId) return;
+      worker.terminate();
+      setState({ status: "parse-error", workbook: null, reason: "工作表解析超时，已终止解析任务。" });
+    }, 30000);
+    worker.postMessage({ type: "load-sheet", index: selectedSheet, requestId });
+    return () => window.clearTimeout(sheetTimeoutRef.current);
+  }, [selectedSheet, state.workbook?.sheets?.length]);
 
   const currentSheet = useMemo(
     () => state.workbook?.sheets[selectedSheet] || null,

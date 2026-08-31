@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-export-index-diagnostic"
+description = "Enables the export_index_diagnostic command without any pre-configured scope."
+commands.allow = ["export_index_diagnostic"]
+
+[[permission]]
+identifier = "deny-export-index-diagnostic"
+description = "Denies the export_index_diagnostic command without any pre-configured scope."
+commands.deny = ["export_index_diagnostic"]

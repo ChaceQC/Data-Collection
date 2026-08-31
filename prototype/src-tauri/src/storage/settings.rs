@@ -3,6 +3,7 @@ use std::{
     io::Write,
     path::{Path, PathBuf},
     sync::Mutex,
+    time::{SystemTime, UNIX_EPOCH},
 };
 
 use atomic_write_file::AtomicWriteFile;
@@ -61,6 +62,7 @@ pub struct AppSettings {
     pub hide_to_tray: bool,
     pub show_floating_window: bool,
     pub preview_limits: Vec<PreviewLimitView>,
+    pub warning: Option<String>,
 }
 
 #[derive(Debug, Error)]
@@ -120,6 +122,7 @@ pub struct SettingsState {
     settings_path: Mutex<Option<PathBuf>>,
     settings: Mutex<PersistedSettings>,
     mutation_lock: Mutex<()>,
+    warning: Mutex<Option<String>>,
 }
 
 impl SettingsState {
@@ -127,12 +130,14 @@ impl SettingsState {
         let parent = settings_path.parent().ok_or(SettingsError::DataDirectory)?;
         fs::create_dir_all(parent).map_err(|_| SettingsError::DataDirectory)?;
 
+        let mut warning = None;
         let settings = if settings_path.exists() {
             match read_settings(&settings_path) {
                 Ok(read_result) => {
-                    if read_result.needs_migration {
-                        // 迁移失败时保留旧文件和内存快照，避免启动失败或半写文档。
-                        let _ = save_settings(&settings_path, &read_result.settings);
+                    if read_result.needs_migration
+                        && save_settings(&settings_path, &read_result.settings).is_err()
+                    {
+                        warning = Some("设置已迁移到当前格式，但修复文件未写入".to_string());
                     }
                     read_result.settings
                 }
@@ -140,8 +145,25 @@ impl SettingsState {
                     SettingsError::Corrupt
                     | SettingsError::UnsupportedVersion
                     | SettingsError::InvalidValue,
-                ) => PersistedSettings::default(),
-                Err(error) => return Err(error),
+                ) => {
+                    let backup_created = backup_settings_file(&settings_path);
+                    let settings = PersistedSettings::default();
+                    let repaired = save_settings(&settings_path, &settings).is_ok();
+                    warning = Some(if repaired {
+                        if backup_created {
+                            "设置文件损坏，已备份并使用默认设置".to_string()
+                        } else {
+                            "设置文件损坏，已使用默认设置".to_string()
+                        }
+                    } else {
+                        "设置文件损坏，已使用默认设置；修复文件未写入".to_string()
+                    });
+                    settings
+                }
+                Err(_) => {
+                    warning = Some("设置文件无法读取，已使用默认设置".to_string());
+                    PersistedSettings::default()
+                }
             }
         } else {
             let settings = PersistedSettings::default();
@@ -154,6 +176,7 @@ impl SettingsState {
             .lock()
             .map_err(|_| SettingsError::State)? = Some(settings_path);
         *self.settings.lock().map_err(|_| SettingsError::State)? = settings;
+        *self.warning.lock().map_err(|_| SettingsError::State)? = warning;
         Ok(())
     }
 
@@ -161,7 +184,14 @@ impl SettingsState {
         self.settings
             .lock()
             .map_err(|_| SettingsError::State)
-            .map(|settings| AppSettings::from_persisted(&settings))
+            .and_then(|settings| {
+                let warning = self
+                    .warning
+                    .lock()
+                    .map_err(|_| SettingsError::State)?
+                    .clone();
+                Ok(AppSettings::from_persisted(&settings, warning))
+            })
     }
 
     pub fn update(&self, update: SettingsUpdate) -> Result<AppSettings, SettingsError> {
@@ -179,12 +209,13 @@ impl SettingsState {
 
         save_settings(&settings_path, &next)?;
         *self.settings.lock().map_err(|_| SettingsError::State)? = next.clone();
-        Ok(AppSettings::from_persisted(&next))
+        *self.warning.lock().map_err(|_| SettingsError::State)? = None;
+        Ok(AppSettings::from_persisted(&next, None))
     }
 }
 
 impl AppSettings {
-    fn from_persisted(settings: &PersistedSettings) -> Self {
+    fn from_persisted(settings: &PersistedSettings, warning: Option<String>) -> Self {
         Self {
             default_sort: settings.default_sort.clone(),
             page_size: settings.page_size,
@@ -199,6 +230,7 @@ impl AppSettings {
                     max_pixels: limit.max_pixels,
                 })
                 .collect(),
+            warning,
         }
     }
 }
@@ -240,6 +272,33 @@ fn save_settings(path: &Path, settings: &PersistedSettings) -> Result<(), Settin
         .write_all(&encoded)
         .map_err(|_| SettingsError::Write)?;
     file.commit().map_err(|_| SettingsError::Write)
+}
+
+fn backup_settings_file(path: &Path) -> bool {
+    let Ok(metadata) = fs::symlink_metadata(path) else {
+        return false;
+    };
+    if crate::filesystem::is_unsafe_metadata(&metadata) || !metadata.is_file() {
+        return false;
+    }
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or_default();
+    for attempt in 0..3_u32 {
+        let backup = path.with_file_name(format!(
+            "{}.recovery-{}-{}.bak",
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("settings"),
+            timestamp,
+            attempt
+        ));
+        if !backup.exists() && fs::copy(path, backup).is_ok() {
+            return true;
+        }
+    }
+    false
 }
 
 fn validate_update(update: SettingsUpdate) -> Result<PersistedSettings, SettingsError> {
@@ -302,7 +361,7 @@ mod tests {
     }
 
     #[test]
-    fn falls_back_from_corrupt_settings_without_overwriting_the_file() {
+    fn repairs_corrupt_settings_after_preserving_a_backup() {
         let path = unique_path("settings-corrupt.json");
         fs::write(&path, b"not-json").expect("corrupt settings should be written");
         let state = SettingsState::default();
@@ -314,9 +373,23 @@ mod tests {
             state.snapshot().expect("settings should read").page_size,
             DEFAULT_PAGE_SIZE
         );
-        assert_eq!(
-            fs::read(&path).expect("settings should remain"),
-            b"not-json"
+        assert!(state
+            .snapshot()
+            .expect("settings should read")
+            .warning
+            .is_some());
+        let repaired: serde_json::Value =
+            serde_json::from_slice(&fs::read(&path).expect("repaired settings should remain"))
+                .expect("repaired settings should be JSON");
+        assert_eq!(repaired["version"], SETTINGS_FORMAT_VERSION);
+        assert!(
+            fs::read_dir(path.parent().expect("settings parent should exist"))
+                .expect("settings parent should be readable")
+                .flatten()
+                .any(|entry| entry
+                    .file_name()
+                    .to_string_lossy()
+                    .contains("settings-corrupt.json.recovery-"))
         );
         cleanup(path);
     }
@@ -416,7 +489,7 @@ mod tests {
     }
 
     #[test]
-    fn rejects_non_boolean_v2_flags_without_overwriting_the_file() {
+    fn repairs_non_boolean_v2_flags_after_preserving_a_backup() {
         let path = unique_path("settings-invalid-boolean.json");
         let invalid = br#"{"version":2,"settings":{"hideToTray":"yes","showFloatingWindow":true}}"#;
         fs::write(&path, invalid).expect("invalid settings should be written");
@@ -426,7 +499,15 @@ mod tests {
             .initialize(path.clone())
             .expect("settings should recover");
         assert!(!state.snapshot().expect("settings should read").hide_to_tray);
-        assert_eq!(fs::read(&path).expect("settings should remain"), invalid);
+        let repaired: serde_json::Value =
+            serde_json::from_slice(&fs::read(&path).expect("repaired settings should exist"))
+                .expect("repaired settings should be JSON");
+        assert_eq!(repaired["version"], SETTINGS_FORMAT_VERSION);
+        assert!(state
+            .snapshot()
+            .expect("settings should read")
+            .warning
+            .is_some());
         cleanup(path);
     }
 

@@ -45,9 +45,10 @@ export function ImagePreviewer({ content }) {
         {status === "loading" && <div className="preview-loading-state">正在加载图片...</div>}
         {status === "parse-error" && <div className="preview-error-state">图片无法显示，请检查文件是否损坏。</div>}
         <img
+          key={content.resourceUrl}
           className={`preview-image ${mode === "fit" ? "is-fit" : "is-free"} ${status === "ready" ? "" : "is-hidden"}`}
           src={normalizePreviewResourceUrl(content.resourceUrl)}
-          alt=""
+          alt="预览图片"
           onLoad={() => setStatus("ready")}
           onError={() => setStatus("parse-error")}
           style={{

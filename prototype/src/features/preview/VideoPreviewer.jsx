@@ -20,6 +20,7 @@ export function VideoPreviewer({ content }) {
   return (
     <div className="preview-video-content">
       <video
+        key={content.resourceUrl}
         className="preview-video"
         controls
         playsInline

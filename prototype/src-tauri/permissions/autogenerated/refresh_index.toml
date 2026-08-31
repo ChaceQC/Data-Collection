@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-refresh-index"
+description = "Enables the refresh_index command without any pre-configured scope."
+commands.allow = ["refresh_index"]
+
+[[permission]]
+identifier = "deny-refresh-index"
+description = "Denies the refresh_index command without any pre-configured scope."
+commands.deny = ["refresh_index"]

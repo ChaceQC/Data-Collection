@@ -8,7 +8,9 @@ use crate::{
     storage::{self, AppState, StorageError},
 };
 
-use super::storage_message;
+use super::{
+    command_error, storage_message, structured_storage_error, CommandError, IndexMutationResult,
+};
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -28,12 +30,27 @@ pub fn set_favorite(
     favorite: bool,
     state: State<'_, AppState>,
     app: AppHandle,
-) -> Result<Vec<IndexEntry>, String> {
-    let entries = state
-        .update_entries(|entries| storage::set_favorite(entries, &file_id, favorite))
-        .map_err(storage_message)?;
-    super::emit_index_changed(&app, vec![file_id]);
-    Ok(entries)
+) -> Result<IndexMutationResult, CommandError> {
+    let outcome = state
+        .update_entries_with(|entries| {
+            let changed = storage::set_favorite(entries, &file_id, favorite)?;
+            let entry = entries.iter().find(|entry| entry.id == file_id).cloned();
+            Ok((changed, entry))
+        })
+        .map_err(structured_storage_error)?;
+    let changed_ids = if outcome.changed {
+        vec![file_id.clone()]
+    } else {
+        Vec::new()
+    };
+    if outcome.changed {
+        super::emit_index_changed(&app, outcome.revision, changed_ids.clone(), "favorite");
+    }
+    Ok(IndexMutationResult {
+        revision: outcome.revision,
+        changed_ids,
+        entry: outcome.value,
+    })
 }
 
 #[tauri::command]
@@ -41,44 +58,66 @@ pub fn remove_index_entry(
     file_id: String,
     state: State<'_, AppState>,
     app: AppHandle,
-) -> Result<Vec<IndexEntry>, String> {
+) -> Result<IndexMutationResult, CommandError> {
     if file_id.trim().is_empty() {
-        return Err(storage_message(StorageError::InvalidId));
+        return Err(structured_storage_error(StorageError::InvalidId));
     }
-    let entries = state
-        .update_entries(|entries| {
+    let outcome = state
+        .update_entries_with(|entries| {
             let position = entries
                 .iter()
                 .position(|entry| entry.id == file_id)
                 .ok_or(StorageError::EntryNotFound)?;
             entries.remove(position);
-            Ok(true)
+            Ok((true, ()))
         })
-        .map_err(storage_message)?;
-    super::emit_index_changed(&app, vec![file_id]);
-    Ok(entries)
+        .map_err(structured_storage_error)?;
+    super::emit_index_changed(
+        &app,
+        outcome.revision,
+        vec![file_id.clone()],
+        "remove-index",
+    );
+    Ok(IndexMutationResult {
+        revision: outcome.revision,
+        changed_ids: vec![file_id],
+        entry: None,
+    })
 }
 
 #[tauri::command]
 pub async fn copy_indexed_file(
     file_id: String,
     state: State<'_, AppState>,
-) -> Result<ClipboardCopyResult, String> {
+) -> Result<ClipboardCopyResult, CommandError> {
     if file_id.trim().is_empty() {
-        return Err(storage_message(StorageError::InvalidId));
+        return Err(structured_storage_error(StorageError::InvalidId));
     }
     let entry = find_entry(&state, &file_id)?;
     if entry.kind == "folder" {
-        return Err("暂时只支持复制普通文件".to_string());
+        return Err(command_error(
+            "folder-not-supported",
+            "暂时只支持复制普通文件",
+            false,
+            "unchanged",
+        ));
     }
     let name = entry.name.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let (source, _) =
-            operations::validate_indexed_file(&entry).map_err(|error| error.to_string())?;
-        clipboard::set_file(&source).map_err(|error| error.to_string())
+        let (source, _) = operations::validate_indexed_file(&entry).map_err(operation_error)?;
+        clipboard::set_file(&source).map_err(|error| {
+            command_error("clipboard-failed", error.to_string(), true, "unchanged")
+        })
     })
     .await
-    .map_err(|_| "复制到剪贴板任务未完成，请重试".to_string())??;
+    .map_err(|_| {
+        command_error(
+            "task-failed",
+            "复制到剪贴板任务未完成，请重试",
+            true,
+            "unchanged",
+        )
+    })??;
     Ok(ClipboardCopyResult { name })
 }
 
@@ -86,22 +125,35 @@ pub async fn copy_indexed_file(
 pub async fn open_indexed_file(
     file_id: String,
     state: State<'_, AppState>,
-) -> Result<ExternalOpenResult, String> {
+) -> Result<ExternalOpenResult, CommandError> {
     if file_id.trim().is_empty() {
-        return Err(storage_message(StorageError::InvalidId));
+        return Err(structured_storage_error(StorageError::InvalidId));
     }
     let entry = find_entry(&state, &file_id)?;
     if entry.kind == "folder" {
-        return Err("暂时只支持用默认程序打开普通文件".to_string());
+        return Err(command_error(
+            "folder-not-supported",
+            "暂时只支持用默认程序打开普通文件",
+            false,
+            "unchanged",
+        ));
     }
     let name = entry.name.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let (path, _) =
-            operations::validate_indexed_file(&entry).map_err(|error| error.to_string())?;
-        external::open_with_default(&path).map_err(|error| error.to_string())
+        let (path, _) = operations::validate_indexed_file(&entry).map_err(operation_error)?;
+        external::open_with_default(&path).map_err(|error| {
+            command_error("external-open-failed", error.to_string(), true, "unchanged")
+        })
     })
     .await
-    .map_err(|_| "打开文件任务未完成，请重试".to_string())??;
+    .map_err(|_| {
+        command_error(
+            "task-failed",
+            "打开文件任务未完成，请重试",
+            true,
+            "unchanged",
+        )
+    })??;
     Ok(ExternalOpenResult { name })
 }
 
@@ -109,25 +161,41 @@ pub async fn open_indexed_file(
 pub async fn reveal_indexed_file(
     file_id: String,
     state: State<'_, AppState>,
-) -> Result<ExternalOpenResult, String> {
+) -> Result<ExternalOpenResult, CommandError> {
     if file_id.trim().is_empty() {
-        return Err(storage_message(StorageError::InvalidId));
+        return Err(structured_storage_error(StorageError::InvalidId));
     }
     let entry = find_entry(&state, &file_id)?;
     let is_directory = entry.kind == "folder";
     let name = entry.name.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let path = if is_directory {
-            filesystem::validate_directory_path(&entry.path).map_err(map_path_validation_error)?
+            filesystem::validate_directory_path(&entry.path).map_err(|error| {
+                command_error(
+                    "source-invalid",
+                    map_path_validation_error(error),
+                    true,
+                    "unchanged",
+                )
+            })?
         } else {
             operations::validate_indexed_file(&entry)
-                .map_err(|error| error.to_string())?
+                .map_err(operation_error)?
                 .0
         };
-        external::reveal_in_explorer(&path, is_directory).map_err(|error| error.to_string())
+        external::reveal_in_explorer(&path, is_directory).map_err(|error| {
+            command_error("external-open-failed", error.to_string(), true, "unchanged")
+        })
     })
     .await
-    .map_err(|_| "定位文件任务未完成，请重试".to_string())??;
+    .map_err(|_| {
+        command_error(
+            "task-failed",
+            "定位文件任务未完成，请重试",
+            true,
+            "unchanged",
+        )
+    })??;
     Ok(ExternalOpenResult { name })
 }
 
@@ -137,25 +205,33 @@ pub async fn rename_indexed_file(
     new_name: String,
     state: State<'_, AppState>,
     app: AppHandle,
-) -> Result<Vec<IndexEntry>, String> {
+) -> Result<IndexMutationResult, CommandError> {
     if file_id.trim().is_empty() {
-        return Err(storage_message(StorageError::InvalidId));
+        return Err(structured_storage_error(StorageError::InvalidId));
     }
     let entry = find_entry(&state, &file_id)?;
     if entry.kind == "folder" {
-        return Err("暂时只支持重命名普通文件".to_string());
+        return Err(command_error(
+            "folder-not-supported",
+            "暂时只支持重命名普通文件",
+            false,
+            "unchanged",
+        ));
     }
     let operation = tauri::async_runtime::spawn_blocking(move || {
-        let (source, _) =
-            operations::validate_indexed_file(&entry).map_err(|error| error.to_string())?;
-        let target =
-            operations::validate_new_name(&source, &new_name).map_err(|error| error.to_string())?;
-        operations::rename_file(&source, &target).map_err(|error| error.to_string())?;
+        let (source, _) = operations::validate_indexed_file(&entry).map_err(operation_error)?;
+        let target = operations::validate_new_name(&source, &new_name).map_err(operation_error)?;
+        operations::rename_file(&source, &target).map_err(operation_error)?;
         let mut replacement = match filesystem::index_selected_path(&target.to_string_lossy()) {
             Ok(replacement) => replacement,
             Err(_) => {
                 let _ = operations::restore_renamed_file(&target, &source);
-                return Err("文件已重命名，但无法读取新文件元数据".to_string());
+                return Err(command_error(
+                    "metadata-failed",
+                    "文件已重命名，但无法读取新文件元数据",
+                    true,
+                    "unchanged",
+                ));
             }
         };
         replacement.id = entry.id.clone();
@@ -163,12 +239,12 @@ pub async fn rename_indexed_file(
         replacement.added_at = entry.added_at;
         replacement.preview_status = entry.preview_status.clone();
         replacement.last_recorded_at = entry.last_recorded_at;
-        Ok::<(PathBuf, PathBuf, IndexEntry), String>((source, target, replacement))
+        Ok::<(PathBuf, PathBuf, IndexEntry), CommandError>((source, target, replacement))
     })
     .await
-    .map_err(|_| "重命名任务未完成，请重试".to_string())??;
+    .map_err(|_| command_error("task-failed", "重命名任务未完成，请重试", true, "unchanged"))??;
     let (source, target, replacement) = operation;
-    let updated_entries = state.update_entries(|entries| {
+    let outcome = state.update_entries_with(|entries| {
         let current = entries
             .iter_mut()
             .find(|entry| entry.id == file_id)
@@ -178,18 +254,27 @@ pub async fn rename_indexed_file(
         }
         *current = replacement.clone();
         storage::sort_entries(entries);
-        Ok(true)
+        Ok((true, Some(replacement.clone())))
     });
-    match updated_entries {
-        Ok(entries) => {
-            super::emit_index_changed(&app, vec![file_id]);
-            Ok(entries)
+    match outcome {
+        Ok(outcome) => {
+            super::emit_index_changed(&app, outcome.revision, vec![file_id.clone()], "rename");
+            Ok(IndexMutationResult {
+                revision: outcome.revision,
+                changed_ids: vec![file_id],
+                entry: outcome.value,
+            })
         }
         Err(error) => {
             if operations::restore_renamed_file(&target, &source) {
-                Err(storage_message(error))
+                Err(structured_storage_error(error))
             } else {
-                Err("文件已重命名，但索引未同步且无法自动回滚，请手动检查".to_string())
+                Err(command_error(
+                    "partial-success",
+                    "文件已重命名，但索引未同步且无法自动回滚，请手动检查",
+                    false,
+                    "unknown",
+                ))
             }
         }
     }
@@ -200,51 +285,111 @@ pub async fn delete_original_file(
     file_id: String,
     state: State<'_, AppState>,
     app: AppHandle,
-) -> Result<Vec<IndexEntry>, String> {
+) -> Result<IndexMutationResult, CommandError> {
     if file_id.trim().is_empty() {
-        return Err(storage_message(StorageError::InvalidId));
+        return Err(structured_storage_error(StorageError::InvalidId));
     }
     let entry = find_entry(&state, &file_id)?;
     if entry.kind == "folder" {
-        return Err("暂时不支持删除文件夹".to_string());
+        return Err(command_error(
+            "folder-not-supported",
+            "暂时不支持删除文件夹",
+            false,
+            "unchanged",
+        ));
     }
     if entry.invalid {
-        return Err("文件已失效，请使用“从资料库移除”清理记录".to_string());
+        return Err(command_error(
+            "source-missing",
+            "文件已失效，请使用“从资料库移除”清理记录",
+            false,
+            "unchanged",
+        ));
     }
-    tauri::async_runtime::spawn_blocking(move || {
-        let (source, _) =
-            operations::validate_indexed_file(&entry).map_err(|error| error.to_string())?;
-        operations::delete_to_recycle_bin(&source).map_err(|error| error.to_string())
+    let (source, _) = operations::validate_indexed_file(&entry).map_err(operation_error)?;
+    state
+        .prepare_delete(&file_id, &source)
+        .map_err(structured_storage_error)?;
+    let delete_result = tauri::async_runtime::spawn_blocking(move || {
+        operations::delete_to_recycle_bin(&source).map_err(operation_error)
     })
     .await
-    .map_err(|_| "删除任务未完成，请重试".to_string())??;
+    .map_err(|_| command_error("task-failed", "删除任务未完成，请重试", true, "unknown"))?;
+    if let Err(error) = delete_result {
+        let _ = state.clear_pending_delete(&file_id);
+        return Err(error);
+    }
+    state
+        .mark_delete_complete(&file_id)
+        .map_err(|error| command_error("partial-success", error.to_string(), false, "unknown"))?;
 
-    match state.update_entries(|entries| {
+    match state.update_entries_with(|entries| {
         let position = entries
             .iter()
             .position(|entry| entry.id == file_id)
             .ok_or(StorageError::EntryNotFound)?;
         entries.remove(position);
-        Ok(true)
+        Ok((true, ()))
     }) {
-        Ok(entries) => {
-            super::emit_index_changed(&app, vec![file_id]);
-            Ok(entries)
+        Ok(outcome) => {
+            let revision = outcome.revision;
+            if state.clear_pending_delete(&file_id).is_err() {
+                return Err(command_error(
+                    "partial-success",
+                    "原文件已移入回收站，索引已更新但待同步记录未清理",
+                    true,
+                    "unknown",
+                ));
+            }
+            super::emit_index_changed(&app, revision, vec![file_id.clone()], "delete-original");
+            Ok(IndexMutationResult {
+                revision,
+                changed_ids: vec![file_id],
+                entry: None,
+            })
         }
-        Err(error) => Err(format!(
-            "原文件已移入回收站，但索引未同步：{}",
-            storage_message(error)
+        Err(error) => Err(command_error(
+            "partial-success",
+            format!(
+                "原文件已移入回收站，但索引未同步：{}",
+                storage_message(error)
+            ),
+            true,
+            "unknown",
         )),
     }
 }
 
-fn find_entry(state: &State<'_, AppState>, file_id: &str) -> Result<IndexEntry, String> {
+fn find_entry(state: &State<'_, AppState>, file_id: &str) -> Result<IndexEntry, CommandError> {
     state
         .snapshot()
-        .map_err(storage_message)?
+        .map_err(structured_storage_error)?
         .into_iter()
         .find(|entry| entry.id == file_id)
-        .ok_or_else(|| storage_message(StorageError::EntryNotFound))
+        .ok_or_else(|| structured_storage_error(StorageError::EntryNotFound))
+}
+
+fn operation_error(error: operations::FileOperationError) -> CommandError {
+    let (code, retryable, state) = match &error {
+        operations::FileOperationError::SourceMissing => ("source-missing", false, "unchanged"),
+        operations::FileOperationError::SourcePermissionDenied => {
+            ("source-permission-denied", true, "unchanged")
+        }
+        operations::FileOperationError::SourceInvalid => ("source-invalid", false, "unchanged"),
+        operations::FileOperationError::DestinationInvalid => {
+            ("destination-invalid", true, "unchanged")
+        }
+        operations::FileOperationError::UnsafePath => ("unsafe-path", false, "unchanged"),
+        operations::FileOperationError::TargetConflict => ("target-conflict", false, "unchanged"),
+        operations::FileOperationError::InvalidName => ("invalid-name", false, "unchanged"),
+        operations::FileOperationError::ExtensionChanged => {
+            ("extension-changed", false, "unchanged")
+        }
+        operations::FileOperationError::NameUnchanged => ("name-unchanged", false, "unchanged"),
+        operations::FileOperationError::RenameFailed => ("rename-failed", true, "unchanged"),
+        operations::FileOperationError::RecycleFailed => ("recycle-failed", true, "unknown"),
+    };
+    command_error(code, error.to_string(), retryable, state)
 }
 
 fn map_path_validation_error(error: filesystem::PathValidationError) -> String {

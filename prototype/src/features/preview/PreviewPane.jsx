@@ -1,6 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { X } from "@phosphor-icons/react";
-import { canPreview, disposePreview, loadPreview } from "./previewApi";
+import {
+  cancelPreviewTask,
+  canPreview,
+  createPreviewTaskId,
+  disposePreview,
+  loadPreview,
+} from "./previewApi";
 import { getPreviewDefinition } from "./previewRegistry";
 import { getPreviewStatusLabel } from "./previewTypes";
 import { TextPreviewer } from "./TextPreviewer";
@@ -34,18 +40,22 @@ export function PreviewPane({ entry, onClose }) {
   const [result, setResult] = useState(() => initialState(entry));
   const requestSequence = useRef(0);
   const activePreviewId = useRef("");
+  const activeTaskId = useRef("");
   const definition = getPreviewDefinition(entry);
 
   useEffect(() => {
     const previousPreviewId = activePreviewId.current;
+    const previousTaskId = activeTaskId.current;
     activePreviewId.current = "";
+    activeTaskId.current = "";
+    if (previousTaskId) void cancelPreviewTask(previousTaskId);
     if (previousPreviewId) void disposePreview(previousPreviewId);
     const requestId = requestSequence.current + 1;
     requestSequence.current = requestId;
     let cancelled = false;
     setResult(initialState(entry));
 
-    if (!definition || entry.invalid || !entry.path) {
+    if (!definition || entry.invalid || !entry.id) {
       setResult({
         status: entry.invalid ? "missing" : "unsupported",
         kind: entry.kind || "other",
@@ -69,7 +79,9 @@ export function PreviewPane({ entry, onClose }) {
           setResult({ ...support, content: null, previewId: "", byteLength: 0 });
           return;
         }
-        const loaded = await loadPreview(entry);
+        const taskId = createPreviewTaskId();
+        activeTaskId.current = taskId;
+        const loaded = await loadPreview(entry, { taskId });
         if (cancelled || requestSequence.current !== requestId) {
           if (loaded.previewId) void disposePreview(loaded.previewId);
           return;
@@ -97,6 +109,9 @@ export function PreviewPane({ entry, onClose }) {
       requestSequence.current += 1;
       const previewId = activePreviewId.current;
       activePreviewId.current = "";
+      const taskId = activeTaskId.current;
+      activeTaskId.current = "";
+      if (taskId) void cancelPreviewTask(taskId);
       if (previewId) void disposePreview(previewId);
     };
   }, [definition, entry?.id, entry?.invalid, entry?.kind, entry?.name, entry?.path]);

@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   filterEntries,
   getFileKind,
+  getRecentEntries,
   getNavigationCount,
   paginateEntries,
   sortEntries,
@@ -36,6 +37,19 @@ test("navigation filters and counts use current entry state", () => {
     filterEntries(entries, { activeNav: "recent" }).map((entry) => entry.id),
     ["b", "c"],
   );
+});
+
+test("recent view is a bounded added-time view instead of all valid entries", () => {
+  const many = Array.from({ length: 55 }, (_, index) => ({
+    id: `recent-${index}`,
+    name: `${index}.txt`,
+    addedAt: index + 1,
+    invalid: false,
+  }));
+  many.push({ id: "invalid-new", name: "invalid.txt", addedAt: 999, invalid: true });
+  assert.equal(getRecentEntries(many).length, 50);
+  assert.equal(getRecentEntries(many)[0].id, "recent-54");
+  assert.equal(getNavigationCount(many, "recent"), 50);
 });
 
 test("sorts all supported fields and keeps equal values deterministic", () => {

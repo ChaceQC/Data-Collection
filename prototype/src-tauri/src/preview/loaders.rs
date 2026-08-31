@@ -4,18 +4,25 @@ use crate::{config::TEXT_PREVIEW_LIMIT, filesystem::FileTypeInfo};
 
 use super::operations::PreviewFailure;
 use super::{doc, image, result, spreadsheet, video};
-use super::{PreviewContent, PreviewResult, PreviewState};
+use super::{PreviewCancellation, PreviewContent, PreviewResult, PreviewState};
 
 pub(super) fn load_text(
     preview_id: String,
     path: std::path::PathBuf,
     byte_length: u64,
     info: FileTypeInfo,
+    cancellation: &PreviewCancellation,
 ) -> PreviewResult {
+    if cancellation.is_cancelled() {
+        return result::result_cancelled(preview_id, info.kind.to_string());
+    }
     let bytes = match read_bounded(&path, TEXT_PREVIEW_LIMIT) {
         Ok(bytes) => bytes,
         Err(failure) => return result::result_failure(preview_id, info.kind.to_string(), failure),
     };
+    if cancellation.is_cancelled() {
+        return result::result_cancelled(preview_id, info.kind.to_string());
+    }
     let decoded = match super::text::decode(&bytes) {
         Ok(decoded) => decoded,
         Err(()) => {
@@ -47,7 +54,11 @@ pub(super) fn load_resource(
     byte_length: u64,
     info: FileTypeInfo,
     state: &PreviewState,
+    cancellation: &PreviewCancellation,
 ) -> PreviewResult {
+    if cancellation.is_cancelled() {
+        return result::result_cancelled(preview_id, info.kind.to_string());
+    }
     if (info.kind == "docx" || info.kind == "xlsx")
         && !spreadsheet::has_supported_container(&path, info.extension).unwrap_or(false)
     {
@@ -107,6 +118,9 @@ pub(super) fn load_resource(
     } else {
         None
     };
+    if cancellation.is_cancelled() {
+        return result::result_cancelled(preview_id, info.kind.to_string());
+    }
     if state
         .resources
         .insert(
@@ -126,6 +140,10 @@ pub(super) fn load_resource(
                 reason: "预览资源初始化失败，请重试",
             },
         );
+    }
+    if cancellation.is_cancelled() {
+        state.resources.dispose(&preview_id);
+        return result::result_cancelled(preview_id, info.kind.to_string());
     }
     let (width, height) = dimensions.unwrap_or((0, 0));
     result::result_ready(
@@ -148,8 +166,12 @@ pub(super) fn load_doc(
     path: std::path::PathBuf,
     kind: String,
     state: &PreviewState,
+    cancellation: &PreviewCancellation,
 ) -> PreviewResult {
-    let converted = match doc::convert_to_pdf(&path) {
+    if cancellation.is_cancelled() {
+        return result::result_cancelled(preview_id, kind);
+    }
+    let converted = match doc::convert_to_pdf(&path, cancellation) {
         Ok(converted) => converted,
         Err(doc::DocConversionError::MissingConverter) => {
             return result::result_failure(
@@ -171,6 +193,19 @@ pub(super) fn load_doc(
                 },
             )
         }
+        Err(doc::DocConversionError::Cancelled) => {
+            return result::result_cancelled(preview_id, kind);
+        }
+        Err(doc::DocConversionError::OutputTooLarge) => {
+            return result::result_failure(
+                preview_id,
+                kind,
+                PreviewFailure {
+                    status: super::STATUS_TOO_LARGE,
+                    reason: "DOC 转换后的 PDF 超过当前预览大小限制",
+                },
+            )
+        }
         Err(doc::DocConversionError::Failed) => {
             return result::result_failure(
                 preview_id,
@@ -188,6 +223,10 @@ pub(super) fn load_doc(
         byte_length,
     } = converted;
     let cleanup_directory = temporary_directory.clone();
+    if cancellation.is_cancelled() {
+        doc::remove_temporary_directory(&cleanup_directory);
+        return result::result_cancelled(preview_id, kind);
+    }
     if state
         .resources
         .insert(

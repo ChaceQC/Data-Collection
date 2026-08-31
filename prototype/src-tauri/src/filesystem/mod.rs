@@ -73,6 +73,51 @@ pub struct IndexEntry {
     pub last_recorded_at: Option<i64>,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DirectoryEntry {
+    pub id: String,
+    pub name: String,
+    pub kind: String,
+    #[serde(rename = "type")]
+    pub file_type: String,
+    pub size: u64,
+    pub modified_at: i64,
+    pub status: String,
+    pub invalid: bool,
+    pub favorite: bool,
+    pub added_at: i64,
+    pub preview_status: String,
+    pub last_recorded_at: Option<i64>,
+    pub directory_id: String,
+    pub relative_path: Vec<String>,
+}
+
+impl DirectoryEntry {
+    pub(crate) fn from_index_entry(
+        entry: IndexEntry,
+        directory_id: String,
+        relative_path: Vec<String>,
+    ) -> Self {
+        Self {
+            id: entry.id,
+            name: entry.name,
+            kind: entry.kind,
+            file_type: entry.file_type,
+            size: entry.size,
+            modified_at: entry.modified_at,
+            status: entry.status,
+            invalid: entry.invalid,
+            favorite: entry.favorite,
+            added_at: entry.added_at,
+            preview_status: entry.preview_status,
+            last_recorded_at: entry.last_recorded_at,
+            directory_id,
+            relative_path,
+        }
+    }
+}
+
 #[derive(Debug, Default)]
 pub struct ScanResult {
     pub entries: Vec<IndexEntry>,
@@ -214,25 +259,39 @@ pub fn refresh_entry(entry: &mut IndexEntry) -> bool {
         return changed;
     };
 
+    apply_refreshed_metadata(entry, &updated)
+}
+
+pub(crate) fn refresh_entry_snapshot(entry: &IndexEntry) -> IndexEntry {
+    let mut refreshed = entry.clone();
+    refresh_entry(&mut refreshed);
+    refreshed
+}
+
+pub(crate) fn apply_refreshed_metadata(entry: &mut IndexEntry, updated: &IndexEntry) -> bool {
     let changed = entry.invalid
-        || entry.status != "已登记"
+        || entry.status != updated.status
         || entry.name != updated.name
         || entry.kind != updated.kind
         || entry.file_type != updated.file_type
         || entry.size != updated.size
         || entry.modified_at != updated.modified_at;
-    entry.name = updated.name;
-    entry.kind = updated.kind;
-    entry.file_type = updated.file_type;
+    entry.name = updated.name.clone();
+    entry.kind = updated.kind.clone();
+    entry.file_type = updated.file_type.clone();
     entry.size = updated.size;
     entry.modified_at = updated.modified_at;
-    entry.invalid = false;
-    entry.status = "已登记".to_string();
+    entry.invalid = updated.invalid;
+    entry.status = updated.status.clone();
     changed
 }
 
 pub fn same_path(left: &str, right: &str) -> bool {
     normalize_path_key(Path::new(left)) == normalize_path_key(Path::new(right))
+}
+
+pub(crate) fn path_identity(raw_path: &str) -> String {
+    normalize_path_key(Path::new(raw_path))
 }
 
 pub(crate) fn validate_preview_file(
@@ -259,6 +318,33 @@ pub(crate) fn validate_directory_path(raw_path: &str) -> Result<PathBuf, PathVal
         return Err(PathValidationError::Invalid);
     }
     Ok(path)
+}
+
+pub(crate) fn resolve_directory_child(
+    raw_root: &str,
+    relative_path: &[String],
+) -> Result<PathBuf, PathValidationError> {
+    if relative_path.len() > 128 {
+        return Err(PathValidationError::Invalid);
+    }
+    let root = validate_directory_path(raw_root)?;
+    let mut current = root.clone();
+    for component in relative_path {
+        validate_relative_component(component)?;
+        let candidate = current.join(component);
+        let resolved = canonicalize_existing_path(&candidate.to_string_lossy())?;
+        if !is_path_within(&root, &resolved) {
+            return Err(PathValidationError::Invalid);
+        }
+        current = resolved;
+    }
+    Ok(current)
+}
+
+pub(crate) fn is_path_within(root: &Path, candidate: &Path) -> bool {
+    let root_key = normalize_path_key(root).trim_end_matches('\\').to_string();
+    let candidate_key = normalize_path_key(candidate);
+    candidate_key == root_key || candidate_key.starts_with(&(root_key + "\\"))
 }
 
 fn add_folder_entry(
@@ -574,6 +660,20 @@ fn reject_unsafe_components(path: &Path) -> Result<(), PathValidationError> {
     Ok(())
 }
 
+fn validate_relative_component(component: &str) -> Result<(), PathValidationError> {
+    if component.is_empty()
+        || component == "."
+        || component == ".."
+        || component.encode_utf16().count() > 255
+        || component
+            .chars()
+            .any(|character| character.is_control() || matches!(character, '/' | '\\' | ':'))
+    {
+        return Err(PathValidationError::Invalid);
+    }
+    Ok(())
+}
+
 fn map_path_io_error(error: std::io::Error) -> PathValidationError {
     match error.kind() {
         std::io::ErrorKind::NotFound => PathValidationError::Missing,
@@ -621,7 +721,7 @@ fn is_reparse_point(_metadata: &Metadata) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{list_directory, same_path, scan_paths};
+    use super::{list_directory, resolve_directory_child, same_path, scan_paths};
     use std::{fs, path::PathBuf, time::SystemTime};
 
     #[test]
@@ -662,6 +762,29 @@ mod tests {
         assert!(result
             .iter()
             .any(|entry| entry.name == "研究 计划.md" && entry.kind == "markdown"));
+        assert!(fs::remove_dir_all(root).is_ok());
+    }
+
+    #[test]
+    fn resolves_only_registered_directory_children() {
+        let root = unique_temp_dir();
+        let nested = root.join("子目录");
+        assert!(fs::create_dir_all(&nested).is_ok());
+        let file = nested.join("资料.txt");
+        assert!(fs::write(&file, "内容").is_ok());
+
+        let resolved = resolve_directory_child(
+            &root.to_string_lossy(),
+            &["子目录".to_string(), "资料.txt".to_string()],
+        )
+        .expect("registered child should resolve");
+        let canonical_file = fs::canonicalize(&file).expect("fixture should canonicalize");
+        assert_eq!(resolved, canonical_file);
+        assert!(resolve_directory_child(
+            &root.to_string_lossy(),
+            &["..".to_string(), "outside.txt".to_string()],
+        )
+        .is_err());
         assert!(fs::remove_dir_all(root).is_ok());
     }
 

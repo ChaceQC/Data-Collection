@@ -10,9 +10,13 @@
     "core:window:allow-toggle-maximize",
     "core:window:allow-start-dragging",
     "dialog:allow-open",
+    "dialog:allow-save",
     "allow-load-file-index",
     "allow-list-directory",
     "allow-index-paths",
+    "allow-refresh-index",
+    "allow-reset-index-recovery",
+    "allow-export-index-diagnostic",
     "allow-reposition-file",
     "allow-set-favorite",
     "allow-remove-index-entry",
@@ -31,6 +35,7 @@
     "allow-retry-floating-ball",
     "allow-can-preview",
     "allow-load-preview",
-    "allow-dispose-preview"
+    "allow-dispose-preview",
+    "allow-cancel-preview-task"
   ]
 }

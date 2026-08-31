@@ -17,6 +17,7 @@ export const DEFAULT_SETTINGS = Object.freeze({
   hideToTray: false,
   showFloatingWindow: true,
   previewLimits: DEFAULT_PREVIEW_LIMITS,
+  warning: "",
 });
 
 export function normalizeSettings(value) {
@@ -38,6 +39,7 @@ export function normalizeSettings(value) {
     hideToTray: source.hideToTray === true,
     showFloatingWindow: source.showFloatingWindow !== false,
     previewLimits,
+    warning: typeof source.warning === "string" ? source.warning : "",
   };
 }
 

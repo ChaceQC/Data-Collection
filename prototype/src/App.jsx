@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { open } from "@tauri-apps/plugin-dialog";
+import { open, save } from "@tauri-apps/plugin-dialog";
 import { PreviewPane } from "./features/preview/PreviewPane";
 import { DeleteOriginalDialog, RenameDialog, RemoveIndexDialog } from "./features/library/LibraryActions";
 import { LibraryPanel } from "./features/library/LibraryPanel";
@@ -14,6 +14,7 @@ import {
   getExtension,
   getFileKind,
   getFileType,
+  getRecentEntries,
   getNavigationCount,
   matchesNavigation,
 } from "./features/library/libraryModel";
@@ -26,6 +27,7 @@ import {
   renameIndexedFile,
   setFavorite,
 } from "./features/library/libraryApi";
+import { listDirectory } from "./features/preview/previewApi";
 import {
   ArrowClockwise,
   CheckCircle,
@@ -103,7 +105,8 @@ const NAV_ITEMS = [
 const IS_TAURI_RUNTIME = isTauri();
 
 function getOperationError(error, fallback) {
-  return typeof error === "string" && error.length > 0 && error.length <= 180 ? error : fallback;
+  const message = typeof error === "string" ? error : error?.message;
+  return typeof message === "string" && message.length > 0 && message.length <= 180 ? message : fallback;
 }
 
 function App() {
@@ -120,6 +123,10 @@ function App() {
   const [directoryView, setDirectoryView] = useState(null);
   const [previewEntryId, setPreviewEntryId] = useState(null);
   const [directoryLoading, setDirectoryLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshError, setRefreshError] = useState("");
+  const [indexRecovery, setIndexRecovery] = useState(null);
+  const [diagnosticExporting, setDiagnosticExporting] = useState(false);
   const [sort, setSort] = useState(DEFAULT_SORT);
   const [pageSize, setPageSize] = useState(DEFAULT_SETTINGS.pageSize);
   const [settings, setSettings] = useState(DEFAULT_SETTINGS);
@@ -135,6 +142,12 @@ function App() {
   const repositionTargetIdRef = useRef(null);
   const indexingRef = useRef(false);
   const busyFileIdRef = useRef("");
+  const latestRevisionRef = useRef(0);
+  const reloadPromiseRef = useRef(null);
+  const requestedRevisionRef = useRef(0);
+  const directoryViewRef = useRef(null);
+
+  directoryViewRef.current = directoryView;
 
   useEffect(() => {
     if (!toast) return undefined;
@@ -146,11 +159,9 @@ function App() {
     if (!IS_TAURI_RUNTIME) return undefined;
     let cancelled = false;
     invoke("load_file_index")
-      .then((loadedFiles) => {
+      .then((snapshot) => {
         if (cancelled) return;
-        setFiles(loadedFiles);
-        setSelectedId(loadedFiles[0]?.id || "");
-        setPreviewEntryId(null);
+        applyIndexSnapshot(snapshot);
         setIndexReady(true);
       })
       .catch(() => {
@@ -171,9 +182,9 @@ function App() {
       if (disposed) stop();
       else unlisten.push(stop);
     }).catch(() => undefined);
-    register(getCurrentWindow().listen("floating-recorded", () => void reloadIndexPreservingState()));
+    register(getCurrentWindow().listen("floating-recorded", (event) => void reloadIndexPreservingState(event.payload?.revision)));
     register(getCurrentWindow().listen("floating-open-file", (event) => void openFromFloating(event.payload)));
-    register(getCurrentWindow().listen("index-changed", () => void reloadIndexPreservingState()));
+    register(getCurrentWindow().listen("index-changed", (event) => void reloadIndexPreservingState(event.payload?.revision)));
     register(getCurrentWindow().listen("open-settings", () => setSettingsOpen(true)));
     register(getCurrentWindow().listen("tray-unavailable", (event) => {
       showToast(typeof event.payload === "string" ? event.payload : "系统托盘不可用，请检查设置");
@@ -231,6 +242,7 @@ function App() {
         setSettings(loadedSettings);
         setSort(loadedSettings.defaultSort);
         setPageSize(loadedSettings.pageSize);
+        if (loadedSettings.warning) showToast(loadedSettings.warning);
       })
       .catch(() => {
         if (!cancelled) showToast("无法读取本地设置，已使用默认设置");
@@ -296,18 +308,120 @@ function App() {
     }
   }
 
-  async function reloadIndexPreservingState() {
+  function applyIndexSnapshot(snapshot) {
+    const loadedFiles = Array.isArray(snapshot) ? snapshot : snapshot?.entries || [];
+    const revision = Number.isFinite(snapshot?.revision) ? snapshot.revision : latestRevisionRef.current;
+    if (revision < latestRevisionRef.current) return false;
+    latestRevisionRef.current = revision;
+    setFiles(loadedFiles);
+    setIndexRecovery(snapshot?.recovery || null);
+    const currentDirectoryEntries = directoryViewRef.current?.entries || [];
+    setSelectedId((currentId) => loadedFiles.some((file) => file.id === currentId)
+      || currentDirectoryEntries.some((file) => file.id === currentId)
+      ? currentId
+      : loadedFiles[0]?.id || "");
+    setPreviewEntryId((currentId) => currentId && (
+      loadedFiles.some((file) => file.id === currentId)
+      || directoryViewRef.current?.entries?.some((file) => file.id === currentId)
+    ) ? currentId : null);
+    return true;
+  }
+
+  async function reloadIndexPreservingState(requiredRevision = 0) {
+    requestedRevisionRef.current = Math.max(
+      requestedRevisionRef.current,
+      Number.isFinite(requiredRevision) ? requiredRevision : 0,
+    );
+    if (reloadPromiseRef.current) return reloadPromiseRef.current;
+    reloadPromiseRef.current = (async () => {
+      try {
+        while (true) {
+          const snapshot = await invoke("load_file_index");
+          const revision = Number.isFinite(snapshot?.revision) ? snapshot.revision : 0;
+          if (revision >= latestRevisionRef.current && revision >= requestedRevisionRef.current) {
+            applyIndexSnapshot(snapshot);
+            const activeDirectory = directoryViewRef.current;
+            const folder = activeDirectory?.trail?.at(-1);
+            if (folder) {
+              try {
+                const entries = await listDirectory(
+                  folder.directoryId || folder.id,
+                  Array.isArray(folder.relativePath) ? folder.relativePath : [],
+                );
+                setDirectoryView((current) => current === activeDirectory ? { ...current, entries } : current);
+              } catch {
+                setDirectoryView(null);
+                setPreviewEntryId(null);
+              }
+            }
+          }
+          if (requestedRevisionRef.current <= latestRevisionRef.current) break;
+        }
+      } catch {
+        showToast("无法同步本地资料索引，请重试");
+      } finally {
+        const needsAnotherReload = requestedRevisionRef.current > latestRevisionRef.current;
+        reloadPromiseRef.current = null;
+        if (needsAnotherReload) void reloadIndexPreservingState();
+      }
+    })();
+    return reloadPromiseRef.current;
+  }
+
+  async function handleRefreshIndex() {
+    if (!IS_TAURI_RUNTIME || refreshing) return;
+    setRefreshing(true);
+    setRefreshError("");
     try {
-      const loadedFiles = await invoke("load_file_index");
-      setFiles(loadedFiles);
-      setSelectedId((currentId) => loadedFiles.some((file) => file.id === currentId)
-        ? currentId
-        : loadedFiles[0]?.id || "");
-      setPreviewEntryId((currentId) => currentId && loadedFiles.some((file) => file.id === currentId)
-        ? currentId
-        : null);
-    } catch {
-      showToast("无法同步本地资料索引，请重试");
+      const result = await invoke("refresh_index");
+      if (result.changedCount || result.recoveredCount || result.revision > latestRevisionRef.current) {
+        await reloadIndexPreservingState(result.revision);
+      }
+      const message = result.changedCount
+        ? `已刷新 ${result.changedCount} 项${result.invalidCount ? `，失效路径 ${result.invalidCount} 项` : ""}`
+        : result.invalidCount
+          ? `索引已是最新，当前有 ${result.invalidCount} 项失效路径`
+          : "索引已是最新";
+      showToast(message);
+    } catch (error) {
+      const message = getOperationError(error, "索引刷新失败，请重试");
+      setRefreshError(message);
+      showToast(message);
+    } finally {
+      setRefreshing(false);
+    }
+  }
+
+  async function resetIndexRecovery() {
+    if (!IS_TAURI_RUNTIME || refreshing) return;
+    setRefreshing(true);
+    try {
+      const snapshot = await invoke("reset_index_recovery");
+      applyIndexSnapshot(snapshot);
+      showToast("已建立空索引，请重新导入资料");
+    } catch (error) {
+      showToast(getOperationError(error, "无法重建索引，请重试"));
+    } finally {
+      setRefreshing(false);
+    }
+  }
+
+  async function exportIndexDiagnostic() {
+    if (!IS_TAURI_RUNTIME || diagnosticExporting) return;
+    setDiagnosticExporting(true);
+    try {
+      const destination = await save({
+        title: "导出索引诊断信息",
+        defaultPath: "本地资料工作台-索引诊断.json",
+        filters: [{ name: "JSON", extensions: ["json"] }],
+      });
+      if (!destination) return;
+      await invoke("export_index_diagnostic", { destination });
+      showToast("索引诊断信息已导出");
+    } catch (error) {
+      showToast(getOperationError(error, "诊断信息导出失败，请重试"));
+    } finally {
+      setDiagnosticExporting(false);
     }
   }
 
@@ -315,9 +429,10 @@ function App() {
     const fileId = payload?.fileId;
     if (!fileId) return;
     try {
-      const loadedFiles = await invoke("load_file_index");
+      const snapshot = await invoke("load_file_index");
+      const loadedFiles = snapshot.entries || [];
       const target = loadedFiles.find((file) => file.id === fileId);
-      setFiles(loadedFiles);
+      applyIndexSnapshot(snapshot);
       setDirectoryView(null);
       setActiveNav("library");
       setSelectedId(fileId);
@@ -337,7 +452,9 @@ function App() {
     setDirectoryView(null);
     setPreviewEntryId(null);
     setActiveNav(key);
-    const firstMatch = files.find((file) => matchesNavigation(file, key));
+    const firstMatch = key === "recent"
+      ? getRecentEntries(files)[0]
+      : files.find((file) => matchesNavigation(file, key));
     if (firstMatch) setSelectedId(firstMatch.id);
   }
 
@@ -376,7 +493,12 @@ function App() {
     setBusyFileId(file.id);
     try {
       if (IS_TAURI_RUNTIME) {
-        setFiles(await setFavorite(file.id, favorite));
+        const result = await setFavorite(file.id, favorite);
+        if (result.entry) {
+          setFiles((currentFiles) => currentFiles.map((item) => (
+            item.id === file.id ? result.entry : item
+          )));
+        }
       } else {
         setFiles((currentFiles) => currentFiles.map((item) => item.id === file.id ? { ...item, favorite } : item));
       }
@@ -428,8 +550,9 @@ function App() {
     setBusyFileId(fileId);
     await releasePreviewForAction(fileId);
     try {
-      const updatedFiles = IS_TAURI_RUNTIME ? await removeIndexEntry(fileId) : files.filter((item) => item.id !== fileId);
-      setFiles(updatedFiles);
+      if (IS_TAURI_RUNTIME) await removeIndexEntry(fileId);
+      const updatedFiles = files.filter((item) => item.id !== fileId);
+      setFiles((currentFiles) => currentFiles.filter((item) => item.id !== fileId));
       setDirectoryView(null);
       setSelectedId((currentId) => currentId === fileId ? updatedFiles[0]?.id || "" : currentId);
       setPendingAction(null);
@@ -461,7 +584,12 @@ function App() {
     await releasePreviewForAction(fileId);
     try {
       if (IS_TAURI_RUNTIME) {
-        setFiles(await renameIndexedFile(fileId, newName));
+        const result = await renameIndexedFile(fileId, newName);
+        if (result.entry) {
+          setFiles((currentFiles) => currentFiles.map((item) => (
+            item.id === fileId ? result.entry : item
+          )));
+        }
       } else {
         setFiles((currentFiles) => currentFiles.map((item) => {
           if (item.id !== fileId) return item;
@@ -569,8 +697,9 @@ function App() {
     setBusyFileId(fileId);
     await releasePreviewForAction(fileId);
     try {
-      const updatedFiles = await deleteOriginalFile(fileId);
-      setFiles(updatedFiles);
+      await deleteOriginalFile(fileId);
+      const updatedFiles = files.filter((item) => item.id !== fileId);
+      setFiles((currentFiles) => currentFiles.filter((item) => item.id !== fileId));
       setSelectedId((currentId) => currentId === fileId ? updatedFiles[0]?.id || "" : currentId);
       setPendingAction(null);
       showToast("原文件已移入回收站");
@@ -588,11 +717,12 @@ function App() {
     setIndexing(true);
     try {
       const result = await invoke("index_paths", { paths });
-      setFiles(result.entries);
+      const snapshot = await invoke("load_file_index");
+      applyIndexSnapshot(snapshot);
       setDirectoryView(null);
       setPreviewEntryId(null);
       setActiveNav("library");
-      setSelectedId(result.addedIds[0] || result.entries[0]?.id || "");
+      setSelectedId(result.addedIds[0] || snapshot.entries[0]?.id || "");
       const messages = [];
       if (result.indexedCount) messages.push(`已索引 ${result.indexedCount} 项`);
       if (result.refreshedCount) messages.push(`更新 ${result.refreshedCount} 项`);
@@ -656,8 +786,12 @@ function App() {
     if (!fileId) return;
     setPreviewEntryId(null);
     try {
-      const updatedFiles = await invoke("reposition_file", { fileId, newPath });
-      setFiles(updatedFiles);
+      const result = await invoke("reposition_file", { fileId, newPath });
+      if (result.entry) {
+        setFiles((currentFiles) => currentFiles.map((item) => (
+          item.id === fileId ? result.entry : item
+        )));
+      }
       setSelectedId(fileId);
       showToast("路径已更新");
     } catch {
@@ -714,11 +848,13 @@ function App() {
   }
 
   async function openDirectory(folder, trail) {
-    if (!folder.path || folder.invalid || directoryLoading) return;
+    const directoryId = folder.directoryId || folder.id;
+    const relativePath = Array.isArray(folder.relativePath) ? folder.relativePath : [];
+    if (!directoryId || folder.invalid || directoryLoading) return;
     setPreviewEntryId(null);
     setDirectoryLoading(true);
     try {
-      const entries = await invoke("list_directory", { path: folder.path });
+      const entries = await listDirectory(directoryId, relativePath);
       setDirectoryView({ entries, trail });
       setSelectedId(entries[0]?.id || folder.id);
     } catch {
@@ -851,6 +987,24 @@ function App() {
           </div>
         )}
 
+        {indexRecovery?.required && (
+          <div className="index-recovery-alert" role="alert" data-tauri-drag-region="false">
+            <WarningCircle size={18} weight="fill" aria-hidden="true" />
+            <div>
+              <strong>本地索引需要恢复</strong>
+              <span>{indexRecovery.issue}。{indexRecovery.backupCreated ? "原文件已保留备份。" : "原文件备份未能创建。"}请重建空索引后重新导入资料。</span>
+            </div>
+            <div className="index-recovery-actions">
+              <button type="button" onClick={() => void exportIndexDiagnostic()} disabled={diagnosticExporting}>
+                {diagnosticExporting ? "导出中..." : "导出诊断"}
+              </button>
+              <button type="button" onClick={() => void resetIndexRecovery()} disabled={refreshing}>
+                {refreshing ? "处理中..." : "重建空索引"}
+              </button>
+            </div>
+          </div>
+        )}
+
         <section
           className={`drop-zone ${dragActive ? "is-dragging" : ""}`}
           data-tauri-drag-region="false"
@@ -902,6 +1056,9 @@ function App() {
           directoryView={directoryView}
           directoryLoading={directoryLoading}
           indexReady={indexReady}
+          refreshing={refreshing}
+          refreshError={refreshError}
+          onRefresh={handleRefreshIndex}
           busyFileId={busyFileId}
           onRowClick={handleRowClick}
           onRowKeyDown={handleRowKeyDown}
