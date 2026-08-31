@@ -128,16 +128,15 @@
 
 #### 进行中
 
-- 代码回归和浏览器有效 PDF 检查已通过；正式版本仍为 `0.3.6`。NSIS 重建第一次因当前运行中的 release 进程 `PID 43900` 锁定构建文件而失败，未强制结束该进程。
+- 代码回归、浏览器有效 PDF 检查和最新 NSIS 重建已通过；正式版本仍为 `0.3.6`，等待用户安装最新安装包后完成 Windows 11 PDF 手工验收。
 
 #### 阻塞与风险
 
-- 新修复后的安装包需要在关闭 `E:\Project\test\prototype\src-tauri\target\release\local-material-workbench.exe` 后重新运行 `npm.cmd run tauri:build`；当前安装包文件仍是修复前构建产物，不能把它写成包含本次修复。
 - 本轮未代替用户执行 Windows 11 桌面安装、启动、真实 PDF 文件和 WebView2 手工验收。
 
 #### 下一步
 
-- 关闭占用 release 文件的本地资料工作台进程后重建 NSIS 安装包，并由用户安装后复测 PDF 首页、分页、缩放和关闭预览。
+- 用户安装最新 NSIS 包后复测 PDF 首页、分页、缩放和关闭预览，并记录目标 Windows/WebView2 版本及失败样本。
 
 #### 涉及文件
 
@@ -151,7 +150,8 @@
 - `npm.cmd run build`：通过，Sites 产物生成成功。
 - PDF skill 临时两页 PDF：Poppler 源文件渲染正常；浏览器 `Dialog + PdfPreviewer` canvas 在 100% 时为 `612x792`，第 2 页 125% 时为 `765x990`，截图内容正常且页面 error/warning 日志为空。
 - 临时调试 HTML、有效 PDF、Poppler PNG 和服务端口 `49220` 已清理/关闭。
-- `npm.cmd run tauri:build`：前端阶段通过，Rust/Tauri build script 因 PID `43900` 的 release 可执行文件占用返回 `os error 32`；本轮没有声称新安装包构建成功。
+- `npm.cmd run tauri:build`：通过，生成修复后的 Windows x64 NSIS 安装包 `prototype/src-tauri/target/release/bundle/nsis/本地资料工作台_0.3.6_x64-setup.exe`；大小 `7047318` bytes，SHA-256 为 `BFE38EC70626D888A5A9C54F71E236146BF0492D564BC3B64017E125EDCA4A74`。
+- `WebView2Loader.dll` 校验通过：`160320` bytes，SHA-256 为 `8427b1fc58ec707813e5c0a51eb5d69397bb333250a7b891be4d3b123f1e0f1c`，x64 loader 与 release 主程序位于同一目录。
 
 ## 2026-08-30
 
