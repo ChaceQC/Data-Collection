@@ -11,17 +11,17 @@
 - 修复 `hideToTray=false` 时主窗口关闭只销毁 `main` 窗口的问题：现在通过统一退出路径幂等关闭悬浮球、释放预览资源、移除托盘并退出应用；`hideToTray=true` 的托盘驻留行为保持不变，托盘不可用时仍保留主窗口并提示。
 - 增加 PDF canvas 尺寸模型测试和关闭策略测试；没有修改索引格式、设置格式或预览资源协议。
 
-#### 进行中
+#### 验收结果
 
-- 等待用户在 Windows 11 Tauri/WebView2 桌面环境使用截图中的真实多页 PDF 复测字符完整性、翻页和缩放，并验证关闭隐藏未勾选时托盘/悬浮球均消失、应用可正常退出；当前不把自动化结果写成原生桌面验收。
+- 用户已确认在 Windows 11 Tauri/WebView2 桌面环境完成本轮手工验证，包含真实多页 PDF 的字符完整性、翻页/缩放，以及关闭隐藏未勾选时托盘和悬浮球清理、应用退出行为。
 
 #### 阻塞与风险
 
-- 当前自动化环境未代替用户执行真实 Windows 11 安装包、托盘、悬浮球和目标 PDF 的手工验收；PDF 特殊字体、WebView2 版本和显示器 DPI 仍需由用户记录。
+- 本轮无新增阻塞；安装包未签名、目标机需要 WebView2、DOC 预览需要 LibreOffice，仍是既有发布边界。
 
 #### 下一步
 
-- 用户安装或启动本分支最新构建，使用同一 PDF 检查首页、截图中的第 2 页、其他含公式/字体页面、缩放和快速翻页；再分别以 `hideToTray` 勾选/未勾选复测关闭和托盘菜单退出。
+- 保持 `ada2dbd` 为本次修复基线；后续如出现回归，优先记录 PDF 样本的字体/页码、WebView2 版本和窗口关闭设置，再针对性追加修复。
 
 #### 涉及文件
 
@@ -36,7 +36,7 @@
 - 临时 Vite 服务端的 `GB-V.bcmap` 和 `FoxitSymbol.pfb` 请求均返回 `200`，响应体长度与资源文件一致；验证端口已关闭。
 - `cargo fmt --all -- --check`：通过；`cargo test --all-targets`：57 项通过；`cargo clippy --all-targets --all-features -- -D warnings`：通过。
 - `npm.cmd run tauri:build`：通过，生成 `prototype/src-tauri/target/release/bundle/nsis/本地资料工作台_0.3.6_x64-setup.exe`；最终安装器为 8,522,230 bytes，SHA-256 为 `B2032E991003D0D68A8096F5F19F6634CD842183F6E7FC32E8D8FB13C231EC8C`；`verify-webview2-loader.mjs` 通过，x64 loader 为 160320 bytes，SHA-256 为 `8427b1fc58ec707813e5c0a51eb5d69397bb333250a7b891be4d3b123f1e0f1c`。
-- PDF skill 的临时两页 PDF 已使用 Poppler 渲染并逐页检查，页面、公式文本、第二页表格和边界正常；本轮仍未代替用户完成真实 Windows 11 PDF/托盘/悬浮球手工验收。
+- PDF skill 的临时两页 PDF 已使用 Poppler 渲染并逐页检查，页面、公式文本、第二页表格和边界正常；真实 Windows 11 PDF/托盘/悬浮球手工验收由用户完成并确认通过。
 
 ### 新总体计划阶段 A-D 代码实现
 
