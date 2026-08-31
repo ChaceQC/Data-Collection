@@ -60,6 +60,17 @@ pub(super) fn result_failure(
     }
 }
 
+pub(super) fn result_cancelled(preview_id: String, kind: String) -> PreviewResult {
+    PreviewResult {
+        preview_id,
+        kind,
+        status: super::STATUS_CANCELLED.to_string(),
+        content: None,
+        byte_length: 0,
+        reason: None,
+    }
+}
+
 pub(super) fn result_ready(
     preview_id: String,
     kind: String,

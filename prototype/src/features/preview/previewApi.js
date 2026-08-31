@@ -1,4 +1,14 @@
-import { invoke, isTauri } from "@tauri-apps/api/core";
+import {
+  getPreviewTarget,
+  invokeCommand,
+  isDesktopRuntime,
+  makeDirectoryTarget,
+  parseDirectoryEntries,
+  parsePreviewResult,
+  parsePreviewSupport,
+} from "../../lib/ipcContracts.js";
+
+export { getPreviewTarget };
 
 function browserPreviewState(entry) {
   return {
@@ -10,16 +20,20 @@ function browserPreviewState(entry) {
 }
 
 export function canUsePreviewRuntime() {
-  return isTauri();
+  return isDesktopRuntime();
+}
+
+export function listDirectory(directoryId, relativePath = []) {
+  return invokeCommand("list_directory", { target: makeDirectoryTarget(directoryId, relativePath) }, parseDirectoryEntries);
 }
 
 export async function canPreview(entry) {
-  if (!canUsePreviewRuntime() || !entry?.path) return browserPreviewState(entry);
-  return invoke("can_preview", { path: entry.path, kind: entry.kind });
+  if (!canUsePreviewRuntime() || !entry?.id) return browserPreviewState(entry);
+  return invokeCommand("can_preview", { target: getPreviewTarget(entry), kind: entry.kind }, parsePreviewSupport);
 }
 
 export async function loadPreview(entry, options = {}) {
-  if (!canUsePreviewRuntime() || !entry?.path) {
+  if (!canUsePreviewRuntime() || !entry?.id) {
     return {
       previewId: "",
       kind: entry?.kind || "other",
@@ -29,14 +43,24 @@ export async function loadPreview(entry, options = {}) {
       reason: browserPreviewState(entry).reason,
     };
   }
-  return invoke("load_preview", {
-    path: entry.path,
+  return invokeCommand("load_preview", {
+    target: getPreviewTarget(entry),
     kind: entry.kind,
     options,
-  });
+  }, parsePreviewResult);
+}
+
+export function createPreviewTaskId() {
+  if (globalThis.crypto?.randomUUID) return `preview-task-${globalThis.crypto.randomUUID()}`;
+  return `preview-task-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+export function cancelPreviewTask(taskId) {
+  if (!canUsePreviewRuntime() || !taskId) return Promise.resolve();
+  return invokeCommand("cancel_preview_task", { taskId });
 }
 
 export function disposePreview(previewId) {
   if (!canUsePreviewRuntime() || !previewId) return Promise.resolve();
-  return invoke("dispose_preview", { previewId });
+  return invokeCommand("dispose_preview", { previewId });
 }

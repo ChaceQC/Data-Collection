@@ -177,16 +177,64 @@
       "description": "Permission identifier",
       "oneOf": [
         {
+          "description": "Enables the batch_remove_index_entries command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-batch-remove-index-entries",
+          "markdownDescription": "Enables the batch_remove_index_entries command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the batch_set_favorite command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-batch-set-favorite",
+          "markdownDescription": "Enables the batch_set_favorite command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the batch_set_group command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-batch-set-group",
+          "markdownDescription": "Enables the batch_set_group command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the batch_update_tags command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-batch-update-tags",
+          "markdownDescription": "Enables the batch_update_tags command without any pre-configured scope."
+        },
+        {
           "description": "Enables the can_preview command without any pre-configured scope.",
           "type": "string",
           "const": "allow-can-preview",
           "markdownDescription": "Enables the can_preview command without any pre-configured scope."
         },
         {
+          "description": "Enables the cancel_batch_operation command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-cancel-batch-operation",
+          "markdownDescription": "Enables the cancel_batch_operation command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the cancel_preview_task command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-cancel-preview-task",
+          "markdownDescription": "Enables the cancel_preview_task command without any pre-configured scope."
+        },
+        {
           "description": "Enables the copy_indexed_file command without any pre-configured scope.",
           "type": "string",
           "const": "allow-copy-indexed-file",
           "markdownDescription": "Enables the copy_indexed_file command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the create_group command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-create-group",
+          "markdownDescription": "Enables the create_group command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the delete_group command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-delete-group",
+          "markdownDescription": "Enables the delete_group command without any pre-configured scope."
         },
         {
           "description": "Enables the delete_original_file command without any pre-configured scope.",
@@ -207,6 +255,12 @@
           "markdownDescription": "Enables the exit_app command without any pre-configured scope."
         },
         {
+          "description": "Enables the export_index_diagnostic command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-export-index-diagnostic",
+          "markdownDescription": "Enables the export_index_diagnostic command without any pre-configured scope."
+        },
+        {
           "description": "Enables the floating_window_status command without any pre-configured scope.",
           "type": "string",
           "const": "allow-floating-window-status",
@@ -217,6 +271,12 @@
           "type": "string",
           "const": "allow-get-floating-recent",
           "markdownDescription": "Enables the get_floating_recent command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_index_recovery command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-index-recovery",
+          "markdownDescription": "Enables the get_index_recovery command without any pre-configured scope."
         },
         {
           "description": "Enables the index_paths command without any pre-configured scope.",
@@ -273,10 +333,22 @@
           "markdownDescription": "Enables the record_floating_paths command without any pre-configured scope."
         },
         {
+          "description": "Enables the refresh_index command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-refresh-index",
+          "markdownDescription": "Enables the refresh_index command without any pre-configured scope."
+        },
+        {
           "description": "Enables the remove_index_entry command without any pre-configured scope.",
           "type": "string",
           "const": "allow-remove-index-entry",
           "markdownDescription": "Enables the remove_index_entry command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the rename_group command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-rename-group",
+          "markdownDescription": "Enables the rename_group command without any pre-configured scope."
         },
         {
           "description": "Enables the rename_indexed_file command without any pre-configured scope.",
@@ -291,10 +363,22 @@
           "markdownDescription": "Enables the reposition_file command without any pre-configured scope."
         },
         {
+          "description": "Enables the reset_index_recovery command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-reset-index-recovery",
+          "markdownDescription": "Enables the reset_index_recovery command without any pre-configured scope."
+        },
+        {
           "description": "Enables the retry_floating_ball command without any pre-configured scope.",
           "type": "string",
           "const": "allow-retry-floating-ball",
           "markdownDescription": "Enables the retry_floating_ball command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the reveal_directory_child command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-reveal-directory-child",
+          "markdownDescription": "Enables the reveal_directory_child command without any pre-configured scope."
         },
         {
           "description": "Enables the reveal_indexed_file command without any pre-configured scope.",
@@ -307,6 +391,18 @@
           "type": "string",
           "const": "allow-save-floating-placement",
           "markdownDescription": "Enables the save_floating_placement command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the set_entry_group command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-set-entry-group",
+          "markdownDescription": "Enables the set_entry_group command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the set_entry_tags command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-set-entry-tags",
+          "markdownDescription": "Enables the set_entry_tags command without any pre-configured scope."
         },
         {
           "description": "Enables the set_favorite command without any pre-configured scope.",
@@ -333,10 +429,40 @@
           "markdownDescription": "Enables the tray_status command without any pre-configured scope."
         },
         {
+          "description": "Enables the undo_last command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-undo-last",
+          "markdownDescription": "Enables the undo_last command without any pre-configured scope."
+        },
+        {
           "description": "Enables the update_settings command without any pre-configured scope.",
           "type": "string",
           "const": "allow-update-settings",
           "markdownDescription": "Enables the update_settings command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the batch_remove_index_entries command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-batch-remove-index-entries",
+          "markdownDescription": "Denies the batch_remove_index_entries command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the batch_set_favorite command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-batch-set-favorite",
+          "markdownDescription": "Denies the batch_set_favorite command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the batch_set_group command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-batch-set-group",
+          "markdownDescription": "Denies the batch_set_group command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the batch_update_tags command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-batch-update-tags",
+          "markdownDescription": "Denies the batch_update_tags command without any pre-configured scope."
         },
         {
           "description": "Denies the can_preview command.",
@@ -345,10 +471,34 @@
           "markdownDescription": "Denies the can_preview command."
         },
         {
+          "description": "Denies the cancel_batch_operation command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-cancel-batch-operation",
+          "markdownDescription": "Denies the cancel_batch_operation command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the cancel_preview_task command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-cancel-preview-task",
+          "markdownDescription": "Denies the cancel_preview_task command without any pre-configured scope."
+        },
+        {
           "description": "Denies the copy_indexed_file command without any pre-configured scope.",
           "type": "string",
           "const": "deny-copy-indexed-file",
           "markdownDescription": "Denies the copy_indexed_file command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the create_group command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-create-group",
+          "markdownDescription": "Denies the create_group command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the delete_group command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-delete-group",
+          "markdownDescription": "Denies the delete_group command without any pre-configured scope."
         },
         {
           "description": "Denies the delete_original_file command without any pre-configured scope.",
@@ -369,6 +519,12 @@
           "markdownDescription": "Denies the exit_app command without any pre-configured scope."
         },
         {
+          "description": "Denies the export_index_diagnostic command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-export-index-diagnostic",
+          "markdownDescription": "Denies the export_index_diagnostic command without any pre-configured scope."
+        },
+        {
           "description": "Denies the floating_window_status command without any pre-configured scope.",
           "type": "string",
           "const": "deny-floating-window-status",
@@ -379,6 +535,12 @@
           "type": "string",
           "const": "deny-get-floating-recent",
           "markdownDescription": "Denies the get_floating_recent command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_index_recovery command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-index-recovery",
+          "markdownDescription": "Denies the get_index_recovery command without any pre-configured scope."
         },
         {
           "description": "Denies the index_paths command without any pre-configured scope.",
@@ -435,10 +597,22 @@
           "markdownDescription": "Denies the record_floating_paths command without any pre-configured scope."
         },
         {
+          "description": "Denies the refresh_index command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-refresh-index",
+          "markdownDescription": "Denies the refresh_index command without any pre-configured scope."
+        },
+        {
           "description": "Denies the remove_index_entry command without any pre-configured scope.",
           "type": "string",
           "const": "deny-remove-index-entry",
           "markdownDescription": "Denies the remove_index_entry command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the rename_group command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-rename-group",
+          "markdownDescription": "Denies the rename_group command without any pre-configured scope."
         },
         {
           "description": "Denies the rename_indexed_file command without any pre-configured scope.",
@@ -453,10 +627,22 @@
           "markdownDescription": "Denies the reposition_file command without any pre-configured scope."
         },
         {
+          "description": "Denies the reset_index_recovery command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-reset-index-recovery",
+          "markdownDescription": "Denies the reset_index_recovery command without any pre-configured scope."
+        },
+        {
           "description": "Denies the retry_floating_ball command without any pre-configured scope.",
           "type": "string",
           "const": "deny-retry-floating-ball",
           "markdownDescription": "Denies the retry_floating_ball command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the reveal_directory_child command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-reveal-directory-child",
+          "markdownDescription": "Denies the reveal_directory_child command without any pre-configured scope."
         },
         {
           "description": "Denies the reveal_indexed_file command without any pre-configured scope.",
@@ -469,6 +655,18 @@
           "type": "string",
           "const": "deny-save-floating-placement",
           "markdownDescription": "Denies the save_floating_placement command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the set_entry_group command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-set-entry-group",
+          "markdownDescription": "Denies the set_entry_group command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the set_entry_tags command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-set-entry-tags",
+          "markdownDescription": "Denies the set_entry_tags command without any pre-configured scope."
         },
         {
           "description": "Denies the set_favorite command without any pre-configured scope.",
@@ -493,6 +691,12 @@
           "type": "string",
           "const": "deny-tray-status",
           "markdownDescription": "Denies the tray_status command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the undo_last command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-undo-last",
+          "markdownDescription": "Denies the undo_last command without any pre-configured scope."
         },
         {
           "description": "Denies the update_settings command without any pre-configured scope.",

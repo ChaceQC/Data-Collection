@@ -1,6 +1,8 @@
+// 仅用于前端与 Rust 托盘菜单 ID 的跨层契约测试，运行时菜单由 Rust 创建。
 export const TRAY_STATIC_MENU_IDS = Object.freeze([
   "tray-open-main",
   "tray-toggle-floating",
+  "tray-refresh-index",
   "tray-recent-tasks",
   "tray-open-settings",
   "tray-exit",
@@ -31,6 +33,7 @@ export function parseTrayMenuId(value) {
     return {
       trayOpenMain: value === "tray-open-main",
       trayToggleFloating: value === "tray-toggle-floating",
+      trayRefreshIndex: value === "tray-refresh-index",
       trayOpenSettings: value === "tray-open-settings",
       trayExit: value === "tray-exit",
     };

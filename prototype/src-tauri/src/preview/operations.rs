@@ -1,15 +1,9 @@
 use std::path::Path;
 
-use crate::{
-    config::{
-        IMAGE_PREVIEW_LIMIT, OFFICE_PREVIEW_LIMIT, PDF_PREVIEW_LIMIT, TEXT_PREVIEW_LIMIT,
-        VIDEO_PREVIEW_LIMIT,
-    },
-    filesystem::{self, FileTypeInfo},
-};
+use crate::filesystem::{self, FileTypeInfo};
 
 use super::{doc, image, loaders, result};
-use super::{PreviewOptions, PreviewResult, PreviewState, PreviewSupport};
+use super::{PreviewCancellation, PreviewOptions, PreviewResult, PreviewState, PreviewSupport};
 
 #[derive(Clone, Copy, Debug)]
 pub(super) struct PreviewFailure {
@@ -35,30 +29,48 @@ pub(crate) fn can_preview(raw_path: &str, requested_kind: &str) -> PreviewSuppor
     }
 }
 
+#[cfg(test)]
 pub(crate) fn load_preview(
     raw_path: &str,
     requested_kind: &str,
     options: PreviewOptions,
     state: &PreviewState,
 ) -> PreviewResult {
+    let cancellation = PreviewCancellation::never_cancelled();
+    load_preview_with_cancellation(raw_path, requested_kind, options, state, &cancellation)
+}
+
+pub(crate) fn load_preview_with_cancellation(
+    raw_path: &str,
+    requested_kind: &str,
+    options: PreviewOptions,
+    state: &PreviewState,
+    cancellation: &PreviewCancellation,
+) -> PreviewResult {
     let _ = (&options.page, &options.scale, &options.mode);
     let preview_id = super::resources::new_preview_id();
     let kind = safe_kind(requested_kind);
+    if cancellation.is_cancelled() {
+        return result::result_cancelled(preview_id, kind);
+    }
     let (path, metadata, info) = match inspect_file(raw_path, &kind) {
         Ok(value) => value,
         Err(failure) => return result::result_failure(preview_id, kind, failure),
     };
+    if cancellation.is_cancelled() {
+        return result::result_cancelled(preview_id, kind);
+    }
     if let Err(failure) = extra_validation(&path, &metadata, &info) {
         return result::result_failure(preview_id, kind, failure);
     }
 
     if info.kind == "text" || info.kind == "markdown" {
-        return loaders::load_text(preview_id, path, metadata.len(), info);
+        return loaders::load_text(preview_id, path, metadata.len(), info, cancellation);
     }
     if info.kind == "doc" {
-        return loaders::load_doc(preview_id, path, kind, state);
+        return loaders::load_doc(preview_id, path, kind, state, cancellation);
     }
-    loaders::load_resource(preview_id, path, metadata.len(), info, state)
+    loaders::load_resource(preview_id, path, metadata.len(), info, state, cancellation)
 }
 
 pub(super) fn dispose_preview(state: &PreviewState, preview_id: &str) {
@@ -104,7 +116,7 @@ fn extra_validation(
         });
     }
     if info.kind == "image" {
-        match image::dimensions(path, info.extension) {
+        match image::dimensions(path, &info.extension, info.max_pixels) {
             Ok(_) => {}
             Err(image::ImageValidationError::TooLarge) => {
                 return Err(PreviewFailure {
@@ -124,14 +136,7 @@ fn extra_validation(
 }
 
 fn limit_for(info: &FileTypeInfo) -> u64 {
-    match info.limit {
-        "text" => TEXT_PREVIEW_LIMIT,
-        "docx" | "xlsx" => OFFICE_PREVIEW_LIMIT,
-        "pdf" => PDF_PREVIEW_LIMIT,
-        "image" => IMAGE_PREVIEW_LIMIT,
-        "video" => VIDEO_PREVIEW_LIMIT,
-        _ => 0,
-    }
+    info.max_bytes
 }
 
 fn safe_kind(kind: &str) -> String {

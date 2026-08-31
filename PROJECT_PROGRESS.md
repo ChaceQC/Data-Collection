@@ -1,5 +1,308 @@
 # 项目进度
 
+## 2026-08-31
+
+### 阶段 A-J Windows 验收完成与 0.3.16 发布准备
+
+#### 已完成
+
+- 用户已确认当前分支所包含阶段 A-I，以及阶段 J 发布验收对应的 Windows 11/Tauri/WebView2 桌面验收完成；本次验收结果作为发布门禁，不再把浏览器回退检查或开发侧自动测试当作桌面验收替代品。
+- 根据用户对发布版本的确认，本次使用 `0.3.16` 作为 `v0.3.6` 后的最终阶段版本。计划表中的 `0.3.7`-`0.3.15` 保留为前置阶段规划编号，本次不连续创建这些版本的 Release。
+- 将前端 package、package-lock 根包、Tauri 配置、Rust crate、Cargo.lock 根包、根 README、原型 README 和本计划的当前状态统一切换到 `0.3.16` 发布口径；阶段 J 的质量门禁与发布验收纳入本次版本。
+
+#### 进行中
+
+- 当前分支已完成版本和文档同步；待按用户指定顺序将本分支并入 `dev`，再将 `dev` 合并入 `main`，推送分支并创建 `v0.3.16` Release。
+
+#### 阻塞与风险
+
+- 阶段 J 的用户发布验收已完成；自动化质量门禁、依赖审计、安装包签名评估和 Release 依赖链仍按仓库实际能力记录，不将未执行的检查写成已执行。
+- 安装包未签名、目标机需要 WebView2、DOC 预览需要 LibreOffice、视频编码依赖 WebView2，以及 `xlsx@0.18.5` 的既有依赖风险保持不变。
+
+#### 下一步
+
+- 完成版本一致性和文档检查后提交当前分支；将当前分支并入 `dev` 并推送，再将 `dev` 合并入 `main` 并推送。
+- 在 `main` 上推送 `v0.3.16` 标签，等待 Windows Release workflow 完成并核验 NSIS 安装包和便携 ZIP。
+
+#### 涉及文件
+
+- `prototype/package.json`、`prototype/package-lock.json`
+- `prototype/src-tauri/Cargo.toml`、`prototype/src-tauri/Cargo.lock`、`prototype/src-tauri/tauri.conf.json`
+- `README.md`、`prototype/README.md`、`PROJECT_PLAN.md`、`PROJECT_PROGRESS.md`
+
+#### 验证
+
+- 版本一致性检查通过：`prototype/package.json`、package-lock 根包、Tauri 配置、Rust crate 和 Cargo.lock 根 package 均为 `0.3.16`。
+- `git diff --check`：通过。
+- `npm.cmd run build`：通过；生成 `dist/client/index.html`、`dist/server/index.js` 和 `dist/.openai/hosting.json`，保留既有大 chunk 提示。
+- `cargo check --locked`：通过，Rust crate 使用锁定依赖并按 `0.3.16` 编译。
+- 分支同步和 Release workflow 结果在后续发布步骤补记。
+
+### 筛选菜单自动关闭与 Windows 扩展路径显示修复
+
+#### 已完成
+
+- 修复 `LibraryFilterMenu` 使用非受控 `<details>` 导致菜单只能通过再次点击“筛选”关闭的问题；现在点击菜单外区域或按 `Escape` 会立即收起，菜单内部仍可连续选择多个筛选项。
+- 修复 Windows `canonicalize` 长路径前缀在界面暴露的问题：仅在显示、复制位置和删除确认对话框中将 `\\?\\D:\\...` 还原为 `D:\\...`，并将 `\\?\\UNC\\server\\share\\...` 还原为 UNC 路径；索引中的原始规范路径和 Rust 文件系统校验保持不变。
+
+#### 验证
+
+- `npm.cmd run test:library`：9 项通过，覆盖驱动器路径和 UNC 路径显示归一化；`npm.cmd run test:contracts`：8 项通过；`npm.cmd run build`：通过。
+- Microsoft Edge 回退页面已实测：打开筛选菜单后点击“资料库”标题，菜单 `open` 从 `true` 变为 `false`；筛选菜单可继续多选。临时 Vite/Edge 会话已关闭。
+- `npm.cmd run tauri:build`：通过，生成修复版 Windows x64 NSIS 安装包 `prototype/src-tauri/target/release/bundle/nsis/本地资料工作台_0.3.6_x64-setup.exe`；大小 `8656156` bytes，SHA-256 为 `448E59CBA3A5CE5DB434768269C2741D864C64B61E7EB7DC0D72979FB6B67EBD`。`WebView2Loader.dll` 校验通过，大小 `160320` bytes，SHA-256 为 `8427B1FC58EC707813E5C0A51EB5D69397BB333250A7B891BE4D3B123F1E0F1C`。
+
+#### 进行中
+
+- 代码修复和修复版安装包已完成；需安装该包重新执行 Windows 11/WebView2 桌面验收，确认真实长路径显示、复制和资源管理器定位。
+
+### 操作列表头与按钮对齐修复
+
+#### 已完成
+
+- 将桌面表格“操作”表头与星标/更多按钮统一增加 `28px` 左侧留白；修改时间列保留 `12px` 右侧空间，避免较窄桌面宽度下日期文本和操作按钮重合。移动端原有右对齐布局不变。
+
+#### 验证
+
+- Edge 960px 视图确认表头和操作单元格使用相同 `28px` 左内边距，操作列内容位于修改时间列之后且没有侵入日期文本；截图保存在被忽略的 `prototype/output/playwright/`。
+- `npm.cmd run test:library`：9 项通过；`npm.cmd run test:contracts`：8 项通过；`npm.cmd run tauri:build`：通过。
+- 最新安装器 `prototype/src-tauri/target/release/bundle/nsis/本地资料工作台_0.3.6_x64-setup.exe` 大小 `8655100` bytes，SHA-256 为 `883CE91A9031ADC3D5F7F9F994D76AEFD22F19A0ADEE8298C3350D24BA4389D6`；loader 校验通过，大小 `160320` bytes，SHA-256 为 `8427B1FC58EC707813E5C0A51EB5D69397BB333250A7B891BE4D3B123F1E0F1C`。
+
+#### 进行中
+
+- 需安装最新修复包在 Windows 11/WebView2 桌面环境复核不同窗口宽度下的操作列、表头、日期截断和行菜单定位；当前未执行安装器启动/卸载验收。
+
+### 新总体计划阶段 G-I 代码实现与分组列调整
+
+#### 已完成
+
+- 在独立本地分支 `codex/implement-phases-g-i`（基线 HEAD `2548769`）继续实现 `PROJECT_PLAN.md` 阶段 G-I；保留正式发布版本 `0.3.6`，没有修改 package、Tauri、Rust crate 或 Cargo.lock 版本，没有执行 commit、merge、push、tag 或 Release。
+- 阶段 G：资料行增加可省略、展开和复制的位置区域；根记录使用已登记路径，目录临时子项使用登记文件夹 ID 加受控相对路径生成位置摘要。搜索覆盖名称、类型、状态、路径、目录层级、标签和分组；同名资料显示父目录摘要，根记录和目录子项均提供受控资源管理器定位入口。
+- 阶段 G：搜索无结果、筛选无结果、失效路径、空目录和导入上限均有下一步入口或明确状态；主窗口只展示基于 `addedAt` 的“最近添加”，托盘/悬浮球继续使用 `lastRecordedAt` 的“最近记录”，没有虚构“最近打开”入口。
+- 阶段 H：索引从 v3 安全迁移到 v4，新增 `tags`、可选 `groupId`、分组表和 revision 持久化；旧索引新字段默认为空，迁移失败保留旧文件。Rust 增加标签/分组名称校验、分组创建/重命名/删除、条目标签/分组更新和受控目录子项定位 command。
+- 阶段 H：资料库新增类型、标签多选、分组多选与已有搜索/收藏/失效导航的组合筛选；分组已按用户反馈单独显示为资料表“分组”列，标签保留在名称下方，删除分组只解除归属，不修改索引记录或原文件。
+- 阶段 I：主索引支持稳定 ID 多选、批量收藏/取消收藏、添加/移除标签、设置/解除分组和移除索引；批量移除前展示选中数量和文件名范围，返回每项成功/失败/跳过及原因，不开放批量物理复制、重命名或删除。
+- 阶段 I：可逆索引变更写入最多 50 条本地元数据撤销记录，不保存正文；撤销要求当前 revision 和每个目标状态都匹配。batch 操作使用操作 ID、后台任务、10 秒截止时间和取消标记，已完成项可部分成功，取消/超时项保留重试入口。
+- 同步前端 IPC runtime validator、TypeScript 声明、Tauri command handler/build manifest、main capability 和自动生成 schema；重命名/重新定位继续保留原有标签和分组。
+
+#### 进行中
+
+- 阶段 G-I 已完成代码级实现和开发侧自动验证；正式版本仍为 `0.3.6`，候选版本 `0.3.13`-`0.3.15` 尚未写入版本入口，等待用户按阶段在 Windows 11/Tauri/WebView2 桌面环境验收。
+
+#### 阻塞与风险
+
+- 本轮只验证了浏览器回退 UI、Rust 存储/command 编译和模型契约，未代替用户完成 Windows 11 原生路径选择、真实长路径/同名文件、资源管理器定位、分组重启恢复、托盘/悬浮球同步、批量取消和安装包运行验收。
+- 浏览器回退不执行真实 Tauri command；`navigator.clipboard` 位置复制、`reveal_directory_child` 资源管理器调用和 batch cancel 仍需桌面环境确认。不能把本轮浏览器截图或自动测试写成 Windows 手工验收通过。
+- 索引格式已升级为 v4，旧 v3 迁移覆盖无标签/无分组夹具；仍需在用户真实升级路径上确认备份、磁盘权限和异常退出边界。安装包未签名、目标机需要 WebView2、DOC 预览需要 LibreOffice 和 SheetJS 既有风险保持不变。
+
+#### 下一步
+
+- 用户在 Windows 11 安装/启动当前开发构建，使用中文、空格、深层路径和同名文件验证位置展开/复制/定位、路径搜索和筛选组合；记录显示器/DPI、文件类型、路径形态和失败步骤。
+- 用户继续验证创建/重命名/删除分组、标签批量变更、收藏/失效组合、重启恢复、托盘/悬浮球同步，以及批量移除确认、取消、部分成功、重试和 revision 过期撤销。
+- 收到桌面验收结果后只修复具体阻断项；阶段门禁、版本入口和用户验收证据一致且获得明确授权前，不提升版本、不构建 Release。
+
+#### 涉及文件
+
+- `prototype/src/features/library/libraryModel.js`、`LibraryPanel.jsx`、`LibraryActions.jsx`、`libraryControllerModel.js`、`libraryRepository.js`、`useIndexController.js`、`useLibraryActions.js`、`prototype/src/App.jsx`、`prototype/src/styles.css`
+- `prototype/src/lib/ipcContracts.js`、`ipcContracts.d.ts`
+- `prototype/src-tauri/src/filesystem/mod.rs`、`commands/mod.rs`、`commands/library.rs`、`storage/mod.rs`、`storage/repository.rs`、`windows/tray.rs`、`src-tauri/src/lib.rs`、`build.rs`、`capabilities/default.json`、`permissions/autogenerated/`
+- `prototype/tests/library-model.test.mjs`、`library-controller.test.mjs`、`ipc-contracts.test.mjs`、`prototype/README.md`、根 `README.md`、`PROJECT_PLAN.md`
+
+#### 验证
+
+- `npm.cmd run test:library`：8 项通过；`npm.cmd run test:contracts`：8 项通过，覆盖位置路径/深层目录、同名父目录、标签/分组组合筛选、v4 groups/undo payload、批量部分结果和标签校验。
+- `npm.cmd run test:settings`：4 项通过；`npm.cmd run test:preview`：9 项通过；`npm.cmd run test:floating-ball`：17 项通过；`npm.cmd run test:tray`：3 项通过；`npm.cmd run test:sites`：4 项通过。
+- `npm.cmd run build`：通过，Sites 产物继续生成 `dist/client/index.html`、`dist/server/index.js` 和 `dist/.openai/hosting.json`；保留既有大 chunk 提示。
+- `cargo fmt --all -- --check`、`cargo check`、`cargo clippy --all-targets --all-features -- -D warnings`：均通过；`cargo test --all-targets`：61 项通过。
+- Playwright Microsoft Edge 回退检查：1280px 资料表显示独立“分组”列和可展开位置；680px 表格 `scrollWidth=clientWidth=629`；360px 表格 `scrollWidth=clientWidth=309`、`body.scrollWidth=360`，分组字段渲染为“未分组”，无横向溢出。截图保存在被忽略的 `prototype/output/playwright/`，临时 Vite 服务和浏览器会话已关闭。
+- 未执行 `npm.cmd run tauri:build`、安装器启动/卸载和 Windows 11 原生手工验收；未把当前开发分支宣传为 `0.3.13`-`0.3.15` 正式候选。
+
+### PDF 渲染与关闭退出生命周期修复
+
+#### 已完成
+
+- PDF.js 构建时从锁定的 `pdfjs-dist@4.10.38` 输出 CMap 和标准字体资源，PDF 加载时显式配置资源目录，覆盖需要 CMap/标准字体的 PDF 字符绘制场景。
+- PDF 页面使用设备像素比创建受限的后台 canvas，等待 `RenderTask` 完成后再复制到可见 canvas；保留页数、页面尺寸、像素上限、分页、缩放、取消和资源释放逻辑，避免 WebView2 在异步绘制期间显示缺字或半成品页面。
+- 修复 `hideToTray=false` 时主窗口关闭只销毁 `main` 窗口的问题：现在通过统一退出路径幂等关闭悬浮球、释放预览资源、移除托盘并退出应用；`hideToTray=true` 的托盘驻留行为保持不变，托盘不可用时仍保留主窗口并提示。
+- 增加 PDF canvas 尺寸模型测试和关闭策略测试；没有修改索引格式、设置格式或预览资源协议。
+
+#### 验收结果
+
+- 用户已确认在 Windows 11 Tauri/WebView2 桌面环境完成本轮手工验证，包含真实多页 PDF 的字符完整性、翻页/缩放，以及关闭隐藏未勾选时托盘和悬浮球清理、应用退出行为。
+
+#### 阻塞与风险
+
+- 本轮无新增阻塞；安装包未签名、目标机需要 WebView2、DOC 预览需要 LibreOffice，仍是既有发布边界。
+
+#### 下一步
+
+- 保持 `ada2dbd` 为本次修复基线；后续如出现回归，优先记录 PDF 样本的字体/页码、WebView2 版本和窗口关闭设置，再针对性追加修复。
+
+#### 涉及文件
+
+- `prototype/vite.config.mjs`、`prototype/src/features/preview/PdfPreviewer.jsx`、`prototype/src/features/preview/pdfRenderModel.js`
+- `prototype/src-tauri/src/windows/lifecycle.rs`、`prototype/src-tauri/src/windows/lifecycle_policy.rs`、`prototype/src-tauri/src/lib.rs`
+- `prototype/tests/pdf-render-model.test.mjs`、`prototype/README.md`、`README.md`
+
+#### 验证
+
+- `npm.cmd run test:preview`：9 项通过，包含 PDF canvas 尺寸模型、预览注册表、安全边界和工作簿夹具。
+- `npm.cmd run build`：通过；`dist/client/pdfjs/` 输出 185 个 CMap/标准字体资源，总计 1,948,053 bytes，并保留 Sites 所需的 `dist/client/index.html`、`dist/server/index.js` 和 `dist/.openai/hosting.json`。
+- 临时 Vite 服务端的 `GB-V.bcmap` 和 `FoxitSymbol.pfb` 请求均返回 `200`，响应体长度与资源文件一致；验证端口已关闭。
+- `cargo fmt --all -- --check`：通过；`cargo test --all-targets`：57 项通过；`cargo clippy --all-targets --all-features -- -D warnings`：通过。
+- `npm.cmd run tauri:build`：通过，生成 `prototype/src-tauri/target/release/bundle/nsis/本地资料工作台_0.3.6_x64-setup.exe`；最终安装器为 8,522,230 bytes，SHA-256 为 `B2032E991003D0D68A8096F5F19F6634CD842183F6E7FC32E8D8FB13C231EC8C`；`verify-webview2-loader.mjs` 通过，x64 loader 为 160320 bytes，SHA-256 为 `8427b1fc58ec707813e5c0a51eb5d69397bb333250a7b891be4d3b123f1e0f1c`。
+- PDF skill 的临时两页 PDF 已使用 Poppler 渲染并逐页检查，页面、公式文本、第二页表格和边界正常；真实 Windows 11 PDF/托盘/悬浮球手工验收由用户完成并确认通过。
+
+### 新总体计划阶段 A-D 代码实现
+
+#### 已完成
+
+- 在独立分支 `codex/implement-phases-a-d`（基线 HEAD `86b20ae`）完成 `PROJECT_PLAN.md` 阶段 A-D 的代码级实现；保留用户已有的未提交计划改动，没有执行 commit、merge、push、tag 或 Release。
+- 阶段 A：`can_preview`、`load_preview` 改用 `fileId` 或“登记文件夹 ID + 相对路径片段”，`list_directory` 后端重新校验登记归属、规范化路径、普通文件/文件夹、符号链接和 Windows reparse point；Markdown 链接 sanitizer 拒绝网络协议、绝对路径、协议相对 URL 和反斜杠变体。
+- 阶段 B：索引状态增加单调 `revision`，新增 `refresh_index` 和托盘刷新入口；主窗口使用 single-flight/revision 丢弃旧响应，刷新时保留选择、目录面包屑、页码和滚动容器；“最近添加”按持久化 `addedAt` 限制最近 50 条，目录视图不再按临时添加时间排序。
+- 阶段 C：索引加载增加字段、类型、状态、时间、ID 和路径结构校验，重复 ID/路径按稳定顺序合并；损坏、未知版本和迁移写入失败会先备份并进入可操作恢复状态；设置损坏会备份并写回安全默认值；删除原文件增加 `pending-operations.json` 待同步记录，库操作错误返回结构化类别和文件状态。
+- 阶段 D：增加 Rust 预览任务取消注册表和退出清理；DOC 使用隔离 LibreOffice profile、输出 PDF 签名/大小校验和取消清理；Office ZIP 增加 `zip` 容器条目/解压后体积限制；XLSX Worker 按工作表惰性解析并限制首屏/单元格；PDF 增加页数、页面尺寸和 canvas 像素上限，图片/视频旧媒体事件通过稳定节点和资源切换隔离，预览资源按活动时间定时回收。
+- 同步根 README、`prototype/README.md`、阶段清单和前端/ Rust 测试夹具；实际版本入口仍为 `0.3.6`，没有把 `0.3.7`-`0.3.10` 候选写入构建配置。
+
+#### 进行中
+
+- 等待用户在 Windows 11 Tauri 开发版完成阶段 A-D 手工验收，然后按阶段决定是否分别提升到 `0.3.7`、`0.3.8`、`0.3.9`、`0.3.10`；当前不能把自动测试当作桌面验收。
+
+#### 阻塞与风险
+
+- 本轮未代替用户完成真实 Windows 11 桌面验收；目录/预览授权的中文、空格、深层路径，外部移动/删除后的刷新，索引损坏恢复，重命名/回收站部分成功，DOC 转换取消，XLSX/PDF 大文件和托盘/悬浮球跨窗口同步仍需用户执行。
+- `xlsx@0.18.5` 的既有 Prototype Pollution/ReDoS 风险仍在；当前通过 Rust Office ZIP 边界、Worker 惰性解析、单元格/超时限制降低暴露面，未宣称依赖风险消失。
+- DOC 仍依赖用户本机 LibreOffice，WebView2 Runtime 仍由目标机提供，安装包仍未签名；本轮没有执行 Release 发布流程。
+
+#### 下一步
+
+- 用户使用当前分支启动 `npm.cmd run tauri:dev`，按 `PROJECT_PLAN.md` 阶段 A-D 完成真实文件和窗口验收，记录失败项的文件类型、路径形态、显示器/DPI 和复现步骤。
+- 收到验收结果后，先修复阻断项并重新执行对应阶段最小验证；只有阶段门禁和版本入口一致后，才在明确授权下更新候选版本或执行 Git 发布流程。
+
+#### 涉及文件
+
+- `prototype/src-tauri/src/commands/`、`prototype/src-tauri/src/filesystem/`、`prototype/src-tauri/src/storage/`
+- `prototype/src-tauri/src/preview/`、`prototype/src-tauri/src/windows/tray.rs`、`prototype/src-tauri/src/windows/tray_model.rs`
+- `prototype/src/App.jsx`、`prototype/src/features/library/`、`prototype/src/features/preview/`、`prototype/src/features/floating-ball/`
+- `prototype/tests/preview-security.test.mjs`、`prototype/tests/library-model.test.mjs`、`prototype/tests/tray-model.test.mjs`
+- `PROJECT_PLAN.md`、`README.md`、`prototype/README.md`、`prototype/package.json`、`prototype/src-tauri/Cargo.toml`、`prototype/src-tauri/Cargo.lock`
+
+#### 验证
+
+- `cargo fmt --check`：通过。
+- `cargo check`：通过。
+- `cargo check --tests`：通过。
+- `cargo test`：54 项通过，包含 Deflate 压缩 DOCX 容器回归测试。
+- `cargo clippy --all-targets --all-features -- -D warnings`：通过。
+- `npm.cmd run build`：通过，并生成 Sites 所需的 `dist/client/index.html`、`dist/server/index.js` 和 `dist/.openai/hosting.json`。
+- `npm.cmd run test:preview`：6 项通过，包含 Markdown 链接安全边界测试。
+- 其他前端针对性测试通过：`test:library` 6 项、`test:settings` 4 项、`test:floating-ball` 17 项、`test:tray` 3 项、`test:sites` 4 项。
+- `npm.cmd run tauri:build`：通过，生成 `prototype/src-tauri/target/release/bundle/nsis/本地资料工作台_0.3.6_x64-setup.exe`；安装器大小 `7021782` bytes，SHA-256 为 `91003AAD2C88804087C1B0D689424C22712BBE8B9055B83F8CFD8AAD290B0850`。
+- 构建后的 `WebView2Loader.dll` 校验通过：`160320` bytes，SHA-256 为 `8427b1fc58ec707813e5c0a51eb5d69397bb333250a7b891be4d3b123f1e0f1c`，与 `local-material-workbench.exe` 位于同一 release 目录。
+- 当前未执行 Windows 11 手工验收、commit、远程推送、tag 或 Release。
+
+### ACL 权限修复与安装包重建
+
+#### 已完成
+
+- 修复 `refresh_index` 已注册但未进入 Tauri command manifest/capability 的问题；同步 `src-tauri/build.rs`、`capabilities/default.json` 和自动生成的 ACL schema/permission 文件。
+- 同步主窗口实际使用的 `dialog:allow-save` 和 `allow-cancel-preview-task` 权限，避免索引诊断导出和预览取消在安装包中再次被 ACL 拦截。
+- 修复 `zip` 依赖缺少 `deflate` feature 导致合法 DOCX 被 Rust Office ZIP 预检判为 `UnsupportedArchive` 的问题，并保留 Deflate DOCX 容器回归测试。
+- `mammoth@1.12.2` 自带 `single-paragraph.docx` 和 `strict-format.docx` 夹具均可直接转换；仓库没有用户 DOCX 测试样本，因此未读取用户真实文档。
+
+#### 进行中
+
+- 等待用户安装最新 `0.3.6` 包后复测截图中的刷新按钮和 DOCX 预览；若仍失败，请记录预览状态文案和文件是否为普通 DOCX/加密文档/超限文件。
+
+#### 验证
+
+- `npm.cmd run tauri:build`：通过，生成 `prototype/src-tauri/target/release/bundle/nsis/本地资料工作台_0.3.6_x64-setup.exe`；安装器大小 `7027983` bytes，SHA-256 为 `55932E545FBE50F31C37077C06205E0811C3233BC182EC2B3BE69F81DD1B4E81`。
+- `verify-webview2-loader`：通过；`WebView2Loader.dll` 为 `160320` bytes，x64，和 release 主程序位于同一目录。
+- `git diff --check`：通过；构建产物仍被 `.gitignore` 忽略，没有执行 commit、push、tag 或 Release。
+
+### 新总体计划阶段 E-F 代码实现
+
+#### 已完成
+
+- 先将阶段 A-D 的现状提交为 `2adeb67`（`feat: 完成阶段A-D代码实现`），再从 `dev` 的 `86b20ae` 快进合并到本地 `dev`；之后在独立分支 `codex/implement-phases-e-f` 继续实现，本轮没有 push、tag 或 Release。
+- 阶段 E：将 `App.jsx` 从约 1,169 行收敛为页面组合层；索引加载/revision 刷新/恢复、资料目录导航、文件操作/选择器、设置状态和窗口事件分别下沉到 controller/hook。
+- 新增 `prototype/shared/file-types.json`，统一扩展名、kind、文件类型、预览器、媒体类型、编码语言和预览限制；前端 `fileTypes.js`、预览注册表、设置限制和 Rust `filesystem` 均从该 manifest 派生。
+- 新增 IPC contract runtime validator 与 `ipcContracts.d.ts`，统一 opaque ID、相对路径、索引 snapshot/mutation、revision 事件、预览状态、设置、托盘和悬浮窗结果；前端 command 通过 `libraryRepository`、预览/设置/悬浮球 API 收口。
+- Rust 新增 `storage/repository.rs`，集中索引快照、导入合并、刷新、原子 mutation、恢复和待同步文件操作委托；command 只负责编排后台任务、参数边界和事件发布。索引 v3、设置 v2、数据目录和事件 revision 保持不变。
+- 阶段 F：资料库改用语义化 `<table>`/`thead`/`tbody`/`th scope`/`rowheader`；行操作收进更多菜单并将原文件删除放在独立“危险操作”分组。
+- 新增统一 `Dialog` 组件和焦点陷阱，覆盖打开焦点、Tab 循环、Escape、背景点击、`aria-labelledby`、`aria-describedby` 和关闭后的触发点焦点返回；预览、设置、移除、重命名和删除确认均复用该组件。
+- 重命名输入增加非法字符、Windows 保留名、尾部空格/点、长度、扩展名、未变化和同目录冲突的逐项内联提示；图片使用文件名生成可访问名称，视频补充带文件名的 `aria-label`。
+- 窄窗口在 `680px`/`360px` 下切换为紧凑资料卡片，只保留文件名、类型、状态和高频操作；样式集中增加颜色/间距/圆角/控件/阴影 token，并明确 `prefers-reduced-motion` 与深色模式策略。
+- 前端托盘模型保留为 Rust 托盘菜单 ID 的唯一跨层契约测试用途，并在文件内标注；实际托盘菜单继续由 Rust 创建。
+
+#### 进行中
+
+- 阶段 E-F 代码和开发侧自动验证已完成，实际版本入口仍为 `0.3.6`；等待用户在 Windows 11 Tauri/WebView2 桌面环境执行阶段 E-F 手工验收，未将浏览器回退检查写成桌面验收。
+
+#### 阻塞与风险
+
+- 本轮没有代替用户执行 Windows 11 原生窗口、托盘、悬浮球、文件选择器、真实预览和文件操作验收；这些仍需用户记录目标窗口尺寸、显示器/DPI、文件类型、路径形态和复现步骤。
+- `xlsx@0.18.5` 的既有 Prototype Pollution/ReDoS 风险仍未消失；LibreOffice、WebView2 Runtime、视频编码和未签名安装包仍是既有发布边界。
+- 当前前端项目仍是 JavaScript/JSX；本阶段提供 `.d.ts` 类型声明和运行时校验，没有一次性迁移全部 JSX，完整 lint/typecheck 仍属于阶段 J。
+
+#### 下一步
+
+- 用户使用当前分支启动 `npm.cmd run tauri:dev`，验证键盘导入/搜索/排序/行选择/预览/弹窗确认、语义表读屏关系、窄窗口无覆盖、托盘/悬浮球同步及现有 A-D 场景。
+- 收到桌面验收结果后先修复阻断项；只有阶段门禁、版本入口和用户验收证据一致且获得明确授权，才提升 `0.3.11`/`0.3.12` 候选版本或执行发布流程。
+
+#### 涉及文件
+
+- `prototype/shared/file-types.json`、`prototype/src/lib/`、`prototype/src/components/Dialog.jsx`
+- `prototype/src/App.jsx`、`prototype/src/features/library/`、`prototype/src/features/preview/`、`prototype/src/features/settings/`、`prototype/src/features/window/`
+- `prototype/src/features/floating-ball/floatingBallApi.js`、`prototype/src/features/tray/trayModel.js`、`prototype/src/styles.css`
+- `prototype/src-tauri/src/storage/repository.rs`、`filesystem/mod.rs`、`preview/`、`commands/`、`build.rs`
+- `prototype/tests/ipc-contracts.test.mjs`、`prototype/tests/library-controller.test.mjs`、`prototype/tests/fixtures/`
+- `PROJECT_PLAN.md`、`README.md`、`prototype/README.md`、`prototype/package.json`
+
+#### 验证
+
+- `npm.cmd run test:contracts`：6 项通过；覆盖共享 manifest、重命名规则、opaque ID、相对路径、revision 事件、预览状态和结构化错误映射。
+- `npm.cmd run test:library`：6 项通过；`test:settings`：4 项通过；`test:preview`：6 项通过；`test:floating-ball`：17 项通过；`test:tray`：3 项通过；`test:sites`：4 项通过。
+- `npm.cmd run build`：通过，生成 `dist/client/index.html`、`dist/server/index.js` 和 `dist/.openai/hosting.json`；仅有既有大 chunk 警告。
+- `cargo fmt --all -- --check`、`cargo test`、`cargo clippy --all-targets --all-features -- -D warnings`：均通过；Rust 共 55 项测试通过。
+- Browser 回退检查：1280px 无页面/表格横向滚动；680px 和 360px 切换紧凑列表，名称/操作矩形无交叠；设置、预览和重命名 Dialog 的焦点、Escape、内联错误和危险操作菜单可见；页面 error/warning 日志为空。临时服务端口 `49219` 已关闭。
+- `npm.cmd run tauri:build`：通过，生成 Windows x64 NSIS 安装包 `prototype/src-tauri/target/release/bundle/nsis/本地资料工作台_0.3.6_x64-setup.exe`；大小 `7046540` bytes，SHA-256 为 `A7E3DA3D073A0B533F0B7619453F5862D8B176276EF3D71914AC2E6BFDD21F6C`。
+- `WebView2Loader.dll` 校验通过：`160320` bytes，SHA-256 为 `8427b1fc58ec707813e5c0a51eb5d69397bb333250a7b891be4d3b123f1e0f1c`，x64 loader 与 release 主程序位于同一目录。
+- `git diff --check`：通过；正式版本仍为 `0.3.6`，没有执行安装器启动/卸载或 Windows 桌面手工验收。
+
+### PDF 预览渲染布局修复
+
+#### 已完成
+
+- 修复 `PreviewPane` 统一 Dialog 改造后多出的内容包装层：PDF 预览现在直接挂载到 `preview-dialog-body`，`aria-busy` 由 Dialog body 承担，避免 `.preview-pdf-content` 的百分比高度和内部 flex 高度失去明确包含块。
+- 保留 PDF.js worker、资源 URL、分页、缩放、取消和资源释放逻辑；未改变 PDF 大小/页数/canvas 限制或 Rust 资源协议。
+
+#### 进行中
+
+- 代码回归、浏览器有效 PDF 检查和最新 NSIS 重建已通过；正式版本仍为 `0.3.6`，等待用户安装最新安装包后完成 Windows 11 PDF 手工验收。
+
+#### 阻塞与风险
+
+- 本轮未代替用户执行 Windows 11 桌面安装、启动、真实 PDF 文件和 WebView2 手工验收。
+
+#### 下一步
+
+- 用户安装最新 NSIS 包后复测 PDF 首页、分页、缩放和关闭预览，并记录目标 Windows/WebView2 版本及失败样本。
+
+#### 涉及文件
+
+- `prototype/src/components/Dialog.jsx`
+- `prototype/src/features/preview/PreviewPane.jsx`
+- `PROJECT_PROGRESS.md`
+
+#### 验证
+
+- `npm.cmd run test:preview`：6 项通过。
+- `npm.cmd run build`：通过，Sites 产物生成成功。
+- PDF skill 临时两页 PDF：Poppler 源文件渲染正常；浏览器 `Dialog + PdfPreviewer` canvas 在 100% 时为 `612x792`，第 2 页 125% 时为 `765x990`，截图内容正常且页面 error/warning 日志为空。
+- 临时调试 HTML、有效 PDF、Poppler PNG 和服务端口 `49220` 已清理/关闭。
+- `npm.cmd run tauri:build`：通过，生成修复后的 Windows x64 NSIS 安装包 `prototype/src-tauri/target/release/bundle/nsis/本地资料工作台_0.3.6_x64-setup.exe`；大小 `7047318` bytes，SHA-256 为 `BFE38EC70626D888A5A9C54F71E236146BF0492D564BC3B64017E125EDCA4A74`。
+- `WebView2Loader.dll` 校验通过：`160320` bytes，SHA-256 为 `8427b1fc58ec707813e5c0a51eb5d69397bb333250a7b891be4d3b123f1e0f1c`，x64 loader 与 release 主程序位于同一目录。
+
 ## 2026-08-30
 
 ### 悬浮球拖动后无法展开与收起闪烁修复

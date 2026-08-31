@@ -51,12 +51,20 @@ impl PreviewResourceStore {
 
         let (safe_path, metadata) =
             match filesystem::validate_preview_file(&resource.path.to_string_lossy()) {
-                Ok(value) if value.0 == resource.path => value,
+                Ok(value)
+                    if filesystem::same_path(
+                        &value.0.to_string_lossy(),
+                        &resource.path.to_string_lossy(),
+                    ) =>
+                {
+                    value
+                }
                 Err(crate::filesystem::PreviewPathError::PermissionDenied) => {
                     return response(StatusCode::FORBIDDEN, Vec::new()).finish();
                 }
                 Ok(_) | Err(_) => return response(StatusCode::NOT_FOUND, Vec::new()).finish(),
             };
+        self.touch(preview_id);
         if metadata.len() != resource.byte_length {
             return response(StatusCode::CONFLICT, Vec::new()).finish();
         }

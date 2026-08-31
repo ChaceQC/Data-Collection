@@ -7,7 +7,7 @@ import {
 } from "@phosphor-icons/react";
 import { normalizePreviewResourceUrl } from "./previewTypes";
 
-export function ImagePreviewer({ content }) {
+export function ImagePreviewer({ content, title = "图片" }) {
   const [mode, setMode] = useState("fit");
   const [scale, setScale] = useState(1);
   const [rotation, setRotation] = useState(0);
@@ -45,9 +45,10 @@ export function ImagePreviewer({ content }) {
         {status === "loading" && <div className="preview-loading-state">正在加载图片...</div>}
         {status === "parse-error" && <div className="preview-error-state">图片无法显示，请检查文件是否损坏。</div>}
         <img
+          key={content.resourceUrl}
           className={`preview-image ${mode === "fit" ? "is-fit" : "is-free"} ${status === "ready" ? "" : "is-hidden"}`}
           src={normalizePreviewResourceUrl(content.resourceUrl)}
-          alt=""
+          alt={`${title} 图片预览`}
           onLoad={() => setStatus("ready")}
           onError={() => setStatus("parse-error")}
           style={{

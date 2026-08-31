@@ -154,6 +154,9 @@ fn build_menu<R: Runtime>(app: &AppHandle<R>) -> Result<Menu<R>, String> {
         None::<&str>,
     )
     .map_err(|_| "托盘菜单无法创建".to_string())?;
+    let refresh_index =
+        MenuItem::with_id(app, "tray-refresh-index", "刷新索引", true, None::<&str>)
+            .map_err(|_| "托盘菜单无法创建".to_string())?;
     let recent = build_recent_submenu(app)?;
     let open_settings =
         MenuItem::with_id(app, "tray-open-settings", "打开设置", true, None::<&str>)
@@ -163,6 +166,7 @@ fn build_menu<R: Runtime>(app: &AppHandle<R>) -> Result<Menu<R>, String> {
     let menu = Menu::new(app).map_err(|_| "托盘菜单无法创建".to_string())?;
     menu.append(&open_main)
         .and_then(|_| menu.append(&toggle_floating))
+        .and_then(|_| menu.append(&refresh_index))
         .and_then(|_| menu.append(&recent))
         .and_then(|_| menu.append(&open_settings))
         .and_then(|_| menu.append(&exit))
@@ -173,13 +177,7 @@ fn build_menu<R: Runtime>(app: &AppHandle<R>) -> Result<Menu<R>, String> {
 fn build_recent_submenu<R: Runtime>(app: &AppHandle<R>) -> Result<Submenu<R>, String> {
     let recent = app
         .state::<AppState>()
-        .update_entries(|entries| {
-            let mut changed = false;
-            for entry in entries.iter_mut() {
-                changed |= crate::filesystem::refresh_entry(entry);
-            }
-            Ok(changed)
-        })
+        .snapshot()
         .map_err(|_| "最近任务暂时无法读取".to_string())
         .map(|entries| storage::floating_recent(&entries));
     let submenu = Submenu::with_id(app, "tray-recent-tasks", "最近任务", true)
@@ -270,6 +268,12 @@ fn handle_menu_event<R: Runtime>(app: &AppHandle<R>, event: tauri::menu::MenuEve
             let _ = app.emit_to("main", "open-settings", ());
         }
         TrayMenuAction::ToggleFloating => toggle_floating(app),
+        TrayMenuAction::RefreshIndex => {
+            let state = app.state::<AppState>();
+            if commands::refresh_index_sync(state.inner(), app).is_err() {
+                emit_error(app, "索引刷新失败，请重试");
+            }
+        }
         TrayMenuAction::Exit => {
             let lifecycle_state = app.state::<LifecycleState>();
             let floating = app.state::<FloatingBallState>();
@@ -344,9 +348,18 @@ fn toggle_favorite<R: Runtime>(app: &AppHandle<R>, file_id: &str) {
     };
     let result = app
         .state::<AppState>()
-        .update_entries(|entries| storage::set_favorite(entries, file_id, !current_favorite));
+        .update_index_with_undo("favorite", |entries, _groups| {
+            let changed = storage::set_favorite(entries, file_id, !current_favorite)?;
+            Ok((changed, ()))
+        });
     match result {
-        Ok(_) => commands::emit_index_changed(app, vec![file_id.to_string()]),
+        Ok(result) if result.changed => commands::emit_index_changed(
+            app,
+            result.revision,
+            vec![file_id.to_string()],
+            "favorite",
+        ),
+        Ok(_) => {}
         Err(_) => emit_error(app, "收藏状态更新失败，请重试"),
     }
 }

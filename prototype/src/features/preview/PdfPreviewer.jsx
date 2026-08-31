@@ -3,36 +3,56 @@ import { CaretLeft, CaretRight, MagnifyingGlassMinus, MagnifyingGlassPlus } from
 import * as pdfjsLib from "pdfjs-dist";
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { normalizePreviewResourceUrl } from "./previewTypes";
+import {
+  getPdfCanvasMetrics,
+  PDF_CANVAS_PIXEL_LIMIT,
+} from "./pdfRenderModel";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl;
+
+const MAX_PDF_PAGES = 200;
 
 export function PdfPreviewer({ content }) {
   const canvasRef = useRef(null);
   const [documentState, setDocumentState] = useState({ status: "loading", document: null, reason: "" });
   const [page, setPage] = useState(1);
   const [scale, setScale] = useState(1);
+  const loadSequence = useRef(0);
+  const renderSequence = useRef(0);
 
   useEffect(() => {
     let cancelled = false;
     let loadedDocument = null;
+    const sequence = loadSequence.current + 1;
+    loadSequence.current = sequence;
     setDocumentState({ status: "loading", document: null, reason: "" });
     setPage(1);
+    setScale(1);
     const loadingTask = pdfjsLib.getDocument({
       url: normalizePreviewResourceUrl(content.resourceUrl),
       isEvalSupported: false,
       disableAutoFetch: false,
+      cMapUrl: new URL("pdfjs/cmaps/", globalThis.document.baseURI).href,
+      cMapPacked: true,
+      standardFontDataUrl: new URL("pdfjs/standard_fonts/", globalThis.document.baseURI).href,
+      maxImageSize: PDF_CANVAS_PIXEL_LIMIT,
     });
     loadingTask.promise
       .then((document) => {
         loadedDocument = document;
-        if (cancelled) {
-          void document.destroy();
+        if (cancelled || loadSequence.current !== sequence) {
+          void document.destroy().catch(() => undefined);
+          return;
+        }
+        if (!Number.isInteger(document.numPages) || document.numPages < 1 || document.numPages > MAX_PDF_PAGES) {
+          void document.destroy().catch(() => undefined);
+          setDocumentState({ status: "too-large", document: null, reason: "PDF 页数超过 200 页预览限制。" });
           return;
         }
         setDocumentState({ status: "ready", document, reason: "" });
       })
       .catch((error) => {
-        if (!cancelled) {
+        if (!cancelled && loadSequence.current === sequence) {
           const reason = error?.name === "PasswordException"
             ? "加密 PDF 暂不支持预览。"
             : "PDF 无法解析，请检查文件是否损坏。";
@@ -41,8 +61,8 @@ export function PdfPreviewer({ content }) {
       });
     return () => {
       cancelled = true;
-      void loadingTask.destroy();
-      if (loadedDocument) void loadedDocument.destroy();
+      void loadingTask.destroy().catch(() => undefined);
+      if (loadedDocument) void loadedDocument.destroy().catch(() => undefined);
     };
   }, [content.resourceUrl]);
 
@@ -51,30 +71,65 @@ export function PdfPreviewer({ content }) {
     if (!document) return undefined;
     let cancelled = false;
     let renderTask;
+    let renderedCanvas;
+    const sequence = renderSequence.current + 1;
+    renderSequence.current = sequence;
     async function renderPage() {
       try {
         const pdfPage = await document.getPage(page);
-        if (cancelled) return;
+        if (cancelled || renderSequence.current !== sequence) return;
         const viewport = pdfPage.getViewport({ scale });
-        const canvas = canvasRef.current;
-        if (!canvas) return;
-        canvas.width = viewport.width;
-        canvas.height = viewport.height;
+        const metrics = getPdfCanvasMetrics(viewport, globalThis.devicePixelRatio);
+        if (!metrics) {
+          throw new Error("page-too-large");
+        }
+        // 先在不可见画布中完成整页绘制，避免异步绘制过程暴露半成品。
+        renderedCanvas = globalThis.document.createElement("canvas");
+        renderedCanvas.width = metrics.pixelWidth;
+        renderedCanvas.height = metrics.pixelHeight;
+        const renderContext = renderedCanvas.getContext("2d", { alpha: false, willReadFrequently: true });
+        if (!renderContext) throw new Error("canvas-context");
         renderTask = pdfPage.render({
-          canvasContext: canvas.getContext("2d", { alpha: false }),
+          canvasContext: renderContext,
           viewport,
+          transform: [metrics.outputScale, 0, 0, metrics.outputScale, 0, 0],
         });
         await renderTask.promise;
+        if (cancelled || renderSequence.current !== sequence) return;
+        const canvas = canvasRef.current;
+        if (!canvas) return;
+        canvas.width = metrics.pixelWidth;
+        canvas.height = metrics.pixelHeight;
+        canvas.style.width = `${metrics.cssWidth}px`;
+        canvas.style.height = `${metrics.cssHeight}px`;
+        const visibleContext = canvas.getContext("2d", { alpha: false, willReadFrequently: true });
+        if (!visibleContext) throw new Error("canvas-context");
+        visibleContext.drawImage(renderedCanvas, 0, 0);
       } catch (error) {
-        if (!cancelled && error?.name !== "RenderingCancelledException") {
-          setDocumentState((current) => ({ ...current, status: "parse-error", reason: "PDF 页面渲染失败，请重试。" }));
+        if (!cancelled && renderSequence.current === sequence && error?.name !== "RenderingCancelledException") {
+          setDocumentState((current) => ({
+            ...current,
+            status: error?.message === "page-too-large" ? "too-large" : "parse-error",
+            reason: error?.message === "page-too-large"
+              ? "当前 PDF 页面尺寸超过预览像素限制，请缩小或使用系统程序打开。"
+              : "PDF 页面渲染失败，请重试。",
+          }));
         }
       }
     }
     void renderPage();
     return () => {
       cancelled = true;
+      renderSequence.current += 1;
       renderTask?.cancel();
+      if (renderedCanvas) {
+        renderedCanvas.width = 0;
+        renderedCanvas.height = 0;
+      }
+      if (canvasRef.current) {
+        canvasRef.current.width = 0;
+        canvasRef.current.height = 0;
+      }
     };
   }, [documentState.document, page, scale]);
 

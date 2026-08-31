@@ -11,13 +11,18 @@ use uuid::Uuid;
 
 use crate::filesystem;
 
+use super::PreviewCancellation;
+
 const CONVERSION_TIMEOUT: Duration = Duration::from_secs(60);
+const MAX_CONVERTER_OUTPUT_BYTES: u64 = 64 * 1024;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum DocConversionError {
     MissingConverter,
     Failed,
     TimedOut,
+    Cancelled,
+    OutputTooLarge,
 }
 
 #[derive(Debug)]
@@ -31,7 +36,10 @@ pub(crate) fn converter_available() -> bool {
     resolve_soffice().is_some()
 }
 
-pub(crate) fn convert_to_pdf(input: &Path) -> Result<ConvertedPdf, DocConversionError> {
+pub(crate) fn convert_to_pdf(
+    input: &Path,
+    cancellation: &PreviewCancellation,
+) -> Result<ConvertedPdf, DocConversionError> {
     let Some(executable) = resolve_soffice() else {
         return Err(DocConversionError::MissingConverter);
     };
@@ -41,17 +49,31 @@ pub(crate) fn convert_to_pdf(input: &Path) -> Result<ConvertedPdf, DocConversion
         remove_temporary_directory(&temporary_directory);
         return Err(DocConversionError::Failed);
     };
-    let output_path = temporary_directory.join(format!("{stem}.pdf"));
+    let output_directory = temporary_directory.join("output");
+    let profile_directory = temporary_directory.join("profile");
+    if fs::create_dir_all(&output_directory).is_err()
+        || fs::create_dir_all(&profile_directory).is_err()
+    {
+        remove_temporary_directory(&temporary_directory);
+        return Err(DocConversionError::Failed);
+    }
+    let output_path = output_directory.join(format!("{stem}.pdf"));
+    let profile_uri = format!(
+        "file:///{}",
+        profile_directory
+            .to_string_lossy()
+            .replace('\\', "/")
+            .trim_start_matches('/')
+    );
 
     let child_result = Command::new(&executable)
-        .args([
-            "--headless",
-            "--convert-to",
-            "pdf",
-            "--outdir",
-            temporary_directory.to_string_lossy().as_ref(),
-            input.to_string_lossy().as_ref(),
-        ])
+        .arg("--headless")
+        .arg(format!("--env:UserInstallation={profile_uri}"))
+        .arg("--convert-to")
+        .arg("pdf")
+        .arg("--outdir")
+        .arg(&output_directory)
+        .arg(input)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -70,6 +92,14 @@ pub(crate) fn convert_to_pdf(input: &Path) -> Result<ConvertedPdf, DocConversion
     loop {
         match child.try_wait() {
             Ok(Some(_)) => break,
+            Ok(None) if cancellation.is_cancelled() => {
+                let _ = child.kill();
+                let _ = child.wait();
+                join_pipe(stdout_reader);
+                join_pipe(stderr_reader);
+                remove_temporary_directory(&temporary_directory);
+                return Err(DocConversionError::Cancelled);
+            }
             Ok(None) if started_at.elapsed() >= CONVERSION_TIMEOUT => {
                 let _ = child.kill();
                 let _ = child.wait();
@@ -101,6 +131,10 @@ pub(crate) fn convert_to_pdf(input: &Path) -> Result<ConvertedPdf, DocConversion
     };
     join_pipe(stdout_reader);
     join_pipe(stderr_reader);
+    if cancellation.is_cancelled() {
+        remove_temporary_directory(&temporary_directory);
+        return Err(DocConversionError::Cancelled);
+    }
     if !status.success() {
         remove_temporary_directory(&temporary_directory);
         return Err(DocConversionError::Failed);
@@ -113,7 +147,7 @@ pub(crate) fn convert_to_pdf(input: &Path) -> Result<ConvertedPdf, DocConversion
             return Err(DocConversionError::Failed);
         }
     };
-    let canonical_directory = match fs::canonicalize(&temporary_directory) {
+    let canonical_directory = match fs::canonicalize(&output_directory) {
         Ok(path) => path,
         Err(_) => {
             remove_temporary_directory(&temporary_directory);
@@ -134,12 +168,28 @@ pub(crate) fn convert_to_pdf(input: &Path) -> Result<ConvertedPdf, DocConversion
         remove_temporary_directory(&temporary_directory);
         return Err(DocConversionError::Failed);
     }
+    let Some(pdf_limit) = filesystem::preview_limit_bytes("pdf") else {
+        remove_temporary_directory(&temporary_directory);
+        return Err(DocConversionError::Failed);
+    };
+    if metadata.len() == 0 || metadata.len() > pdf_limit || !has_pdf_signature(&output_path) {
+        remove_temporary_directory(&temporary_directory);
+        return Err(DocConversionError::OutputTooLarge);
+    }
 
     Ok(ConvertedPdf {
         path: output_path,
         temporary_directory,
         byte_length: metadata.len(),
     })
+}
+
+fn has_pdf_signature(path: &Path) -> bool {
+    let Ok(mut file) = fs::File::open(path) else {
+        return false;
+    };
+    let mut header = [0_u8; 5];
+    std::io::Read::read_exact(&mut file, &mut header).is_ok() && header == *b"%PDF-"
 }
 
 fn resolve_soffice() -> Option<PathBuf> {
@@ -215,7 +265,10 @@ pub(crate) fn remove_temporary_directory(path: &Path) {
 fn drain_pipe<T: Read + Send + 'static>(mut pipe: T) -> JoinHandle<Vec<u8>> {
     std::thread::spawn(move || {
         let mut output = Vec::new();
-        let _ = pipe.read_to_end(&mut output);
+        let _ = (&mut pipe)
+            .take(MAX_CONVERTER_OUTPUT_BYTES.saturating_add(1))
+            .read_to_end(&mut output);
+        let _ = std::io::copy(&mut pipe, &mut std::io::sink());
         output
     })
 }

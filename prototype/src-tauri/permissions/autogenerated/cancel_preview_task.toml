@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-cancel-preview-task"
+description = "Enables the cancel_preview_task command without any pre-configured scope."
+commands.allow = ["cancel_preview_task"]
+
+[[permission]]
+identifier = "deny-cancel-preview-task"
+description = "Denies the cancel_preview_task command without any pre-configured scope."
+commands.deny = ["cancel_preview_task"]

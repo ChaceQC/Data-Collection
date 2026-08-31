@@ -1,23 +1,38 @@
 use std::{
+    collections::HashSet,
     fs,
     path::{Path, PathBuf},
-    sync::Mutex,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Mutex,
+    },
     time::{SystemTime, UNIX_EPOCH},
 };
 
 use atomic_write_file::AtomicWriteFile;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+use uuid::Uuid;
 
 use crate::filesystem::IndexEntry;
 
 pub(crate) mod floating_ball;
+#[cfg(not(test))]
+pub(crate) mod repository;
 pub(crate) mod settings;
 
-pub const INDEX_FORMAT_VERSION: u32 = 3;
+pub const INDEX_FORMAT_VERSION: u32 = 4;
 const LEGACY_INDEX_FORMAT_VERSION: u32 = 1;
-const PREVIOUS_INDEX_FORMAT_VERSION: u32 = 2;
+const PREVIOUS_INDEX_FORMAT_VERSION: u32 = 3;
+const MAX_GROUPS: usize = 256;
+const MAX_GROUP_NAME_CHARS: usize = 64;
+pub(crate) const MAX_TAGS_PER_ENTRY: usize = 32;
+const MAX_TAG_CHARS: usize = 32;
+const MAX_UNDO_RECORDS: usize = 50;
 pub const FLOATING_RECENT_LIMIT: usize = 5;
+
+type IndexDocumentParts = (Vec<IndexEntry>, Vec<Group>, Vec<UndoRecord>, u64);
+type ReadIndexDocument = (Vec<IndexEntry>, Vec<Group>, Vec<UndoRecord>, u64, bool);
 
 #[derive(Debug, Error)]
 pub enum StorageError {
@@ -39,19 +54,138 @@ pub enum StorageError {
     Corrupt,
     #[error("索引文件版本不受支持")]
     UnsupportedVersion,
+    #[error("索引恢复状态不可用")]
+    Recovery,
+    #[error("分组名称无效")]
+    InvalidGroupName,
+    #[error("分组名称已经存在")]
+    DuplicateGroup,
+    #[error("找不到需要操作的分组")]
+    GroupNotFound,
+    #[error("标签无效")]
+    InvalidTag,
+    #[error("撤销操作不可用")]
+    UndoUnavailable,
+    #[error("撤销目标已发生变化")]
+    UndoConflict,
 }
 
 #[derive(Debug, Default)]
 pub struct AppState {
     index_path: Mutex<Option<PathBuf>>,
     entries: Mutex<Vec<IndexEntry>>,
+    groups: Mutex<Vec<Group>>,
+    undo_log: Mutex<Vec<UndoRecord>>,
     mutation_lock: Mutex<()>,
+    pending_operations_path: Mutex<Option<PathBuf>>,
+    pending_operations: Mutex<Vec<PendingOperation>>,
+    recovery: Mutex<Option<RecoveryInfo>>,
+    revision: AtomicU64,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
 struct IndexDocument {
     version: u32,
+    #[serde(default)]
+    revision: u64,
     entries: Vec<IndexEntry>,
+    #[serde(default)]
+    groups: Vec<Group>,
+    #[serde(default)]
+    undo_log: Vec<UndoRecord>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Group {
+    pub id: String,
+    pub name: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct UndoEntryChange {
+    file_id: String,
+    before: Option<IndexEntry>,
+    after: Option<IndexEntry>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct UndoGroupChange {
+    group_id: String,
+    before: Option<Group>,
+    after: Option<Group>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct UndoRecord {
+    id: String,
+    operation: String,
+    revision: u64,
+    created_at: i64,
+    entries: Vec<UndoEntryChange>,
+    groups: Vec<UndoGroupChange>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PendingDocument {
+    version: u32,
+    operations: Vec<PendingOperation>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PendingOperation {
+    file_id: String,
+    operation: String,
+    path: String,
+    state: String,
+    created_at: i64,
+}
+
+#[derive(Clone, Debug)]
+struct RecoveryInfo {
+    issue: String,
+    backup_created: bool,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IndexRecoveryStatus {
+    pub required: bool,
+    pub issue: String,
+    pub backup_created: bool,
+    pub pending_operations: usize,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IndexSnapshot {
+    pub entries: Vec<IndexEntry>,
+    pub groups: Vec<Group>,
+    pub revision: u64,
+    pub recovery: Option<IndexRecoveryStatus>,
+    pub undo: Option<UndoStatus>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UndoStatus {
+    pub id: String,
+    pub operation: String,
+    pub count: usize,
+}
+
+#[derive(Debug)]
+pub struct MutationResult<T> {
+    pub value: T,
+    pub entries: Vec<IndexEntry>,
+    pub revision: u64,
+    pub changed: bool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -89,9 +223,74 @@ impl AppState {
     pub fn initialize(&self, index_path: PathBuf) -> Result<(), StorageError> {
         let parent = index_path.parent().ok_or(StorageError::DataDirectory)?;
         fs::create_dir_all(parent).map_err(|_| StorageError::DataDirectory)?;
-        let entries = load_entries(&index_path)?;
+        let (entries, groups, undo_log, revision, mut recovery) =
+            match load_index_document(&index_path) {
+                Ok((entries, groups, undo_log, revision)) => {
+                    (entries, groups, undo_log, revision, None)
+                }
+                Err(error @ (StorageError::Corrupt | StorageError::UnsupportedVersion)) => {
+                    let issue = match error {
+                        StorageError::Corrupt => "索引文件损坏",
+                        StorageError::UnsupportedVersion => "索引文件版本不受支持",
+                        _ => "索引文件无法恢复",
+                    };
+                    (
+                        Vec::new(),
+                        Vec::new(),
+                        Vec::new(),
+                        0,
+                        Some(RecoveryInfo {
+                            issue: issue.to_string(),
+                            backup_created: backup_file(&index_path),
+                        }),
+                    )
+                }
+                Err(StorageError::Write) => {
+                    let (entries, groups, undo_log, revision, _) =
+                        read_index_document(&index_path)?;
+                    (
+                        entries,
+                        groups,
+                        undo_log,
+                        revision,
+                        Some(RecoveryInfo {
+                            issue: "索引格式迁移未完成".to_string(),
+                            backup_created: backup_file(&index_path),
+                        }),
+                    )
+                }
+                Err(error) => return Err(error),
+            };
+        let pending_path = index_path.with_file_name("pending-operations.json");
+        let pending_operations = match load_pending_operations(&pending_path) {
+            Ok(operations) => operations,
+            Err(StorageError::Corrupt | StorageError::UnsupportedVersion) => {
+                let backup_created = backup_file(&pending_path);
+                let repaired = save_pending_operations(&pending_path, &[]).is_ok();
+                if recovery.is_none() {
+                    recovery = Some(RecoveryInfo {
+                        issue: "待同步操作记录损坏".to_string(),
+                        backup_created: backup_created && repaired,
+                    });
+                }
+                Vec::new()
+            }
+            Err(error) => return Err(error),
+        };
+        self.revision.store(revision, Ordering::Release);
         *self.index_path.lock().map_err(|_| StorageError::State)? = Some(index_path);
+        *self
+            .pending_operations_path
+            .lock()
+            .map_err(|_| StorageError::State)? = Some(pending_path);
         *self.entries.lock().map_err(|_| StorageError::State)? = entries;
+        *self.groups.lock().map_err(|_| StorageError::State)? = groups;
+        *self.undo_log.lock().map_err(|_| StorageError::State)? = undo_log;
+        *self
+            .pending_operations
+            .lock()
+            .map_err(|_| StorageError::State)? = pending_operations;
+        *self.recovery.lock().map_err(|_| StorageError::State)? = recovery;
         Ok(())
     }
 
@@ -110,57 +309,480 @@ impl AppState {
             .map(|entries| entries.clone())
     }
 
+    pub fn snapshot_groups(&self) -> Result<Vec<Group>, StorageError> {
+        self.groups
+            .lock()
+            .map_err(|_| StorageError::State)
+            .map(|groups| groups.clone())
+    }
+
+    pub fn snapshot_with_revision(&self) -> Result<IndexSnapshot, StorageError> {
+        Ok(IndexSnapshot {
+            entries: self.snapshot()?,
+            groups: self.snapshot_groups()?,
+            revision: self.revision(),
+            recovery: self.recovery_status()?,
+            undo: self.undo_status()?,
+        })
+    }
+
+    fn undo_log_snapshot(&self) -> Result<Vec<UndoRecord>, StorageError> {
+        self.undo_log
+            .lock()
+            .map_err(|_| StorageError::State)
+            .map(|records| records.clone())
+    }
+
+    fn undo_status(&self) -> Result<Option<UndoStatus>, StorageError> {
+        let revision = self.revision();
+        Ok(self
+            .undo_log_snapshot()?
+            .last()
+            .filter(|record| record.revision == revision)
+            .map(|record| UndoStatus {
+                id: record.id.clone(),
+                operation: record.operation.clone(),
+                count: record.entries.len() + record.groups.len(),
+            }))
+    }
+
+    pub fn revision(&self) -> u64 {
+        self.revision.load(Ordering::Acquire)
+    }
+
+    pub fn recovery_status(&self) -> Result<Option<IndexRecoveryStatus>, StorageError> {
+        let recovery = self
+            .recovery
+            .lock()
+            .map_err(|_| StorageError::State)?
+            .clone();
+        let pending_operations = self
+            .pending_operations
+            .lock()
+            .map_err(|_| StorageError::State)?
+            .len();
+        if recovery.is_none() && pending_operations == 0 {
+            return Ok(None);
+        }
+        Ok(Some(IndexRecoveryStatus {
+            required: true,
+            issue: recovery
+                .as_ref()
+                .map(|value| value.issue.clone())
+                .unwrap_or_else(|| "存在待同步的文件操作，请刷新索引".to_string()),
+            backup_created: recovery
+                .as_ref()
+                .map(|value| value.backup_created)
+                .unwrap_or(false),
+            pending_operations,
+        }))
+    }
+
     pub fn replace_entries(&self, entries: Vec<IndexEntry>) -> Result<(), StorageError> {
         *self.entries.lock().map_err(|_| StorageError::State)? = entries;
         Ok(())
     }
 
+    fn replace_groups(&self, groups: Vec<Group>) -> Result<(), StorageError> {
+        *self.groups.lock().map_err(|_| StorageError::State)? = groups;
+        Ok(())
+    }
+
+    #[cfg(test)]
     pub fn update_entries<F>(&self, mutation: F) -> Result<Vec<IndexEntry>, StorageError>
     where
         F: FnOnce(&mut Vec<IndexEntry>) -> Result<bool, StorageError>,
     {
+        self.update_entries_with(|entries| mutation(entries).map(|changed| (changed, ())))
+            .map(|result| result.entries)
+    }
+
+    pub fn update_entries_with<F, T>(&self, mutation: F) -> Result<MutationResult<T>, StorageError>
+    where
+        F: FnOnce(&mut Vec<IndexEntry>) -> Result<(bool, T), StorageError>,
+    {
+        self.update_index_with(|entries, _groups| mutation(entries))
+    }
+
+    pub fn update_index_with<F, T>(&self, mutation: F) -> Result<MutationResult<T>, StorageError>
+    where
+        F: FnOnce(&mut Vec<IndexEntry>, &mut Vec<Group>) -> Result<(bool, T), StorageError>,
+    {
+        self.update_index_internal(None, mutation)
+    }
+
+    pub fn update_index_with_undo<F, T>(
+        &self,
+        operation: &str,
+        mutation: F,
+    ) -> Result<MutationResult<T>, StorageError>
+    where
+        F: FnOnce(&mut Vec<IndexEntry>, &mut Vec<Group>) -> Result<(bool, T), StorageError>,
+    {
+        self.update_index_internal(Some(operation), mutation)
+    }
+
+    fn update_index_internal<F, T>(
+        &self,
+        undo_operation: Option<&str>,
+        mutation: F,
+    ) -> Result<MutationResult<T>, StorageError>
+    where
+        F: FnOnce(&mut Vec<IndexEntry>, &mut Vec<Group>) -> Result<(bool, T), StorageError>,
+    {
         let _guard = self.mutation_lock.lock().map_err(|_| StorageError::State)?;
         let index_path = self.index_path()?;
-        let mut next = self.snapshot()?;
-        let changed = mutation(&mut next)?;
-        if changed {
-            save_entries(&index_path, &next)?;
-            self.replace_entries(next.clone())?;
-            return Ok(next);
+        let before_entries = self.snapshot()?;
+        let before_groups = self.snapshot_groups()?;
+        let mut next_entries = before_entries.clone();
+        let mut next_groups = before_groups.clone();
+        let (changed, value) = mutation(&mut next_entries, &mut next_groups)?;
+        let revision = if changed {
+            let mut next_undo = self.undo_log_snapshot()?;
+            let next_revision = self.revision().saturating_add(1);
+            if let Some(operation) = undo_operation {
+                append_undo_record(
+                    &mut next_undo,
+                    operation,
+                    next_revision,
+                    &before_entries,
+                    &next_entries,
+                    &before_groups,
+                    &next_groups,
+                );
+            }
+            save_index_document(
+                &index_path,
+                &next_entries,
+                &next_groups,
+                &next_undo,
+                next_revision,
+            )?;
+            self.replace_entries(next_entries.clone())?;
+            self.replace_groups(next_groups)?;
+            *self.undo_log.lock().map_err(|_| StorageError::State)? = next_undo;
+            self.revision.fetch_add(1, Ordering::AcqRel) + 1
+        } else {
+            self.revision()
+        };
+        Ok(MutationResult {
+            value,
+            entries: next_entries,
+            revision,
+            changed,
+        })
+    }
+
+    pub fn undo_last(&self) -> Result<MutationResult<Vec<String>>, StorageError> {
+        let _guard = self.mutation_lock.lock().map_err(|_| StorageError::State)?;
+        let index_path = self.index_path()?;
+        let mut undo_log = self.undo_log_snapshot()?;
+        let record = undo_log
+            .last()
+            .cloned()
+            .ok_or(StorageError::UndoUnavailable)?;
+        if self.revision() != record.revision {
+            return Err(StorageError::UndoUnavailable);
         }
-        self.snapshot()
+
+        let mut next_entries = self.snapshot()?;
+        let mut next_groups = self.snapshot_groups()?;
+        let mut changed_ids = record
+            .entries
+            .iter()
+            .map(|change| change.file_id.clone())
+            .collect::<Vec<_>>();
+        changed_ids.extend(record.groups.iter().map(|change| change.group_id.clone()));
+        for change in &record.entries {
+            if next_entries.iter().find(|entry| entry.id == change.file_id) != change.after.as_ref()
+            {
+                return Err(StorageError::UndoConflict);
+            }
+        }
+        for change in &record.groups {
+            if next_groups.iter().find(|group| group.id == change.group_id) != change.after.as_ref()
+            {
+                return Err(StorageError::UndoConflict);
+            }
+        }
+        for change in &record.entries {
+            apply_undo_entry_change(&mut next_entries, change)?;
+        }
+        for change in &record.groups {
+            apply_undo_group_change(&mut next_groups, change)?;
+        }
+        sort_entries(&mut next_entries);
+        sort_groups(&mut next_groups);
+        undo_log.pop();
+        let next_revision = self.revision().saturating_add(1);
+        save_index_document(
+            &index_path,
+            &next_entries,
+            &next_groups,
+            &undo_log,
+            next_revision,
+        )?;
+        self.replace_entries(next_entries.clone())?;
+        self.replace_groups(next_groups)?;
+        *self.undo_log.lock().map_err(|_| StorageError::State)? = undo_log;
+        self.revision.fetch_add(1, Ordering::AcqRel);
+        Ok(MutationResult {
+            value: changed_ids,
+            entries: next_entries,
+            revision: self.revision(),
+            changed: true,
+        })
+    }
+
+    pub fn reset_index_recovery(&self) -> Result<IndexSnapshot, StorageError> {
+        let _guard = self.mutation_lock.lock().map_err(|_| StorageError::State)?;
+        let index_path = self.index_path()?;
+        let next_revision = self.revision().saturating_add(1);
+        save_index_document(&index_path, &[], &[], &[], next_revision)?;
+        self.replace_entries(Vec::new())?;
+        self.replace_groups(Vec::new())?;
+        *self.undo_log.lock().map_err(|_| StorageError::State)? = Vec::new();
+        self.revision.fetch_add(1, Ordering::AcqRel);
+        *self.recovery.lock().map_err(|_| StorageError::State)? = None;
+        Ok(IndexSnapshot {
+            entries: Vec::new(),
+            groups: Vec::new(),
+            revision: self.revision(),
+            recovery: self.recovery_status()?,
+            undo: None,
+        })
+    }
+
+    pub fn export_recovery_diagnostic(&self, destination: &Path) -> Result<(), StorageError> {
+        let parent = destination.parent().ok_or(StorageError::DataDirectory)?;
+        let parent_path = parent.to_string_lossy();
+        let safe_parent = crate::filesystem::validate_directory_path(&parent_path)
+            .map_err(|_| StorageError::Write)?;
+        let file_name = destination
+            .file_name()
+            .filter(|name| !name.is_empty())
+            .ok_or(StorageError::Write)?;
+        let target = safe_parent.join(file_name);
+        if let Ok(metadata) = fs::symlink_metadata(&target) {
+            if crate::filesystem::is_unsafe_metadata(&metadata) || !metadata.is_file() {
+                return Err(StorageError::Write);
+            }
+        }
+        let status = self.recovery_status()?.unwrap_or(IndexRecoveryStatus {
+            required: false,
+            issue: "没有待处理的索引恢复问题".to_string(),
+            backup_created: false,
+            pending_operations: 0,
+        });
+        let diagnostic = serde_json::json!({
+            "format": "local-material-workbench-diagnostic",
+            "indexFormatVersion": INDEX_FORMAT_VERSION,
+            "recovery": status,
+        });
+        let encoded = serde_json::to_vec_pretty(&diagnostic).map_err(|_| StorageError::Write)?;
+        let mut file = AtomicWriteFile::open(target).map_err(|_| StorageError::Write)?;
+        std::io::Write::write_all(file.as_file_mut(), &encoded).map_err(|_| StorageError::Write)?;
+        file.commit().map_err(|_| StorageError::Write)
+    }
+
+    pub fn reconcile_pending_operations(&self) -> Result<bool, StorageError> {
+        let _guard = self.mutation_lock.lock().map_err(|_| StorageError::State)?;
+        let index_path = self.index_path()?;
+        let mut entries = self.snapshot()?;
+        let pending = self
+            .pending_operations
+            .lock()
+            .map_err(|_| StorageError::State)?
+            .clone();
+        let mut resolved_ids = Vec::new();
+        for operation in &pending {
+            if operation.operation != "delete-original" || operation.state != "physical-complete" {
+                continue;
+            }
+            if !path_exists(&operation.path) {
+                entries.retain(|entry| entry.id != operation.file_id);
+                resolved_ids.push(operation.file_id.clone());
+            }
+        }
+        let changed = entries != self.snapshot()?;
+        if changed {
+            let groups = self.snapshot_groups()?;
+            let undo_log = self.undo_log_snapshot()?;
+            let next_revision = self.revision().saturating_add(1);
+            save_index_document(&index_path, &entries, &groups, &undo_log, next_revision)?;
+            self.replace_entries(entries)?;
+            self.revision.fetch_add(1, Ordering::AcqRel);
+        }
+        if !resolved_ids.is_empty() {
+            let mut operations = self
+                .pending_operations
+                .lock()
+                .map_err(|_| StorageError::State)?;
+            operations.retain(|operation| !resolved_ids.contains(&operation.file_id));
+            let pending_path = self.pending_operations_path()?;
+            save_pending_operations(&pending_path, &operations)?;
+        }
+        Ok(changed)
+    }
+
+    pub fn prepare_delete(&self, file_id: &str, path: &Path) -> Result<(), StorageError> {
+        let _guard = self.mutation_lock.lock().map_err(|_| StorageError::State)?;
+        let entry = self
+            .snapshot()?
+            .into_iter()
+            .find(|entry| {
+                entry.id == file_id
+                    && crate::filesystem::same_path(&entry.path, &path.to_string_lossy())
+            })
+            .ok_or(StorageError::EntryNotFound)?;
+        let mut operations = self
+            .pending_operations
+            .lock()
+            .map_err(|_| StorageError::State)?
+            .clone();
+        operations.retain(|operation| operation.file_id != entry.id);
+        operations.push(PendingOperation {
+            file_id: entry.id,
+            operation: "delete-original".to_string(),
+            path: path.to_string_lossy().into_owned(),
+            state: "prepared".to_string(),
+            created_at: current_timestamp_millis(),
+        });
+        let pending_path = self.pending_operations_path()?;
+        save_pending_operations(&pending_path, &operations)?;
+        *self
+            .pending_operations
+            .lock()
+            .map_err(|_| StorageError::State)? = operations;
+        Ok(())
+    }
+
+    pub fn mark_delete_complete(&self, file_id: &str) -> Result<(), StorageError> {
+        self.update_pending_delete(file_id, "physical-complete")
+    }
+
+    pub fn clear_pending_delete(&self, file_id: &str) -> Result<(), StorageError> {
+        let _guard = self.mutation_lock.lock().map_err(|_| StorageError::State)?;
+        let mut operations = self
+            .pending_operations
+            .lock()
+            .map_err(|_| StorageError::State)?
+            .clone();
+        operations.retain(|operation| operation.file_id != file_id);
+        let pending_path = self.pending_operations_path()?;
+        save_pending_operations(&pending_path, &operations)?;
+        *self
+            .pending_operations
+            .lock()
+            .map_err(|_| StorageError::State)? = operations;
+        Ok(())
+    }
+
+    fn update_pending_delete(&self, file_id: &str, next_state: &str) -> Result<(), StorageError> {
+        let _guard = self.mutation_lock.lock().map_err(|_| StorageError::State)?;
+        let mut operations = self
+            .pending_operations
+            .lock()
+            .map_err(|_| StorageError::State)?
+            .clone();
+        let Some(operation) = operations
+            .iter_mut()
+            .find(|operation| operation.file_id == file_id)
+        else {
+            return Err(StorageError::Recovery);
+        };
+        operation.state = next_state.to_string();
+        let pending_path = self.pending_operations_path()?;
+        save_pending_operations(&pending_path, &operations)?;
+        *self
+            .pending_operations
+            .lock()
+            .map_err(|_| StorageError::State)? = operations;
+        Ok(())
+    }
+
+    fn pending_operations_path(&self) -> Result<PathBuf, StorageError> {
+        self.pending_operations_path
+            .lock()
+            .map_err(|_| StorageError::State)?
+            .clone()
+            .ok_or(StorageError::DataDirectory)
     }
 }
 
+#[cfg(test)]
 pub fn load_entries(path: &Path) -> Result<Vec<IndexEntry>, StorageError> {
-    if !path.exists() {
-        return Ok(Vec::new());
+    let (entries, _, _, _) = load_index_document(path)?;
+    Ok(entries)
+}
+
+fn load_index_document(path: &Path) -> Result<IndexDocumentParts, StorageError> {
+    let (entries, groups, undo_log, revision, needs_save) = read_index_document(path)?;
+    if needs_save {
+        save_index_document(path, &entries, &groups, &undo_log, revision)?;
+    }
+    Ok((entries, groups, undo_log, revision))
+}
+
+fn read_index_document(path: &Path) -> Result<ReadIndexDocument, StorageError> {
+    let metadata = match fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok((Vec::new(), Vec::new(), Vec::new(), 0, false));
+        }
+        Err(_) => return Err(StorageError::Read),
+    };
+    if crate::filesystem::is_unsafe_metadata(&metadata) || !metadata.is_file() {
+        return Err(StorageError::Corrupt);
     }
     let bytes = fs::read(path).map_err(|_| StorageError::Read)?;
     let document =
         serde_json::from_slice::<IndexDocument>(&bytes).map_err(|_| StorageError::Corrupt)?;
     let mut entries = document.entries;
+    let mut groups = document.groups;
+    let undo_log = document.undo_log;
+    let revision = document.revision;
     let needs_save = match document.version {
-        INDEX_FORMAT_VERSION => normalize_entries(&mut entries),
-        LEGACY_INDEX_FORMAT_VERSION | PREVIOUS_INDEX_FORMAT_VERSION => {
-            normalize_entries(&mut entries);
-            for entry in &mut entries {
-                entry.last_recorded_at = None;
-            }
+        INDEX_FORMAT_VERSION => {
+            normalize_entries(&mut entries, &groups)? || normalize_groups(&mut groups)?
+        }
+        LEGACY_INDEX_FORMAT_VERSION | 2 | PREVIOUS_INDEX_FORMAT_VERSION => {
+            normalize_entries(&mut entries, &groups)?;
+            normalize_groups(&mut groups)?;
             true
         }
         _ => return Err(StorageError::UnsupportedVersion),
     };
-    if needs_save {
-        save_entries(path, &entries)?;
+    validate_groups(&groups)?;
+    validate_entries(&entries, &groups)?;
+    validate_undo_log(&undo_log, &entries, &groups)?;
+    if revision > i64::MAX as u64 {
+        return Err(StorageError::Corrupt);
     }
-    Ok(entries)
+    Ok((entries, groups, undo_log, revision, needs_save))
 }
 
+#[cfg(test)]
 pub fn save_entries(path: &Path, entries: &[IndexEntry]) -> Result<(), StorageError> {
+    save_index_document(path, entries, &[], &[], 0)
+}
+
+fn save_index_document(
+    path: &Path,
+    entries: &[IndexEntry],
+    groups: &[Group],
+    undo_log: &[UndoRecord],
+    revision: u64,
+) -> Result<(), StorageError> {
+    validate_groups(groups)?;
+    validate_entries(entries, groups)?;
+    validate_undo_log(undo_log, entries, groups)?;
     let document = IndexDocument {
         version: INDEX_FORMAT_VERSION,
+        revision,
         entries: entries.to_vec(),
+        groups: groups.to_vec(),
+        undo_log: undo_log.to_vec(),
     };
     let encoded = serde_json::to_vec_pretty(&document).map_err(|_| StorageError::Write)?;
     let mut file = AtomicWriteFile::open(path).map_err(|_| StorageError::Write)?;
@@ -194,11 +816,15 @@ pub fn merge_index_entries(
             let preview_status = existing.preview_status.clone();
             let added_at = existing.added_at;
             let last_recorded_at = existing.last_recorded_at;
+            let tags = existing.tags.clone();
+            let group_id = existing.group_id.clone();
             *existing = incoming;
             existing.id = id;
             existing.favorite = favorite;
             existing.preview_status = preview_status;
             existing.added_at = added_at;
+            existing.tags = tags;
+            existing.group_id = group_id;
             existing.last_recorded_at = match mode {
                 IndexMergeMode::RegularImport => last_recorded_at,
                 IndexMergeMode::FloatingRecord { base_recorded_at } => {
@@ -277,6 +903,171 @@ pub fn set_favorite(
     Ok(true)
 }
 
+pub fn normalize_tags(tags: &[String]) -> Result<Vec<String>, StorageError> {
+    let mut normalized = Vec::with_capacity(tags.len());
+    for tag in tags {
+        let value = tag.trim();
+        if value.is_empty()
+            || value.chars().count() > MAX_TAG_CHARS
+            || value.chars().any(char::is_control)
+        {
+            return Err(StorageError::InvalidTag);
+        }
+        if normalized
+            .iter()
+            .any(|current: &String| current.eq_ignore_ascii_case(value))
+        {
+            continue;
+        }
+        normalized.push(value.to_string());
+    }
+    if normalized.len() > MAX_TAGS_PER_ENTRY {
+        return Err(StorageError::InvalidTag);
+    }
+    Ok(normalized)
+}
+
+pub fn validate_group_name(name: &str) -> Result<String, StorageError> {
+    let normalized = name.trim();
+    if normalized.is_empty()
+        || normalized.chars().count() > MAX_GROUP_NAME_CHARS
+        || normalized.chars().any(char::is_control)
+    {
+        return Err(StorageError::InvalidGroupName);
+    }
+    Ok(normalized.to_string())
+}
+
+pub fn create_group(groups: &mut Vec<Group>, name: &str) -> Result<Group, StorageError> {
+    if groups.len() >= MAX_GROUPS {
+        return Err(StorageError::InvalidGroupName);
+    }
+    let normalized = validate_group_name(name)?;
+    if groups
+        .iter()
+        .any(|group| group.name.eq_ignore_ascii_case(&normalized))
+    {
+        return Err(StorageError::DuplicateGroup);
+    }
+    let group = Group {
+        id: format!("group-{}", Uuid::new_v4().simple()),
+        name: normalized,
+    };
+    groups.push(group.clone());
+    sort_groups(groups);
+    Ok(group)
+}
+
+pub fn rename_group(
+    groups: &mut [Group],
+    group_id: &str,
+    name: &str,
+) -> Result<(bool, Group), StorageError> {
+    if group_id.trim().is_empty() {
+        return Err(StorageError::InvalidId);
+    }
+    let normalized = validate_group_name(name)?;
+    if groups
+        .iter()
+        .any(|group| group.id != group_id && group.name.eq_ignore_ascii_case(&normalized))
+    {
+        return Err(StorageError::DuplicateGroup);
+    }
+    let group = groups
+        .iter_mut()
+        .find(|group| group.id == group_id)
+        .ok_or(StorageError::GroupNotFound)?;
+    if group.name == normalized {
+        return Ok((false, group.clone()));
+    }
+    group.name = normalized;
+    let result = group.clone();
+    sort_groups(groups);
+    Ok((true, result))
+}
+
+pub fn delete_group(
+    entries: &mut [IndexEntry],
+    groups: &mut Vec<Group>,
+    group_id: &str,
+) -> Result<(Group, Vec<String>), StorageError> {
+    if group_id.trim().is_empty() {
+        return Err(StorageError::InvalidId);
+    }
+    let position = groups
+        .iter()
+        .position(|group| group.id == group_id)
+        .ok_or(StorageError::GroupNotFound)?;
+    let removed = groups.remove(position);
+    let mut changed_ids = Vec::new();
+    for entry in entries
+        .iter_mut()
+        .filter(|entry| entry.group_id.as_deref() == Some(group_id))
+    {
+        entry.group_id = None;
+        changed_ids.push(entry.id.clone());
+    }
+    Ok((removed, changed_ids))
+}
+
+pub fn set_entry_tags(
+    entries: &mut [IndexEntry],
+    file_id: &str,
+    tags: &[String],
+) -> Result<bool, StorageError> {
+    let tags = normalize_tags(tags)?;
+    let entry = find_entry_mut(entries, file_id)?;
+    if entry.tags == tags {
+        return Ok(false);
+    }
+    entry.tags = tags;
+    Ok(true)
+}
+
+pub fn set_entry_group(
+    entries: &mut [IndexEntry],
+    groups: &[Group],
+    file_id: &str,
+    group_id: Option<&str>,
+) -> Result<bool, StorageError> {
+    if let Some(group_id) = group_id {
+        if group_id.trim().is_empty() {
+            return Err(StorageError::InvalidId);
+        }
+        if !groups.iter().any(|group| group.id == group_id) {
+            return Err(StorageError::GroupNotFound);
+        }
+    }
+    let entry = find_entry_mut(entries, file_id)?;
+    if entry.group_id.as_deref() == group_id {
+        return Ok(false);
+    }
+    entry.group_id = group_id.map(str::to_string);
+    Ok(true)
+}
+
+fn find_entry_mut<'a>(
+    entries: &'a mut [IndexEntry],
+    file_id: &str,
+) -> Result<&'a mut IndexEntry, StorageError> {
+    if file_id.trim().is_empty() {
+        return Err(StorageError::InvalidId);
+    }
+    entries
+        .iter_mut()
+        .find(|entry| entry.id == file_id)
+        .ok_or(StorageError::EntryNotFound)
+}
+
+fn sort_groups(groups: &mut [Group]) {
+    groups.sort_by(|left, right| {
+        left.name
+            .to_lowercase()
+            .cmp(&right.name.to_lowercase())
+            .then_with(|| left.id.cmp(&right.id))
+    });
+}
+
 pub fn current_timestamp_millis() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -291,15 +1082,58 @@ fn recorded_timestamp(base_recorded_at: i64, input_index: usize) -> i64 {
         .saturating_add(input_index.min(i64::MAX as usize) as i64)
 }
 
-fn normalize_entries(entries: &mut [IndexEntry]) -> bool {
+fn normalize_entries(
+    entries: &mut Vec<IndexEntry>,
+    groups: &[Group],
+) -> Result<bool, StorageError> {
     let mut changed = normalize_added_at(entries);
-    for entry in entries {
+    for entry in entries.iter_mut() {
         if entry.last_recorded_at.is_some_and(|value| value <= 0) {
             entry.last_recorded_at = None;
             changed = true;
         }
+        if entry.invalid && entry.status != "路径失效" {
+            entry.status = "路径失效".to_string();
+            changed = true;
+        } else if !entry.invalid && entry.status == "路径失效" {
+            entry.invalid = true;
+            changed = true;
+        }
+        let normalized_tags = normalize_tags(&entry.tags)?;
+        if entry.tags != normalized_tags {
+            entry.tags = normalized_tags;
+            changed = true;
+        }
+        if entry
+            .group_id
+            .as_ref()
+            .is_some_and(|group_id| !groups.iter().any(|group| &group.id == group_id))
+        {
+            entry.group_id = None;
+            changed = true;
+        }
     }
-    changed
+    changed |= deduplicate_entries(entries);
+    validate_entries(entries, groups)?;
+    Ok(changed)
+}
+
+fn normalize_groups(groups: &mut Vec<Group>) -> Result<bool, StorageError> {
+    let mut changed = false;
+    for group in groups.iter_mut() {
+        let normalized = validate_group_name(&group.name)?;
+        if group.name != normalized {
+            group.name = normalized;
+            changed = true;
+        }
+    }
+    let before = groups.to_vec();
+    sort_groups(groups);
+    if before != *groups {
+        changed = true;
+    }
+    validate_groups(groups)?;
+    Ok(changed)
 }
 
 fn normalize_added_at(entries: &mut [IndexEntry]) -> bool {
@@ -314,19 +1148,456 @@ fn normalize_added_at(entries: &mut [IndexEntry]) -> bool {
     changed
 }
 
+fn deduplicate_entries(entries: &mut Vec<IndexEntry>) -> bool {
+    let original = entries.to_vec();
+    let mut deduplicated = Vec::with_capacity(entries.len());
+    for entry in original {
+        let duplicate_index = deduplicated.iter().position(|current: &IndexEntry| {
+            current.id == entry.id
+                || crate::filesystem::path_identity(&current.path)
+                    == crate::filesystem::path_identity(&entry.path)
+        });
+        if let Some(index) = duplicate_index {
+            merge_duplicate_metadata(&mut deduplicated[index], &entry);
+        } else {
+            deduplicated.push(entry);
+        }
+    }
+    let changed =
+        deduplicated.len() != entries.len() || deduplicated.as_slice() != entries.as_slice();
+    if changed {
+        *entries = deduplicated;
+    }
+    changed
+}
+
+fn merge_duplicate_metadata(current: &mut IndexEntry, duplicate: &IndexEntry) {
+    current.favorite |= duplicate.favorite;
+    if current.added_at <= 0 || (duplicate.added_at > 0 && duplicate.added_at < current.added_at) {
+        current.added_at = duplicate.added_at;
+    }
+    current.last_recorded_at = match (current.last_recorded_at, duplicate.last_recorded_at) {
+        (Some(left), Some(right)) => Some(left.max(right)),
+        (None, value) => value,
+        (value, None) => value,
+    };
+    if current.preview_status == "idle" && duplicate.preview_status != "idle" {
+        current.preview_status = duplicate.preview_status.clone();
+    }
+    for tag in &duplicate.tags {
+        if !current
+            .tags
+            .iter()
+            .any(|current_tag| current_tag.eq_ignore_ascii_case(tag))
+            && current.tags.len() < MAX_TAGS_PER_ENTRY
+        {
+            current.tags.push(tag.clone());
+        }
+    }
+    if current.group_id.is_none() {
+        current.group_id = duplicate.group_id.clone();
+    }
+    if duplicate.invalid {
+        current.invalid = true;
+        current.status = "路径失效".to_string();
+    }
+}
+
+fn validate_groups(groups: &[Group]) -> Result<(), StorageError> {
+    if groups.len() > MAX_GROUPS {
+        return Err(StorageError::Corrupt);
+    }
+    let mut ids = HashSet::new();
+    let mut names = HashSet::new();
+    for group in groups {
+        if !is_valid_opaque_id(&group.id)
+            || !ids.insert(group.id.clone())
+            || validate_group_name(&group.name).is_err()
+            || !names.insert(group.name.to_lowercase())
+        {
+            return Err(StorageError::Corrupt);
+        }
+    }
+    Ok(())
+}
+
+fn validate_entries(entries: &[IndexEntry], groups: &[Group]) -> Result<(), StorageError> {
+    let mut ids = HashSet::new();
+    let mut paths = HashSet::new();
+    for entry in entries {
+        let path_name = Path::new(&entry.path)
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or_default();
+        if entry.id.trim().is_empty()
+            || !ids.insert(entry.id.clone())
+            || entry.path.trim().is_empty()
+            || !paths.insert(crate::filesystem::path_identity(&entry.path))
+            || entry.name.trim().is_empty()
+            || path_name != entry.name
+            || entry.size > MAX_INDEXED_SIZE_BYTES
+            || entry.modified_at < 0
+            || entry.added_at < 0
+            || entry
+                .last_recorded_at
+                .is_some_and(|value| !(1..=MAX_TIMESTAMP_MILLIS).contains(&value))
+            || entry.modified_at > MAX_TIMESTAMP_SECONDS
+            || entry.added_at > MAX_TIMESTAMP_SECONDS
+            || normalize_tags(&entry.tags).map_or(true, |tags| tags != entry.tags)
+            || entry
+                .group_id
+                .as_ref()
+                .is_some_and(|group_id| !groups.iter().any(|group| &group.id == group_id))
+        {
+            return Err(StorageError::Corrupt);
+        }
+        if !matches!(entry.status.as_str(), "已登记" | "路径失效")
+            || entry.invalid != (entry.status == "路径失效")
+            || !matches!(
+                entry.preview_status.as_str(),
+                "idle"
+                    | "loading"
+                    | "ready"
+                    | "unsupported"
+                    | "missing"
+                    | "permission-denied"
+                    | "too-large"
+                    | "converter-missing"
+                    | "parse-error"
+            )
+        {
+            return Err(StorageError::Corrupt);
+        }
+        if entry.kind == "folder" {
+            if entry.file_type != "文件夹" {
+                return Err(StorageError::Corrupt);
+            }
+        } else if let Some(info) = crate::filesystem::type_info_for_path(Path::new(&entry.path)) {
+            if info.kind != entry.kind || info.file_type != entry.file_type {
+                return Err(StorageError::Corrupt);
+            }
+        } else if entry.kind != "other" || entry.file_type != "其他文件" {
+            return Err(StorageError::Corrupt);
+        }
+    }
+    Ok(())
+}
+
+fn is_valid_opaque_id(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 96
+        && !value.contains('/')
+        && !value.contains('\\')
+        && !value.contains(':')
+        && !value.contains("..")
+        && !value
+            .chars()
+            .any(|character| character.is_whitespace() || character.is_control())
+}
+
+fn validate_undo_log(
+    records: &[UndoRecord],
+    _entries: &[IndexEntry],
+    _groups: &[Group],
+) -> Result<(), StorageError> {
+    if records.len() > MAX_UNDO_RECORDS {
+        return Err(StorageError::Corrupt);
+    }
+    for record in records {
+        if !is_valid_opaque_id(&record.id)
+            || record.operation.trim().is_empty()
+            || record.revision == 0
+            || record.revision > i64::MAX as u64
+            || record.created_at <= 0
+            || record.entries.iter().any(|change| {
+                !is_valid_opaque_id(&change.file_id)
+                    || change.before.is_none() && change.after.is_none()
+                    || change.before.as_ref().is_some_and(|entry| {
+                        entry.id != change.file_id || validate_entry_shape(entry).is_err()
+                    })
+                    || change.after.as_ref().is_some_and(|entry| {
+                        entry.id != change.file_id || validate_entry_shape(entry).is_err()
+                    })
+            })
+            || record.groups.iter().any(|change| {
+                !is_valid_opaque_id(&change.group_id)
+                    || change.before.is_none() && change.after.is_none()
+                    || change.before.as_ref().is_some_and(|group| {
+                        group.id != change.group_id || validate_group_name(&group.name).is_err()
+                    })
+                    || change.after.as_ref().is_some_and(|group| {
+                        group.id != change.group_id || validate_group_name(&group.name).is_err()
+                    })
+            })
+        {
+            return Err(StorageError::Corrupt);
+        }
+    }
+    Ok(())
+}
+
+fn validate_entry_shape(entry: &IndexEntry) -> Result<(), StorageError> {
+    let path_name = Path::new(&entry.path)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or_default();
+    if !is_valid_opaque_id(&entry.id)
+        || entry.path.trim().is_empty()
+        || entry.name.trim().is_empty()
+        || path_name != entry.name
+        || entry.size > MAX_INDEXED_SIZE_BYTES
+        || entry.modified_at < 0
+        || entry.added_at < 0
+        || entry.modified_at > MAX_TIMESTAMP_SECONDS
+        || entry.added_at > MAX_TIMESTAMP_SECONDS
+        || entry
+            .last_recorded_at
+            .is_some_and(|value| !(1..=MAX_TIMESTAMP_MILLIS).contains(&value))
+        || normalize_tags(&entry.tags).map_or(true, |tags| tags != entry.tags)
+        || !matches!(entry.status.as_str(), "已登记" | "路径失效")
+        || entry.invalid != (entry.status == "路径失效")
+        || !matches!(
+            entry.preview_status.as_str(),
+            "idle"
+                | "loading"
+                | "ready"
+                | "unsupported"
+                | "missing"
+                | "permission-denied"
+                | "too-large"
+                | "converter-missing"
+                | "parse-error"
+        )
+    {
+        return Err(StorageError::Corrupt);
+    }
+    Ok(())
+}
+
+fn append_undo_record(
+    records: &mut Vec<UndoRecord>,
+    operation: &str,
+    revision: u64,
+    before_entries: &[IndexEntry],
+    after_entries: &[IndexEntry],
+    before_groups: &[Group],
+    after_groups: &[Group],
+) {
+    let entries = diff_entries(before_entries, after_entries);
+    let groups = diff_groups(before_groups, after_groups);
+    if entries.is_empty() && groups.is_empty() {
+        return;
+    }
+    records.push(UndoRecord {
+        id: format!("undo-{}", Uuid::new_v4().simple()),
+        operation: operation.to_string(),
+        revision,
+        created_at: current_timestamp_millis(),
+        entries,
+        groups,
+    });
+    if records.len() > MAX_UNDO_RECORDS {
+        let remove_count = records.len() - MAX_UNDO_RECORDS;
+        records.drain(0..remove_count);
+    }
+}
+
+fn diff_entries(before: &[IndexEntry], after: &[IndexEntry]) -> Vec<UndoEntryChange> {
+    let mut changes = Vec::new();
+    for entry in before {
+        let current = after.iter().find(|candidate| candidate.id == entry.id);
+        if current != Some(entry) {
+            changes.push(UndoEntryChange {
+                file_id: entry.id.clone(),
+                before: Some(entry.clone()),
+                after: current.cloned(),
+            });
+        }
+    }
+    for entry in after {
+        if !before.iter().any(|candidate| candidate.id == entry.id) {
+            changes.push(UndoEntryChange {
+                file_id: entry.id.clone(),
+                before: None,
+                after: Some(entry.clone()),
+            });
+        }
+    }
+    changes
+}
+
+fn diff_groups(before: &[Group], after: &[Group]) -> Vec<UndoGroupChange> {
+    let mut changes = Vec::new();
+    for group in before {
+        let current = after.iter().find(|candidate| candidate.id == group.id);
+        if current != Some(group) {
+            changes.push(UndoGroupChange {
+                group_id: group.id.clone(),
+                before: Some(group.clone()),
+                after: current.cloned(),
+            });
+        }
+    }
+    for group in after {
+        if !before.iter().any(|candidate| candidate.id == group.id) {
+            changes.push(UndoGroupChange {
+                group_id: group.id.clone(),
+                before: None,
+                after: Some(group.clone()),
+            });
+        }
+    }
+    changes
+}
+
+fn apply_undo_entry_change(
+    entries: &mut Vec<IndexEntry>,
+    change: &UndoEntryChange,
+) -> Result<(), StorageError> {
+    let position = entries.iter().position(|entry| entry.id == change.file_id);
+    match &change.before {
+        Some(entry) => {
+            if let Some(position) = position {
+                entries[position] = entry.clone();
+            } else {
+                entries.push(entry.clone());
+            }
+        }
+        None => {
+            if let Some(position) = position {
+                entries.remove(position);
+            }
+        }
+    }
+    Ok(())
+}
+
+fn apply_undo_group_change(
+    groups: &mut Vec<Group>,
+    change: &UndoGroupChange,
+) -> Result<(), StorageError> {
+    let position = groups.iter().position(|group| group.id == change.group_id);
+    match &change.before {
+        Some(group) => {
+            if let Some(position) = position {
+                groups[position] = group.clone();
+            } else {
+                groups.push(group.clone());
+            }
+        }
+        None => {
+            if let Some(position) = position {
+                groups.remove(position);
+            }
+        }
+    }
+    Ok(())
+}
+
+const MAX_TIMESTAMP_SECONDS: i64 = 4_102_444_800;
+const MAX_TIMESTAMP_MILLIS: i64 = MAX_TIMESTAMP_SECONDS.saturating_mul(1_000);
+const MAX_INDEXED_SIZE_BYTES: u64 = 1_u64 << 50;
+
+fn path_exists(path: &str) -> bool {
+    fs::symlink_metadata(path).is_ok()
+}
+
+fn load_pending_operations(path: &Path) -> Result<Vec<PendingOperation>, StorageError> {
+    let metadata = match fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(Vec::new());
+        }
+        Err(_) => return Err(StorageError::Read),
+    };
+    if crate::filesystem::is_unsafe_metadata(&metadata) || !metadata.is_file() {
+        return Err(StorageError::Corrupt);
+    }
+    let bytes = fs::read(path).map_err(|_| StorageError::Read)?;
+    let document =
+        serde_json::from_slice::<PendingDocument>(&bytes).map_err(|_| StorageError::Corrupt)?;
+    if document.version != 1 {
+        return Err(StorageError::UnsupportedVersion);
+    }
+    if document.operations.iter().any(|operation| {
+        operation.file_id.trim().is_empty()
+            || operation.operation != "delete-original"
+            || !matches!(operation.state.as_str(), "prepared" | "physical-complete")
+            || operation.path.trim().is_empty()
+            || operation.created_at <= 0
+    }) {
+        return Err(StorageError::Corrupt);
+    }
+    Ok(document.operations)
+}
+
+fn save_pending_operations(
+    path: &Path,
+    operations: &[PendingOperation],
+) -> Result<(), StorageError> {
+    if operations.is_empty() {
+        if path.exists() {
+            fs::remove_file(path).map_err(|_| StorageError::Write)?;
+        }
+        return Ok(());
+    }
+    let document = PendingDocument {
+        version: 1,
+        operations: operations.to_vec(),
+    };
+    let encoded = serde_json::to_vec_pretty(&document).map_err(|_| StorageError::Write)?;
+    let mut file = AtomicWriteFile::open(path).map_err(|_| StorageError::Write)?;
+    std::io::Write::write_all(file.as_file_mut(), &encoded).map_err(|_| StorageError::Write)?;
+    file.commit().map_err(|_| StorageError::Write)
+}
+
+fn backup_file(path: &Path) -> bool {
+    let Ok(metadata) = fs::symlink_metadata(path) else {
+        return false;
+    };
+    if crate::filesystem::is_unsafe_metadata(&metadata) || !metadata.is_file() {
+        return false;
+    }
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or_default();
+    for attempt in 0..3_u32 {
+        let backup = path.with_file_name(format!(
+            "{}.recovery-{}-{}.bak",
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("index"),
+            timestamp,
+            attempt
+        ));
+        if backup.exists() {
+            continue;
+        }
+        if fs::copy(path, backup).is_ok() {
+            return true;
+        }
+    }
+    false
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
         floating_recent, load_entries, merge_index_entries, save_entries, sort_entries, AppState,
-        IndexMergeMode, StorageError,
+        IndexMergeMode, StorageError, INDEX_FORMAT_VERSION,
     };
     use crate::filesystem::IndexEntry;
-    use std::{fs, path::PathBuf, time::SystemTime};
+    use std::{
+        fs,
+        path::{Path, PathBuf},
+        time::SystemTime,
+    };
 
     #[test]
     fn writes_versioned_index_and_reads_it_back() {
         let path = unique_temp_path();
-        let entry = sample_entry("资料.md", 20);
+        let entry = sample_entry("资料.txt", 20);
         assert!(save_entries(&path, std::slice::from_ref(&entry)).is_ok());
         let loaded = load_entries(&path).expect("index should load");
         assert_eq!(loaded, vec![entry]);
@@ -413,15 +1684,15 @@ mod tests {
             let loaded = load_entries(&path).expect("legacy index should migrate");
 
             assert_eq!(loaded[0].added_at, 42);
-            assert_eq!(loaded[0].last_recorded_at, None);
+            assert_eq!(loaded[0].last_recorded_at, Some(9999));
             let migrated: serde_json::Value =
                 serde_json::from_slice(&fs::read(&path).expect("migrated index should exist"))
                     .expect("migrated index should be valid JSON");
-            assert_eq!(migrated["version"], 3);
+            assert_eq!(migrated["version"], INDEX_FORMAT_VERSION);
             assert_eq!(migrated["entries"][0]["addedAt"], 42);
             assert_eq!(
                 migrated["entries"][0]["lastRecordedAt"],
-                serde_json::Value::Null
+                serde_json::json!(9999)
             );
             let _ = fs::remove_file(path);
         }
@@ -538,6 +1809,287 @@ mod tests {
         assert_eq!(entries[0].preview_status, original.preview_status);
     }
 
+    #[test]
+    fn validates_and_clears_group_metadata_without_touching_entry_identity() {
+        let mut groups = Vec::new();
+        let group = super::create_group(&mut groups, "项目 A").expect("group should be created");
+        let mut entry = sample_entry("带标签.txt", 12);
+        let original_id = entry.id.clone();
+        assert!(super::set_entry_tags(
+            std::slice::from_mut(&mut entry),
+            &original_id,
+            &["重点".to_string(), "工作".to_string()]
+        )
+        .expect("tags should be updated"));
+        assert!(super::set_entry_group(
+            std::slice::from_mut(&mut entry),
+            &groups,
+            &original_id,
+            Some(&group.id)
+        )
+        .expect("group should be assigned"));
+        assert_eq!(entry.tags, vec!["重点".to_string(), "工作".to_string()]);
+        assert_eq!(entry.group_id.as_deref(), Some(group.id.as_str()));
+
+        let (removed, changed_ids) =
+            super::delete_group(std::slice::from_mut(&mut entry), &mut groups, &group.id)
+                .expect("group should be deleted");
+        assert_eq!(removed, group);
+        assert_eq!(changed_ids, vec![original_id]);
+        assert!(entry.group_id.is_none());
+        assert_eq!(entry.tags, vec!["重点".to_string(), "工作".to_string()]);
+    }
+
+    #[test]
+    fn migrates_missing_group_fields_to_empty_metadata() {
+        let path = unique_temp_path();
+        let entry = sample_entry("无标签.txt", 42);
+        let legacy = serde_json::json!({ "version": 3, "entries": [entry] });
+        fs::write(
+            &path,
+            serde_json::to_vec(&legacy).expect("legacy should serialize"),
+        )
+        .expect("legacy index should be written");
+        let loaded = load_entries(&path).expect("legacy index should migrate");
+        assert!(loaded[0].tags.is_empty());
+        assert!(loaded[0].group_id.is_none());
+        let migrated: serde_json::Value =
+            serde_json::from_slice(&fs::read(&path).expect("migrated index should exist"))
+                .expect("migrated index should be valid JSON");
+        assert_eq!(migrated["version"], INDEX_FORMAT_VERSION);
+        assert_eq!(migrated["groups"], serde_json::json!([]));
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn persists_undo_for_reversible_changes_and_rejects_stale_revisions() {
+        let index_path = unique_temp_path();
+        let source_path = index_path.with_file_name("撤销资料.txt");
+        fs::write(&source_path, "内容").expect("source should be written");
+        let entry = crate::filesystem::index_selected_path(&source_path.to_string_lossy())
+            .expect("source should be indexable");
+        let state = AppState::default();
+        state
+            .initialize(index_path.clone())
+            .expect("state should initialize");
+        state
+            .update_entries(|entries| {
+                entries.push(entry.clone());
+                Ok(true)
+            })
+            .expect("entry should be saved");
+        let changed = state
+            .update_index_with_undo("favorite", |entries, _groups| {
+                let changed = super::set_favorite(entries, &entry.id, true)?;
+                Ok((changed, ()))
+            })
+            .expect("favorite should be saved with undo");
+        assert_eq!(changed.revision, 2);
+        assert!(state
+            .snapshot_with_revision()
+            .expect("snapshot should load")
+            .undo
+            .is_some());
+
+        let undone = state.undo_last().expect("favorite should be undoable");
+        assert_eq!(undone.value, vec![entry.id.clone()]);
+        assert!(!state.snapshot().expect("snapshot should load")[0].favorite);
+        assert!(state
+            .snapshot_with_revision()
+            .expect("snapshot should load")
+            .undo
+            .is_none());
+        assert!(matches!(
+            state.undo_last(),
+            Err(StorageError::UndoUnavailable)
+        ));
+
+        let _ = fs::remove_file(source_path);
+        let _ = fs::remove_file(index_path);
+    }
+
+    #[test]
+    fn does_not_undo_after_a_later_index_revision() {
+        let index_path = unique_temp_path();
+        let source_path = index_path.with_file_name("过期撤销.txt");
+        fs::write(&source_path, "内容").expect("source should be written");
+        let entry = crate::filesystem::index_selected_path(&source_path.to_string_lossy())
+            .expect("source should be indexable");
+        let state = AppState::default();
+        state
+            .initialize(index_path.clone())
+            .expect("state should initialize");
+        state
+            .update_entries(|entries| {
+                entries.push(entry.clone());
+                Ok(true)
+            })
+            .expect("entry should be saved");
+        state
+            .update_index_with_undo("tags", |entries, _groups| {
+                let changed = super::set_entry_tags(entries, &entry.id, &["稍后".to_string()])?;
+                Ok((changed, ()))
+            })
+            .expect("tags should be saved with undo");
+        state
+            .update_entries(|entries| {
+                entries[0].preview_status = "ready".to_string();
+                Ok(true)
+            })
+            .expect("later index change should be saved");
+        assert!(matches!(
+            state.undo_last(),
+            Err(StorageError::UndoUnavailable)
+        ));
+
+        let _ = fs::remove_file(source_path);
+        let _ = fs::remove_file(index_path);
+    }
+
+    #[test]
+    fn deduplicates_ids_and_paths_deterministically_while_preserving_user_fields() {
+        let path = unique_temp_path();
+        let first = sample_entry("重复.txt", 10);
+        let mut duplicate = first.clone();
+        duplicate.favorite = true;
+        duplicate.last_recorded_at = Some(99);
+        duplicate.preview_status = "ready".to_string();
+        let document = serde_json::json!({
+            "version": INDEX_FORMAT_VERSION,
+            "entries": [first.clone(), duplicate]
+        });
+        fs::write(
+            &path,
+            serde_json::to_vec(&document).expect("index should serialize"),
+        )
+        .expect("index should be written");
+
+        let loaded = load_entries(&path).expect("duplicate index should recover");
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].id, first.id);
+        assert!(loaded[0].favorite);
+        assert_eq!(loaded[0].last_recorded_at, Some(99));
+        assert_eq!(loaded[0].preview_status, "ready");
+        assert!(fs::read(&path).is_ok());
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn recovers_a_corrupt_index_without_startup_failure_and_requires_explicit_reset() {
+        let path = unique_temp_path();
+        fs::write(&path, b"not-json").expect("corrupt index should be written");
+        let state = AppState::default();
+        state
+            .initialize(path.clone())
+            .expect("corrupt index should enter recovery");
+        assert!(state
+            .snapshot()
+            .expect("snapshot should be readable")
+            .is_empty());
+        let recovery = state
+            .recovery_status()
+            .expect("recovery status should be readable")
+            .expect("recovery should be required");
+        assert!(recovery.required);
+        assert!(recovery.backup_created);
+
+        let snapshot = state
+            .reset_index_recovery()
+            .expect("explicit reset should create an empty index");
+        assert!(snapshot.recovery.is_none());
+        assert_eq!(snapshot.revision, 1);
+        let saved: serde_json::Value =
+            serde_json::from_slice(&fs::read(&path).expect("reset index should exist"))
+                .expect("reset index should be JSON");
+        assert_eq!(saved["version"], INDEX_FORMAT_VERSION);
+        cleanup_recovery_artifacts(&path);
+    }
+
+    #[test]
+    fn increments_revision_only_after_a_persisted_index_change() {
+        let index_path = unique_temp_path();
+        let source_path = index_path.with_file_name("revision.txt");
+        fs::write(&source_path, "内容").expect("source should be written");
+        let entry = crate::filesystem::index_selected_path(&source_path.to_string_lossy())
+            .expect("source should be indexable");
+        let state = AppState::default();
+        state
+            .initialize(index_path.clone())
+            .expect("state should initialize");
+        let added = state
+            .update_entries_with(|entries| {
+                entries.push(entry);
+                Ok((true, ()))
+            })
+            .expect("entry should be persisted");
+        assert_eq!(added.revision, 1);
+        let unchanged = state
+            .update_entries_with(|_| Ok((false, ())))
+            .expect("unchanged index should be readable");
+        assert_eq!(unchanged.revision, 1);
+        let _ = fs::remove_file(source_path);
+        let _ = fs::remove_file(index_path);
+    }
+
+    #[test]
+    fn rejects_unreasonable_indexed_sizes() {
+        let path = unique_temp_path();
+        let mut entry = sample_entry("过大.txt", 10);
+        entry.size = u64::MAX;
+        let document = serde_json::json!({
+            "version": INDEX_FORMAT_VERSION,
+            "entries": [entry]
+        });
+        fs::write(
+            &path,
+            serde_json::to_vec(&document).expect("index should serialize"),
+        )
+        .expect("index should be written");
+        assert!(matches!(load_entries(&path), Err(StorageError::Corrupt)));
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn reconciles_a_completed_delete_after_index_save_failure() {
+        let index_path = unique_temp_path();
+        let source_path = index_path.with_file_name("待同步删除.txt");
+        fs::write(&source_path, "内容").expect("source should be written");
+        let entry = crate::filesystem::index_selected_path(&source_path.to_string_lossy())
+            .expect("source should be indexable");
+        let state = AppState::default();
+        state
+            .initialize(index_path.clone())
+            .expect("state should initialize");
+        state
+            .update_entries(|entries| {
+                entries.push(entry.clone());
+                Ok(true)
+            })
+            .expect("entry should be saved");
+        let canonical_source = fs::canonicalize(&source_path).expect("source should canonicalize");
+        state
+            .prepare_delete(&entry.id, &canonical_source)
+            .expect("delete should be recorded");
+        state
+            .mark_delete_complete(&entry.id)
+            .expect("physical completion should be recorded");
+        fs::remove_file(&source_path).expect("source should be removed");
+
+        assert!(state
+            .reconcile_pending_operations()
+            .expect("pending operation should reconcile"));
+        assert!(state
+            .snapshot()
+            .expect("snapshot should be readable")
+            .is_empty());
+        assert!(state
+            .recovery_status()
+            .expect("status should be readable")
+            .is_none());
+        let _ = fs::remove_file(&index_path);
+        let _ = fs::remove_file(index_path.with_file_name("pending-operations.json"));
+    }
+
     fn sample_entry(name: &str, modified_at: i64) -> IndexEntry {
         IndexEntry {
             id: name.to_string(),
@@ -553,6 +2105,8 @@ mod tests {
             added_at: modified_at,
             preview_status: "idle".to_string(),
             last_recorded_at: None,
+            tags: Vec::new(),
+            group_id: None,
         }
     }
 
@@ -562,5 +2116,27 @@ mod tests {
             .map(|duration| duration.as_nanos())
             .unwrap_or_default();
         std::env::temp_dir().join(format!("local-material-workbench-index-{timestamp}.json"))
+    }
+
+    fn cleanup_recovery_artifacts(path: &Path) {
+        let _ = fs::remove_file(path);
+        if let Some(parent) = path.parent() {
+            let prefix = path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or_default()
+                .to_string();
+            if let Ok(entries) = fs::read_dir(parent) {
+                for entry in entries.flatten() {
+                    if entry
+                        .file_name()
+                        .to_string_lossy()
+                        .starts_with(&format!("{prefix}.recovery-"))
+                    {
+                        let _ = fs::remove_file(entry.path());
+                    }
+                }
+            }
+        }
     }
 }

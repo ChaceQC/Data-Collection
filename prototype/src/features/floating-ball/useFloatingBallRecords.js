@@ -43,8 +43,8 @@ export function useFloatingBallRecords({
     if (!isTauriRuntime) return undefined;
     let cancelled = false;
     getFloatingRecent()
-      .then((loadedRecent) => {
-        if (!cancelled) setRecent(getRecentEntries(loadedRecent));
+      .then((result) => {
+        if (!cancelled) setRecent(getRecentEntries(result?.recent || result));
       })
       .catch(() => {
         if (!cancelled) setFeedback("悬浮球状态读取失败，请重试");
@@ -73,7 +73,8 @@ export function useFloatingBallRecords({
   async function refreshRecent() {
     if (!isTauriRuntime) return;
     try {
-      setRecent(getRecentEntries(await getFloatingRecent()));
+      const result = await getFloatingRecent();
+      setRecent(getRecentEntries(result?.recent || result));
     } catch {
       showFeedbackRef.current("最近记录暂时无法刷新", "error");
     }
@@ -86,8 +87,8 @@ export function useFloatingBallRecords({
     setFavoriteBusyId(entry.id);
     try {
       if (isTauriRuntime) {
-        const entries = await setFavorite(entry.id, favorite);
-        const updatedEntry = entries.find((item) => item.id === entry.id);
+        const result = await setFavorite(entry.id, favorite);
+        const updatedEntry = result.entry;
         setRecent((current) => current.map((item) => (
           item.id === entry.id ? { ...item, favorite: updatedEntry?.favorite ?? favorite } : item
         )));
@@ -98,7 +99,7 @@ export function useFloatingBallRecords({
       }
       showFeedbackRef.current(favorite ? "已加入收藏" : "已取消收藏", "recorded");
     } catch (error) {
-      showFeedbackRef.current(typeof error === "string" ? error : "收藏状态更新失败，请重试", "error");
+      showFeedbackRef.current(getErrorMessage(error, "收藏状态更新失败，请重试"), "error");
     } finally {
       favoriteBusyRef.current = "";
       setFavoriteBusyId("");
@@ -140,7 +141,7 @@ export function useFloatingBallRecords({
       setRecent(getRecentEntries(result.recent));
       showFeedbackRef.current(getRecordMessage(result), getRecordStatus(result));
     } catch (error) {
-      showFeedbackRef.current(typeof error === "string" ? error : "悬浮球记录失败，请重试", "error");
+      showFeedbackRef.current(getErrorMessage(error, "悬浮球记录失败，请重试"), "error");
     } finally {
       recordingRef.current = false;
       const pendingPaths = pendingPathsRef.current;
@@ -176,4 +177,9 @@ export function useFloatingBallRecords({
     recent,
     refreshRecent,
   };
+}
+
+function getErrorMessage(error, fallback) {
+  const message = typeof error === "string" ? error : error?.message;
+  return typeof message === "string" && message.length <= 180 ? message : fallback;
 }

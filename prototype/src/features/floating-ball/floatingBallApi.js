@@ -1,30 +1,36 @@
-import { invoke, isTauri } from "@tauri-apps/api/core";
+import {
+  invokeCommand,
+  isDesktopRuntime,
+  parseFloatingRecentResult,
+  parseFloatingRecordResult,
+  parseWindowStatus,
+} from "../../lib/ipcContracts.js";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { currentMonitor, getCurrentWindow } from "@tauri-apps/api/window";
 import { PhysicalPosition, PhysicalSize } from "@tauri-apps/api/dpi";
 
 export function canUseFloatingBallRuntime() {
-  return isTauri();
+  return isDesktopRuntime();
 }
 
 export function loadFloatingPlacement() {
-  return invoke("load_floating_placement");
+  return invokeCommand("load_floating_placement");
 }
 
 export function saveFloatingPlacement(placement) {
-  return invoke("save_floating_placement", { placement });
+  return invokeCommand("save_floating_placement", { placement });
 }
 
 export function getFloatingRecent() {
-  return invoke("get_floating_recent");
+  return invokeCommand("get_floating_recent", undefined, parseFloatingRecentResult);
 }
 
 export function recordFloatingPaths(paths) {
-  return invoke("record_floating_paths", { paths });
+  return invokeCommand("record_floating_paths", { paths }, parseFloatingRecordResult);
 }
 
 export function openMainFromFloating(fileId) {
-  return invoke("open_main_from_floating", { fileId });
+  return invokeCommand("open_main_from_floating", { fileId });
 }
 
 export function listenFloatingEvent(eventName, handler) {

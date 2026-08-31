@@ -1,8 +1,9 @@
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     fs::{self, Metadata},
     hash::{Hash, Hasher},
     path::{Path, PathBuf},
+    sync::OnceLock,
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -23,16 +24,51 @@ pub enum FileSystemError {
     InvalidDirectory,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct FileTypeInfo {
-    pub extension: &'static str,
-    pub kind: &'static str,
-    pub file_type: &'static str,
-    pub language: Option<&'static str>,
-    pub media_type: Option<&'static str>,
-    pub previewer: &'static str,
-    pub limit: &'static str,
+    pub extension: String,
+    pub kind: String,
+    pub file_type: String,
+    pub language: Option<String>,
+    pub media_type: Option<String>,
+    pub max_bytes: u64,
+    pub max_pixels: Option<u64>,
 }
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SharedFileTypeDefinition {
+    kind: String,
+    file_type: String,
+    language: Option<String>,
+    media_type: Option<String>,
+    limit: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SharedPreviewLimit {
+    label: String,
+    max_bytes: u64,
+    max_pixels: Option<u64>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct SharedFileTypeManifest {
+    limits: HashMap<String, SharedPreviewLimit>,
+    extensions: HashMap<String, SharedFileTypeDefinition>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct PreviewLimitSpec {
+    pub label: String,
+    pub max_bytes: u64,
+    pub max_pixels: Option<u64>,
+}
+
+const SHARED_FILE_TYPES_JSON: &str = include_str!("../../../shared/file-types.json");
+const PREVIEW_LIMIT_KEYS: &[&str] = &["text", "office", "pdf", "image", "video"];
+static SHARED_FILE_TYPE_MANIFEST: OnceLock<Option<SharedFileTypeManifest>> = OnceLock::new();
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum PreviewPathError {
@@ -71,6 +107,59 @@ pub struct IndexEntry {
     pub preview_status: String,
     #[serde(default)]
     pub last_recorded_at: Option<i64>,
+    #[serde(default)]
+    pub tags: Vec<String>,
+    #[serde(default)]
+    pub group_id: Option<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DirectoryEntry {
+    pub id: String,
+    pub name: String,
+    pub kind: String,
+    #[serde(rename = "type")]
+    pub file_type: String,
+    pub size: u64,
+    pub modified_at: i64,
+    pub status: String,
+    pub invalid: bool,
+    pub favorite: bool,
+    pub added_at: i64,
+    pub preview_status: String,
+    pub last_recorded_at: Option<i64>,
+    pub tags: Vec<String>,
+    pub group_id: Option<String>,
+    pub directory_id: String,
+    pub relative_path: Vec<String>,
+}
+
+impl DirectoryEntry {
+    pub(crate) fn from_index_entry(
+        entry: IndexEntry,
+        directory_id: String,
+        relative_path: Vec<String>,
+    ) -> Self {
+        Self {
+            id: entry.id,
+            name: entry.name,
+            kind: entry.kind,
+            file_type: entry.file_type,
+            size: entry.size,
+            modified_at: entry.modified_at,
+            status: entry.status,
+            invalid: entry.invalid,
+            favorite: entry.favorite,
+            added_at: entry.added_at,
+            preview_status: entry.preview_status,
+            last_recorded_at: entry.last_recorded_at,
+            tags: entry.tags,
+            group_id: entry.group_id,
+            directory_id,
+            relative_path,
+        }
+    }
 }
 
 #[derive(Debug, Default)]
@@ -214,25 +303,39 @@ pub fn refresh_entry(entry: &mut IndexEntry) -> bool {
         return changed;
     };
 
+    apply_refreshed_metadata(entry, &updated)
+}
+
+pub(crate) fn refresh_entry_snapshot(entry: &IndexEntry) -> IndexEntry {
+    let mut refreshed = entry.clone();
+    refresh_entry(&mut refreshed);
+    refreshed
+}
+
+pub(crate) fn apply_refreshed_metadata(entry: &mut IndexEntry, updated: &IndexEntry) -> bool {
     let changed = entry.invalid
-        || entry.status != "已登记"
+        || entry.status != updated.status
         || entry.name != updated.name
         || entry.kind != updated.kind
         || entry.file_type != updated.file_type
         || entry.size != updated.size
         || entry.modified_at != updated.modified_at;
-    entry.name = updated.name;
-    entry.kind = updated.kind;
-    entry.file_type = updated.file_type;
+    entry.name = updated.name.clone();
+    entry.kind = updated.kind.clone();
+    entry.file_type = updated.file_type.clone();
     entry.size = updated.size;
     entry.modified_at = updated.modified_at;
-    entry.invalid = false;
-    entry.status = "已登记".to_string();
+    entry.invalid = updated.invalid;
+    entry.status = updated.status.clone();
     changed
 }
 
 pub fn same_path(left: &str, right: &str) -> bool {
     normalize_path_key(Path::new(left)) == normalize_path_key(Path::new(right))
+}
+
+pub(crate) fn path_identity(raw_path: &str) -> String {
+    normalize_path_key(Path::new(raw_path))
 }
 
 pub(crate) fn validate_preview_file(
@@ -259,6 +362,33 @@ pub(crate) fn validate_directory_path(raw_path: &str) -> Result<PathBuf, PathVal
         return Err(PathValidationError::Invalid);
     }
     Ok(path)
+}
+
+pub(crate) fn resolve_directory_child(
+    raw_root: &str,
+    relative_path: &[String],
+) -> Result<PathBuf, PathValidationError> {
+    if relative_path.len() > 128 {
+        return Err(PathValidationError::Invalid);
+    }
+    let root = validate_directory_path(raw_root)?;
+    let mut current = root.clone();
+    for component in relative_path {
+        validate_relative_component(component)?;
+        let candidate = current.join(component);
+        let resolved = canonicalize_existing_path(&candidate.to_string_lossy())?;
+        if !is_path_within(&root, &resolved) {
+            return Err(PathValidationError::Invalid);
+        }
+        current = resolved;
+    }
+    Ok(current)
+}
+
+pub(crate) fn is_path_within(root: &Path, candidate: &Path) -> bool {
+    let root_key = normalize_path_key(root).trim_end_matches('\\').to_string();
+    let candidate_key = normalize_path_key(candidate);
+    candidate_key == root_key || candidate_key.starts_with(&(root_key + "\\"))
 }
 
 fn add_folder_entry(
@@ -320,8 +450,8 @@ fn build_folder_entry(path: PathBuf, metadata: &Metadata) -> Option<IndexEntry> 
 fn build_entry(
     path: PathBuf,
     metadata: &Metadata,
-    kind: &str,
-    file_type: &str,
+    kind: impl Into<String>,
+    file_type: impl Into<String>,
     size: u64,
 ) -> Option<IndexEntry> {
     let name = path.file_name()?.to_string_lossy().into_owned();
@@ -329,8 +459,8 @@ fn build_entry(
         id: make_id(&path),
         path: path.to_string_lossy().into_owned(),
         name,
-        kind: kind.to_string(),
-        file_type: file_type.to_string(),
+        kind: kind.into(),
+        file_type: file_type.into(),
         size,
         modified_at: modified_timestamp(metadata),
         status: "已登记".to_string(),
@@ -339,6 +469,8 @@ fn build_entry(
         added_at: current_timestamp(),
         preview_status: default_preview_status(),
         last_recorded_at: None,
+        tags: Vec::new(),
+        group_id: None,
     })
 }
 
@@ -363,135 +495,53 @@ pub(crate) fn type_info_for_path(path: &Path) -> Option<FileTypeInfo> {
 
 pub(crate) fn type_info_for_extension(extension: &str) -> Option<FileTypeInfo> {
     let extension = extension.trim_start_matches('.').to_ascii_lowercase();
-    let info = match extension.as_str() {
-        "md" | "markdown" => FileTypeInfo {
-            extension: if extension == "md" { "md" } else { "markdown" },
-            kind: "markdown",
-            file_type: "Markdown",
-            language: Some("markdown"),
-            media_type: None,
-            previewer: "MarkdownPreviewer",
-            limit: "text",
-        },
-        "txt" | "text" => FileTypeInfo {
-            extension: if extension == "txt" { "txt" } else { "text" },
-            kind: "text",
-            file_type: "文本文件",
-            language: None,
-            media_type: None,
-            previewer: "TextPreviewer",
-            limit: "text",
-        },
-        "js" => text_info("js", "javascript"),
-        "jsx" => text_info("jsx", "javascript"),
-        "ts" => text_info("ts", "typescript"),
-        "tsx" => text_info("tsx", "typescript"),
-        "py" => text_info("py", "python"),
-        "c" => text_info("c", "c"),
-        "h" => text_info("h", "c"),
-        "cc" | "cpp" | "cxx" => text_info("cpp", "cpp"),
-        "hpp" => text_info("hpp", "cpp"),
-        "rs" => text_info("rs", "rust"),
-        "go" => text_info("go", "go"),
-        "java" => text_info("java", "java"),
-        "css" => text_info("css", "css"),
-        "html" => text_info("html", "html"),
-        "xml" => text_info("xml", "xml"),
-        "yaml" | "yml" => text_info("yaml", "yaml"),
-        "toml" => text_info("toml", "toml"),
-        "ini" | "conf" => text_info("ini", "ini"),
-        "sql" => text_info("sql", "sql"),
-        "json" | "jsonl" => text_info("json", "json"),
-        "doc" => FileTypeInfo {
-            extension: "doc",
-            kind: "doc",
-            file_type: "Word 文档",
-            language: None,
-            media_type: Some("application/msword"),
-            previewer: "DocPreviewer",
-            limit: "docx",
-        },
-        "docx" => FileTypeInfo {
-            extension: "docx",
-            kind: "docx",
-            file_type: "Word 文档",
-            language: None,
-            media_type: Some(
-                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            ),
-            previewer: "OfficePreviewer",
-            limit: "docx",
-        },
-        "xls" | "xlsx" => FileTypeInfo {
-            extension: if extension == "xls" { "xls" } else { "xlsx" },
-            kind: "xlsx",
-            file_type: "Excel 工作簿",
-            language: None,
-            media_type: Some("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
-            previewer: "SpreadsheetPreviewer",
-            limit: "xlsx",
-        },
-        "pdf" => FileTypeInfo {
-            extension: "pdf",
-            kind: "pdf",
-            file_type: "PDF 文档",
-            language: None,
-            media_type: Some("application/pdf"),
-            previewer: "PdfPreviewer",
-            limit: "pdf",
-        },
-        "png" => image_info("png", "image/png"),
-        "jpg" | "jpeg" => image_info("jpeg", "image/jpeg"),
-        "webp" => image_info("webp", "image/webp"),
-        "gif" => image_info("gif", "image/gif"),
-        "bmp" => image_info("bmp", "image/bmp"),
-        "mp4" => video_info("mp4", "video/mp4"),
-        "webm" => video_info("webm", "video/webm"),
-        _ => return None,
-    };
-    Some(info)
+    let manifest = shared_file_type_manifest()?;
+    let definition = manifest.extensions.get(&extension)?;
+    let limit_key = definition.limit.as_deref()?;
+    let limit = manifest.limits.get(limit_key)?;
+    Some(FileTypeInfo {
+        extension,
+        kind: definition.kind.clone(),
+        file_type: definition.file_type.clone(),
+        language: definition.language.clone(),
+        media_type: definition.media_type.clone(),
+        max_bytes: limit.max_bytes,
+        max_pixels: limit.max_pixels,
+    })
 }
 
-fn classify_path(path: &Path) -> (&'static str, &'static str) {
+fn classify_path(path: &Path) -> (String, String) {
     type_info_for_path(path)
         .map(|info| (info.kind, info.file_type))
-        .unwrap_or(("other", "其他文件"))
+        .unwrap_or_else(|| ("other".to_string(), "其他文件".to_string()))
 }
 
-fn text_info(extension: &'static str, language: &'static str) -> FileTypeInfo {
-    FileTypeInfo {
-        extension,
-        kind: "text",
-        file_type: "代码或配置",
-        language: Some(language),
-        media_type: None,
-        previewer: "TextPreviewer",
-        limit: "text",
-    }
+pub(crate) fn preview_limit_bytes(key: &str) -> Option<u64> {
+    shared_file_type_manifest()?
+        .limits
+        .get(key)
+        .map(|limit| limit.max_bytes)
 }
 
-fn image_info(extension: &'static str, media_type: &'static str) -> FileTypeInfo {
-    FileTypeInfo {
-        extension,
-        kind: "image",
-        file_type: "图片",
-        language: None,
-        media_type: Some(media_type),
-        previewer: "ImagePreviewer",
-        limit: "image",
-    }
+pub(crate) fn preview_limits() -> Vec<PreviewLimitSpec> {
+    let Some(manifest) = shared_file_type_manifest() else {
+        return Vec::new();
+    };
+    PREVIEW_LIMIT_KEYS
+        .iter()
+        .filter_map(|key| manifest.limits.get(*key))
+        .map(|limit| PreviewLimitSpec {
+            label: limit.label.clone(),
+            max_bytes: limit.max_bytes,
+            max_pixels: limit.max_pixels,
+        })
+        .collect()
 }
 
-fn video_info(extension: &'static str, media_type: &'static str) -> FileTypeInfo {
-    FileTypeInfo {
-        extension,
-        kind: "video",
-        file_type: "视频",
-        language: None,
-        media_type: Some(media_type),
-        previewer: "VideoPreviewer",
-        limit: "video",
-    }
+fn shared_file_type_manifest() -> Option<&'static SharedFileTypeManifest> {
+    SHARED_FILE_TYPE_MANIFEST
+        .get_or_init(|| serde_json::from_str(SHARED_FILE_TYPES_JSON).ok())
+        .as_ref()
 }
 
 fn modified_timestamp(metadata: &Metadata) -> i64 {
@@ -574,6 +624,20 @@ fn reject_unsafe_components(path: &Path) -> Result<(), PathValidationError> {
     Ok(())
 }
 
+fn validate_relative_component(component: &str) -> Result<(), PathValidationError> {
+    if component.is_empty()
+        || component == "."
+        || component == ".."
+        || component.encode_utf16().count() > 255
+        || component
+            .chars()
+            .any(|character| character.is_control() || matches!(character, '/' | '\\' | ':'))
+    {
+        return Err(PathValidationError::Invalid);
+    }
+    Ok(())
+}
+
 fn map_path_io_error(error: std::io::Error) -> PathValidationError {
     match error.kind() {
         std::io::ErrorKind::NotFound => PathValidationError::Missing,
@@ -621,8 +685,20 @@ fn is_reparse_point(_metadata: &Metadata) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{list_directory, same_path, scan_paths};
+    use super::{
+        list_directory, preview_limits, resolve_directory_child, same_path, scan_paths,
+        type_info_for_extension,
+    };
     use std::{fs, path::PathBuf, time::SystemTime};
+
+    #[test]
+    fn reads_file_types_and_preview_limits_from_shared_manifest() {
+        let xlsx = type_info_for_extension(".XLSX").expect("shared manifest should define xlsx");
+        assert_eq!(xlsx.kind, "xlsx");
+        assert_eq!(xlsx.file_type, "Excel 工作簿");
+        assert_eq!(xlsx.max_bytes, 20 * 1024 * 1024);
+        assert_eq!(preview_limits().len(), 5);
+    }
 
     #[test]
     fn indexes_selected_directory_as_one_folder() {
@@ -662,6 +738,29 @@ mod tests {
         assert!(result
             .iter()
             .any(|entry| entry.name == "研究 计划.md" && entry.kind == "markdown"));
+        assert!(fs::remove_dir_all(root).is_ok());
+    }
+
+    #[test]
+    fn resolves_only_registered_directory_children() {
+        let root = unique_temp_dir();
+        let nested = root.join("子目录");
+        assert!(fs::create_dir_all(&nested).is_ok());
+        let file = nested.join("资料.txt");
+        assert!(fs::write(&file, "内容").is_ok());
+
+        let resolved = resolve_directory_child(
+            &root.to_string_lossy(),
+            &["子目录".to_string(), "资料.txt".to_string()],
+        )
+        .expect("registered child should resolve");
+        let canonical_file = fs::canonicalize(&file).expect("fixture should canonicalize");
+        assert_eq!(resolved, canonical_file);
+        assert!(resolve_directory_child(
+            &root.to_string_lossy(),
+            &["..".to_string(), "outside.txt".to_string()],
+        )
+        .is_err());
         assert!(fs::remove_dir_all(root).is_ok());
     }
 

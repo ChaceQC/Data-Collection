@@ -8,7 +8,7 @@ function formatDuration(seconds) {
   return `${String(minutes).padStart(2, "0")}:${String(totalSeconds % 60).padStart(2, "0")}`;
 }
 
-export function VideoPreviewer({ content }) {
+export function VideoPreviewer({ content, title = "视频" }) {
   const [status, setStatus] = useState("loading");
   const [metadata, setMetadata] = useState(null);
 
@@ -20,10 +20,12 @@ export function VideoPreviewer({ content }) {
   return (
     <div className="preview-video-content">
       <video
+        key={content.resourceUrl}
         className="preview-video"
         controls
         playsInline
         preload="metadata"
+        aria-label={`${title} 视频预览`}
         src={normalizePreviewResourceUrl(content.resourceUrl)}
         onLoadedMetadata={(event) => {
           const video = event.currentTarget;

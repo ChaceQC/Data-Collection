@@ -10,6 +10,7 @@ use crate::{
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FloatingRecordResult {
+    pub revision: u64,
     pub recent: Vec<storage::FloatingRecentEntry>,
     pub indexed_count: usize,
     pub refreshed_count: usize,
@@ -19,9 +20,17 @@ pub struct FloatingRecordResult {
     pub truncated: bool,
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FloatingRecentResult {
+    pub revision: u64,
+    pub recent: Vec<storage::FloatingRecentEntry>,
+}
+
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct FloatingRecordedEvent {
+    revision: u64,
     ids: Vec<String>,
     indexed_count: usize,
     refreshed_count: usize,
@@ -53,24 +62,26 @@ pub async fn record_floating_paths(
     let skipped_count = scan.skipped_count;
     let skipped_reasons = scan.skipped_reasons.clone();
     let scan_truncated = scan.truncated;
-    let mut merge_stats = storage::MergeStats::default();
-    let entries = state
-        .update_entries(|entries| {
-            merge_stats = storage::merge_index_entries(
+    let outcome = state
+        .update_entries_with(|entries| {
+            let merge_stats = storage::merge_index_entries(
                 entries,
                 scan.entries,
                 storage::IndexMergeMode::FloatingRecord {
                     base_recorded_at: storage::current_timestamp_millis(),
                 },
             );
-            Ok(merge_stats.accepted_count > 0)
+            Ok((merge_stats.accepted_count > 0, merge_stats))
         })
         .map_err(|error| match error {
             StorageError::Write => "资料记录保存失败，原有索引未改变".to_string(),
             other => other.to_string(),
         })?;
+    let merge_stats = outcome.value;
+    let entries = outcome.entries;
     let truncated = scan_truncated || merge_stats.truncated;
     let result = FloatingRecordResult {
+        revision: outcome.revision,
         recent: storage::floating_recent(&entries),
         indexed_count: merge_stats.added_count,
         refreshed_count: merge_stats.refreshed_count,
@@ -83,7 +94,8 @@ pub async fn record_floating_paths(
         "main",
         "floating-recorded",
         FloatingRecordedEvent {
-            ids: merge_stats.affected_ids,
+            revision: result.revision,
+            ids: merge_stats.affected_ids.clone(),
             indexed_count: result.indexed_count,
             refreshed_count: result.refreshed_count,
             recorded_count: result.recorded_count,
@@ -92,23 +104,28 @@ pub async fn record_floating_paths(
             truncated: result.truncated,
         },
     );
+    if !merge_stats.affected_ids.is_empty() {
+        super::emit_index_changed(
+            &app,
+            result.revision,
+            merge_stats.affected_ids.clone(),
+            "floating-record",
+        );
+    }
     Ok(result)
 }
 
 #[tauri::command]
 pub fn get_floating_recent(
     state: State<'_, AppState>,
-) -> Result<Vec<storage::FloatingRecentEntry>, String> {
-    let entries = state
-        .update_entries(|entries| {
-            let mut changed = false;
-            for entry in entries.iter_mut() {
-                changed |= filesystem::refresh_entry(entry);
-            }
-            Ok(changed)
-        })
-        .map_err(|error| error.to_string())?;
-    Ok(storage::floating_recent(&entries))
+    app: AppHandle,
+) -> Result<FloatingRecentResult, String> {
+    let refreshed = super::refresh_index_sync(&state, &app)?;
+    let entries = state.snapshot().map_err(|error| error.to_string())?;
+    Ok(FloatingRecentResult {
+        revision: refreshed.revision,
+        recent: storage::floating_recent(&entries),
+    })
 }
 
 #[tauri::command]

@@ -8,6 +8,7 @@ export const PREVIEW_STATUSES = Object.freeze([
   "too-large",
   "converter-missing",
   "parse-error",
+  "cancelled",
 ]);
 
 export const PREVIEW_STATUS_LABELS = Object.freeze({
@@ -20,6 +21,7 @@ export const PREVIEW_STATUS_LABELS = Object.freeze({
   "too-large": "文件过大",
   "converter-missing": "缺少 DOC 转换器",
   "parse-error": "解析失败",
+  cancelled: "已取消预览",
 });
 
 export function getPreviewStatusLabel(status) {

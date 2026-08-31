@@ -4,7 +4,11 @@ use tauri::{AppHandle, Emitter, Manager, Runtime, WindowEvent};
 
 use crate::{preview::PreviewState, storage::settings::SettingsState};
 
-use super::{close_floating_ball, FloatingBallState};
+use super::{
+    close_floating_ball,
+    lifecycle_policy::{main_window_close_action, MainWindowCloseAction},
+    FloatingBallState,
+};
 
 pub const MAIN_WINDOW_LABEL: &str = "main";
 
@@ -49,23 +53,30 @@ pub fn handle_main_window_event<R: Runtime>(
         .snapshot()
         .map(|settings| settings.hide_to_tray)
         .unwrap_or(false);
-    if !hide_to_tray {
-        return;
+    match main_window_close_action(hide_to_tray) {
+        MainWindowCloseAction::Exit => {
+            api.prevent_close();
+            let floating_state = app.state::<FloatingBallState>();
+            let preview_state = app.state::<PreviewState>();
+            request_exit(app, state, &floating_state, &preview_state);
+        }
+        MainWindowCloseAction::HideToTray => {
+            if app.tray_by_id(super::tray::TRAY_ID).is_none() {
+                api.prevent_close();
+                let _ = app.emit_to(
+                    MAIN_WINDOW_LABEL,
+                    "tray-unavailable",
+                    "托盘不可用，已保留主窗口；请关闭隐藏设置后再退出",
+                );
+                return;
+            }
+            api.prevent_close();
+            if let Some(window) = app.get_webview_window(MAIN_WINDOW_LABEL) {
+                let _ = window.hide();
+            }
+            let _ = app.emit_to(MAIN_WINDOW_LABEL, "main-window-hidden", ());
+        }
     }
-    if app.tray_by_id(super::tray::TRAY_ID).is_none() {
-        api.prevent_close();
-        let _ = app.emit_to(
-            MAIN_WINDOW_LABEL,
-            "tray-unavailable",
-            "托盘不可用，已保留主窗口；请关闭隐藏设置后再退出",
-        );
-        return;
-    }
-    api.prevent_close();
-    if let Some(window) = app.get_webview_window(MAIN_WINDOW_LABEL) {
-        let _ = window.hide();
-    }
-    let _ = app.emit_to(MAIN_WINDOW_LABEL, "main-window-hidden", ());
 }
 
 pub fn show_main_window<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
@@ -93,6 +104,8 @@ pub fn request_exit<R: Runtime>(
     if !state.begin_exit() {
         return;
     }
+    app.state::<super::tray::TrayState>().begin_exit();
+    let _ = app.remove_tray_by_id(super::tray::TRAY_ID);
     close_floating_ball(app, floating_state);
     preview_state.dispose_all();
     if let Some(window) = app.get_webview_window(MAIN_WINDOW_LABEL) {

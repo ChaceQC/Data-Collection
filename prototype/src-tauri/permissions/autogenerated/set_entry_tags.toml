@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-set-entry-tags"
+description = "Enables the set_entry_tags command without any pre-configured scope."
+commands.allow = ["set_entry_tags"]
+
+[[permission]]
+identifier = "deny-set-entry-tags"
+description = "Denies the set_entry_tags command without any pre-configured scope."
+commands.deny = ["set_entry_tags"]

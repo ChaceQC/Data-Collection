@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-cancel-batch-operation"
+description = "Enables the cancel_batch_operation command without any pre-configured scope."
+commands.allow = ["cancel_batch_operation"]
+
+[[permission]]
+identifier = "deny-cancel-batch-operation"
+description = "Denies the cancel_batch_operation command without any pre-configured scope."
+commands.deny = ["cancel_batch_operation"]

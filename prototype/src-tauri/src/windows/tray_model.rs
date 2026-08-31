@@ -3,15 +3,17 @@ pub enum TrayMenuAction {
     OpenMain,
     OpenSettings,
     ToggleFloating,
+    RefreshIndex,
     Exit,
     OpenTask(String),
     ToggleFavorite(String),
 }
 
 #[allow(dead_code)]
-pub const TRAY_STATIC_MENU_IDS: [&str; 5] = [
+pub const TRAY_STATIC_MENU_IDS: [&str; 6] = [
     "tray-open-main",
     "tray-toggle-floating",
+    "tray-refresh-index",
     "tray-recent-tasks",
     "tray-open-settings",
     "tray-exit",
@@ -24,6 +26,7 @@ pub fn parse_menu_id(raw: &str) -> Option<TrayMenuAction> {
     match raw {
         "tray-open-main" => Some(TrayMenuAction::OpenMain),
         "tray-toggle-floating" => Some(TrayMenuAction::ToggleFloating),
+        "tray-refresh-index" => Some(TrayMenuAction::RefreshIndex),
         "tray-open-settings" => Some(TrayMenuAction::OpenSettings),
         "tray-exit" => Some(TrayMenuAction::Exit),
         _ => parse_task_id(raw),
@@ -136,6 +139,7 @@ mod tests {
             [
                 "tray-open-main",
                 "tray-toggle-floating",
+                "tray-refresh-index",
                 "tray-recent-tasks",
                 "tray-open-settings",
                 "tray-exit"

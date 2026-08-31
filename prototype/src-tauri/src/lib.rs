@@ -1,8 +1,10 @@
 #[cfg(not(test))]
 mod commands;
-mod config;
 #[cfg_attr(test, allow(dead_code))]
 mod filesystem;
+#[cfg(test)]
+#[path = "windows/lifecycle_policy.rs"]
+mod lifecycle_policy_tests;
 #[cfg(test)]
 #[path = "windows/monitor.rs"]
 mod monitor_tests;
@@ -31,8 +33,13 @@ pub fn run() {
             state.resource_response(&request)
         })
         .manage(storage::AppState::default())
+        .manage(commands::BatchState::default())
         .manage(storage::settings::SettingsState::default())
-        .manage(preview::PreviewState::default())
+        .manage({
+            let state = preview::PreviewState::default();
+            state.start_cleanup_task();
+            state
+        })
         .manage(windows::FloatingBallState::default())
         .manage(windows::lifecycle::LifecycleState::default())
         .manage(windows::tray::TrayState::default())
@@ -82,7 +89,12 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::load_file_index,
             commands::list_directory,
+            commands::reveal_directory_child,
             commands::index_paths,
+            commands::refresh_index,
+            commands::get_index_recovery,
+            commands::reset_index_recovery,
+            commands::export_index_diagnostic,
             commands::reposition_file,
             commands::floating_ball::record_floating_paths,
             commands::floating_ball::get_floating_recent,
@@ -98,6 +110,17 @@ pub fn run() {
             commands::library::reveal_indexed_file,
             commands::library::rename_indexed_file,
             commands::library::delete_original_file,
+            commands::library::set_entry_tags,
+            commands::library::set_entry_group,
+            commands::library::create_group,
+            commands::library::rename_group,
+            commands::library::delete_group,
+            commands::library::batch_set_favorite,
+            commands::library::batch_remove_index_entries,
+            commands::library::batch_update_tags,
+            commands::library::batch_set_group,
+            commands::library::cancel_batch_operation,
+            commands::library::undo_last,
             commands::settings::load_settings,
             commands::settings::update_settings,
             commands::window::set_floating_window_visible,
@@ -106,7 +129,8 @@ pub fn run() {
             commands::window::exit_app,
             commands::can_preview,
             commands::load_preview,
-            commands::dispose_preview
+            commands::dispose_preview,
+            commands::cancel_preview_task,
         ])
         .build(tauri::generate_context!())
         .map(|app| {

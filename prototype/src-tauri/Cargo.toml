@@ -1,6 +1,6 @@
 [package]
 name = "local-material-workbench"
-version = "0.3.6"
+version = "0.3.16"
 description = "本地资料工作台 Tauri 桌面应用"
 authors = ["Local Material Workbench"]
 edition = "2021"
@@ -33,3 +33,4 @@ windows-sys = { version = "0.61.2", features = [
     "Win32_UI_WindowsAndMessaging",
 ] }
 uuid = { version = "1", features = ["v4"] }
+zip = { version = "2", default-features = false, features = ["deflate"] }
