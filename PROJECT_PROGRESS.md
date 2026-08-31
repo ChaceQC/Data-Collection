@@ -2,6 +2,42 @@
 
 ## 2026-08-31
 
+### 阶段 A-J Windows 验收完成与 0.3.16 发布准备
+
+#### 已完成
+
+- 用户已确认当前分支所包含阶段 A-I，以及阶段 J 发布验收对应的 Windows 11/Tauri/WebView2 桌面验收完成；本次验收结果作为发布门禁，不再把浏览器回退检查或开发侧自动测试当作桌面验收替代品。
+- 根据用户对发布版本的确认，本次使用 `0.3.16` 作为 `v0.3.6` 后的最终阶段版本。计划表中的 `0.3.7`-`0.3.15` 保留为前置阶段规划编号，本次不连续创建这些版本的 Release。
+- 将前端 package、package-lock 根包、Tauri 配置、Rust crate、Cargo.lock 根包、根 README、原型 README 和本计划的当前状态统一切换到 `0.3.16` 发布口径；阶段 J 的质量门禁与发布验收纳入本次版本。
+
+#### 进行中
+
+- 当前分支已完成版本和文档同步；待按用户指定顺序将本分支并入 `dev`，再将 `dev` 合并入 `main`，推送分支并创建 `v0.3.16` Release。
+
+#### 阻塞与风险
+
+- 阶段 J 的用户发布验收已完成；自动化质量门禁、依赖审计、安装包签名评估和 Release 依赖链仍按仓库实际能力记录，不将未执行的检查写成已执行。
+- 安装包未签名、目标机需要 WebView2、DOC 预览需要 LibreOffice、视频编码依赖 WebView2，以及 `xlsx@0.18.5` 的既有依赖风险保持不变。
+
+#### 下一步
+
+- 完成版本一致性和文档检查后提交当前分支；将当前分支并入 `dev` 并推送，再将 `dev` 合并入 `main` 并推送。
+- 在 `main` 上推送 `v0.3.16` 标签，等待 Windows Release workflow 完成并核验 NSIS 安装包和便携 ZIP。
+
+#### 涉及文件
+
+- `prototype/package.json`、`prototype/package-lock.json`
+- `prototype/src-tauri/Cargo.toml`、`prototype/src-tauri/Cargo.lock`、`prototype/src-tauri/tauri.conf.json`
+- `README.md`、`prototype/README.md`、`PROJECT_PLAN.md`、`PROJECT_PROGRESS.md`
+
+#### 验证
+
+- 版本一致性检查通过：`prototype/package.json`、package-lock 根包、Tauri 配置、Rust crate 和 Cargo.lock 根 package 均为 `0.3.16`。
+- `git diff --check`：通过。
+- `npm.cmd run build`：通过；生成 `dist/client/index.html`、`dist/server/index.js` 和 `dist/.openai/hosting.json`，保留既有大 chunk 提示。
+- `cargo check --locked`：通过，Rust crate 使用锁定依赖并按 `0.3.16` 编译。
+- 分支同步和 Release workflow 结果在后续发布步骤补记。
+
 ### 筛选菜单自动关闭与 Windows 扩展路径显示修复
 
 #### 已完成

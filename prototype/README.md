@@ -1,6 +1,6 @@
 # 本地资料工作台原型
 
-这是基于 `AGENT.md` 方案 3“收纳入口”实现的本地资料工作台。当前版本 `0.3.6` 为悬浮球优化正式发布版本，包含 Tauri 2 桌面外壳、真实文件索引、统一预览适配器、悬浮球和系统托盘生命周期代码；上一版阶段 A-F 的实现、自动验证和 Windows 11 桌面手工验收均已完成，浏览器运行时仍只保留安全的原型回退。当前开发分支已完成新总体计划阶段 A-I 的代码级改动，但候选版本仍保持 `0.3.6`，等待用户按阶段完成 Windows 11 手工验收。
+这是基于 `AGENT.md` 方案 3“收纳入口”实现的本地资料工作台。当前版本 `0.3.16` 是在 `0.3.6` 基础上合并阶段 A-I 并完成阶段 J 发布验收后的整体版本，包含 Tauri 2 桌面外壳、真实文件索引、统一预览适配器、悬浮球和系统托盘生命周期代码；用户已确认阶段 A-J 对应的 Windows 11/Tauri/WebView2 桌面验收完成，浏览器运行时仍只保留安全的原型回退。
 
 ## 启动
 
@@ -77,7 +77,7 @@ Windows WebView2 使用 `http://preview.localhost/<previewId>` 访问受控资�
 
 PDF 的初始无范围请求返回完整 `200` 响应，客户端明确发起的范围请求仍按 `Content-Range` 分段返回，以兼容 PDF.js 的文件长度探测和分页读取。
 
-预览、资料库核心功能、阶段 F 的设置和显式外部操作，以及悬浮球阶段 A-F 的实现、自动验证、Windows 11 桌面手工验收和 `v0.3.6` GitHub Release 均已完成。新计划阶段 A-I 的代码级实现和自动验证已在当前开发分支完成，但尚未形成 `0.3.7`-`0.3.15` 正式候选；不把构建、浏览器检查或单元测试写成新的 Windows 手工验收。不把所有格式写成无条件“已支持”，视频编码、LibreOffice 和 WebView2 Runtime 仍按各自外部依赖边界处理。
+预览、资料库核心功能、阶段 F 的设置和显式外部操作，以及悬浮球阶段 A-F 的实现、自动验证、Windows 11 桌面手工验收和 `v0.3.6` GitHub Release 均已完成。新计划阶段 A-I 的代码级实现、自动验证和 Windows 11/Tauri/WebView2 桌面验收已完成，并作为整体纳入 `v0.3.16` 发布；阶段 J 的用户验收和发布门禁确认已完成。不把所有格式写成无条件“已支持”，视频编码、LibreOffice 和 WebView2 Runtime 仍按各自外部依赖边界处理。
 
 依赖审计注意事项：当前公开 `xlsx@0.18.5` 没有可用的 npm 修复版本，并存在已知 Prototype Pollution/ReDoS 报告。应用不打开宏、外部链接或 HTML，限制工作簿大小和展示范围，并在 Worker 中解析以便超时或异常时终止；在替换为有修复的兼容库前，该风险仍需纳入发布判断。
 
@@ -86,7 +86,7 @@ PDF 的初始无范围请求返回完整 `200` 响应，客户端明确发起的
 - 索引仍只保存路径和元数据，预览正文、资源会话 ID 和临时 PDF 不写入 `index.json`。
 - SVG、MOV、AVI、MKV 等未登记格式返回 `unsupported`；视频不提供隐藏转码。
 - DOC 预览依赖本机 LibreOffice；当前构建未内置或下载 WebView2 Runtime，也未签名。
-- 当前不提供全文检索、批量物理复制/重命名/删除或跨任意历史的通用撤销栈；阶段 G-I 的位置搜索、标签/分组、批量索引操作和有限撤销已在开发分支实现，待阶段门禁和 Windows 11 手工验收后再进入正式版本。阶段 F 的原始数据模型、影响范围和失败恢复决策记录在 `docs/phase-f-settings-and-external-operations.md`。
+- 当前不提供全文检索、批量物理复制/重命名/删除或跨任意历史的通用撤销栈；阶段 G-I 的位置搜索、标签/分组、批量索引操作和有限撤销已随 `0.3.16` 发布。阶段 F 的原始数据模型、影响范围和失败恢复决策记录在 `docs/phase-f-settings-and-external-operations.md`。
 - 悬浮球透明置顶窗口、资源管理器真实拖放、位置恢复以及本轮新增的悬停状态机、四边四角几何、跨 DPI 和组合交互均已由用户在 Windows 11 桌面端验收通过；浏览器回退只展示内存演示状态。
 - 浏览器回退不会执行真实文件剪贴板、重命名、原文件删除或外部打开/定位；桌面端复制到剪贴板、资源管理器粘贴、设置持久化和显式外部操作已由用户在 Windows 环境完成手工验收。
 - 解析失败、缺失、权限不足、过大、转换器缺失和暂不支持均保留索引并在模态对话框显示可执行的下一步。
@@ -117,6 +117,6 @@ cargo test
 cargo clippy --all-targets --all-features -- -D warnings
 ```
 
-`npm.cmd run build` 会生成 Sites 所需的 `dist/client/index.html`、`dist/server/index.js` 和 `dist/.openai/hosting.json`。浏览器/Sites 模式不会调用真实文件预览、托盘或窗口 command；上一版 Windows 桌面预览、资料库操作、阶段 F、悬浮球基础能力和阶段 H 验收记录在根目录 `PROJECT_PROGRESS.md`，当前新计划阶段 A-I 的代码级验证已完成，但仍由用户执行对应 Windows 11 桌面验收。
+`npm.cmd run build` 会生成 Sites 所需的 `dist/client/index.html`、`dist/server/index.js` 和 `dist/.openai/hosting.json`。浏览器/Sites 模式不会调用真实文件预览、托盘或窗口 command；上一版 Windows 桌面预览、资料库操作、阶段 F、悬浮球基础能力和阶段 H 验收记录在根目录 `PROJECT_PROGRESS.md`，当前新计划阶段 A-I 的代码级验证、阶段 J 发布验收和 Windows 11/Tauri/WebView2 桌面验收已完成，并作为整体纳入 `0.3.16`。
 
 悬浮球阶段的自动验证使用 `npm.cmd run test:floating-ball`、`cargo test`、`cargo check` 和 `cargo clippy`；真实 Windows 窗口、文件拖放、多显示器位置和关闭/重启行为的验收记录均保留，本轮悬停面板优化的四边四角、DPI 和组合行为已由用户完成手工确认，代理不以浏览器页面或开发侧命令结果替代该验收。
