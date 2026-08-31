@@ -84,6 +84,7 @@ export function Dialog({
   initialFocusRef,
   header,
   dialogProps = {},
+  bodyProps = {},
 }) {
   const dialogRef = useRef(null);
   const titleId = useId();
@@ -116,7 +117,7 @@ export function Dialog({
             <DialogCloseButton label={closeLabel} disabled={busy} onClick={onClose} />
           </header>
         )}
-        <div className={bodyClassName}>
+        <div className={bodyClassName} {...bodyProps}>
           {description && <p id={descriptionId} className={header ? "sr-only" : "library-dialog-description"}>{description}</p>}
           {children}
         </div>

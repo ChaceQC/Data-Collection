@@ -119,6 +119,40 @@
 - `WebView2Loader.dll` 校验通过：`160320` bytes，SHA-256 为 `8427b1fc58ec707813e5c0a51eb5d69397bb333250a7b891be4d3b123f1e0f1c`，x64 loader 与 release 主程序位于同一目录。
 - `git diff --check`：通过；正式版本仍为 `0.3.6`，没有执行安装器启动/卸载或 Windows 桌面手工验收。
 
+### PDF 预览渲染布局修复
+
+#### 已完成
+
+- 修复 `PreviewPane` 统一 Dialog 改造后多出的内容包装层：PDF 预览现在直接挂载到 `preview-dialog-body`，`aria-busy` 由 Dialog body 承担，避免 `.preview-pdf-content` 的百分比高度和内部 flex 高度失去明确包含块。
+- 保留 PDF.js worker、资源 URL、分页、缩放、取消和资源释放逻辑；未改变 PDF 大小/页数/canvas 限制或 Rust 资源协议。
+
+#### 进行中
+
+- 代码回归和浏览器有效 PDF 检查已通过；正式版本仍为 `0.3.6`。NSIS 重建第一次因当前运行中的 release 进程 `PID 43900` 锁定构建文件而失败，未强制结束该进程。
+
+#### 阻塞与风险
+
+- 新修复后的安装包需要在关闭 `E:\Project\test\prototype\src-tauri\target\release\local-material-workbench.exe` 后重新运行 `npm.cmd run tauri:build`；当前安装包文件仍是修复前构建产物，不能把它写成包含本次修复。
+- 本轮未代替用户执行 Windows 11 桌面安装、启动、真实 PDF 文件和 WebView2 手工验收。
+
+#### 下一步
+
+- 关闭占用 release 文件的本地资料工作台进程后重建 NSIS 安装包，并由用户安装后复测 PDF 首页、分页、缩放和关闭预览。
+
+#### 涉及文件
+
+- `prototype/src/components/Dialog.jsx`
+- `prototype/src/features/preview/PreviewPane.jsx`
+- `PROJECT_PROGRESS.md`
+
+#### 验证
+
+- `npm.cmd run test:preview`：6 项通过。
+- `npm.cmd run build`：通过，Sites 产物生成成功。
+- PDF skill 临时两页 PDF：Poppler 源文件渲染正常；浏览器 `Dialog + PdfPreviewer` canvas 在 100% 时为 `612x792`，第 2 页 125% 时为 `765x990`，截图内容正常且页面 error/warning 日志为空。
+- 临时调试 HTML、有效 PDF、Poppler PNG 和服务端口 `49220` 已清理/关闭。
+- `npm.cmd run tauri:build`：前端阶段通过，Rust/Tauri build script 因 PID `43900` 的 release 可执行文件占用返回 `os error 32`；本轮没有声称新安装包构建成功。
+
 ## 2026-08-30
 
 ### 悬浮球拖动后无法展开与收起闪烁修复

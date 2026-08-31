@@ -124,6 +124,7 @@ export function PreviewPane({ entry, onClose }) {
       className="preview-dialog"
       backdropClassName="preview-modal-backdrop"
       bodyClassName={`preview-dialog-body ${isReady ? "is-ready" : ""}`}
+      bodyProps={{ "aria-busy": result.status === "loading" }}
       onClose={onClose}
       dialogProps={{ "data-testid": "preview-dialog" }}
       header={({ titleId }) => (
@@ -137,9 +138,7 @@ export function PreviewPane({ entry, onClose }) {
         </header>
       )}
     >
-      <div aria-busy={result.status === "loading"}>
-        {result.status === "ready" && result.content ? <PreviewContent result={result} entryName={entry.name} /> : result.status === "loading" ? <div className="preview-loading-state">正在准备预览...</div> : <UnsupportedPreviewer status={result.status} reason={result.reason} />}
-      </div>
+      {result.status === "ready" && result.content ? <PreviewContent result={result} entryName={entry.name} /> : result.status === "loading" ? <div className="preview-loading-state">正在准备预览...</div> : <UnsupportedPreviewer status={result.status} reason={result.reason} />}
     </Dialog>
   );
 }
