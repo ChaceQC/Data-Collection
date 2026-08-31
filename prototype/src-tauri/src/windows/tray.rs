@@ -346,10 +346,12 @@ fn toggle_favorite<R: Runtime>(app: &AppHandle<R>, file_id: &str) {
         refresh_menu(app);
         return;
     };
-    let result = app.state::<AppState>().update_entries_with(|entries| {
-        let changed = storage::set_favorite(entries, file_id, !current_favorite)?;
-        Ok((changed, ()))
-    });
+    let result = app
+        .state::<AppState>()
+        .update_index_with_undo("favorite", |entries, _groups| {
+            let changed = storage::set_favorite(entries, file_id, !current_favorite)?;
+            Ok((changed, ()))
+        });
     match result {
         Ok(result) if result.changed => commands::emit_index_changed(
             app,

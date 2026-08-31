@@ -1,10 +1,13 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
 
 export const IPC_COMMANDS = Object.freeze([
-  "load_file_index", "list_directory", "index_paths", "refresh_index", "get_index_recovery",
+  "load_file_index", "list_directory", "reveal_directory_child", "index_paths", "refresh_index", "get_index_recovery",
   "reset_index_recovery", "export_index_diagnostic", "reposition_file", "set_favorite",
   "remove_index_entry", "copy_indexed_file", "open_indexed_file", "reveal_indexed_file",
-  "rename_indexed_file", "delete_original_file", "load_settings", "update_settings",
+  "rename_indexed_file", "delete_original_file", "set_entry_tags", "set_entry_group",
+  "create_group", "rename_group", "delete_group", "batch_set_favorite",
+  "batch_remove_index_entries", "batch_update_tags", "batch_set_group", "cancel_batch_operation", "undo_last",
+  "load_settings", "update_settings",
   "floating_window_status", "retry_floating_ball", "tray_status", "get_floating_recent",
   "record_floating_paths", "open_main_from_floating", "load_floating_placement",
   "save_floating_placement", "set_floating_window_visible", "show_main_window", "exit_app",
@@ -29,6 +32,14 @@ const OPERATION_MESSAGES = Object.freeze({
   "storage-write": "本地索引无法写入，请检查磁盘空间和权限",
   "storage-unavailable": "本地索引暂时不可用，请重试",
   "index-recovery-required": "本地索引需要恢复，请使用页面中的恢复操作",
+  "duplicate-group": "分组名称已经存在",
+  "group-not-found": "分组已不存在，请刷新索引",
+  "invalid-group-name": "分组名称无效，请使用不超过 64 个字符的名称",
+  "invalid-tag": "标签无效，请使用不超过 32 个字符的名称",
+  "batch-too-large": "一次选择的资料过多，请分批操作",
+  "invalid-batch": "请先选择资料",
+  "undo-unavailable": "撤销不可用，索引已经发生变化",
+  "undo-conflict": "撤销目标已经发生变化，请先刷新索引",
   "folder-not-supported": "此操作暂时只支持普通文件",
   "task-failed": "操作任务未完成，请重试",
 });
@@ -71,13 +82,15 @@ export function makeDirectoryTarget(directoryId, relativePath = []) {
 }
 
 export function parseIndexSnapshot(value, command = "load_file_index") {
-  if (Array.isArray(value)) return { entries: value.map((entry) => parseIndexEntry(entry, command)), revision: 0, recovery: null };
+  if (Array.isArray(value)) return { entries: value.map((entry) => parseIndexEntry(entry, command)), groups: [], revision: 0, recovery: null, undo: null };
   const source = record(value, command);
   return {
     ...source,
     entries: array(source.entries, command).map((entry) => parseIndexEntry(entry, command)),
+    groups: array(source.groups ?? [], command).map((group) => parseGroup(group, command)),
     revision: nonNegativeInteger(source.revision, command, "revision"),
     recovery: source.recovery == null ? null : parseRecovery(source.recovery, command),
+    undo: source.undo == null ? null : parseUndoStatus(source.undo, command),
   };
 }
 
@@ -110,6 +123,40 @@ export function parseMutationResult(value, command = "mutation") {
     revision: nonNegativeInteger(source.revision, command, "revision"),
     changedIds: opaqueIdArray(source.changedIds, command, "changedIds"),
     entry: source.entry == null ? null : parseIndexEntry(source.entry, command),
+  };
+}
+
+export function parseGroupMutationResult(value, command = "group-mutation") {
+  const source = record(value, command);
+  return {
+    ...source,
+    revision: nonNegativeInteger(source.revision, command, "revision"),
+    changedIds: opaqueIdArray(source.changedIds, command, "changedIds"),
+    group: source.group == null ? null : parseGroup(source.group, command),
+  };
+}
+
+export function parseBatchMutationResult(value, command = "batch-mutation") {
+  const source = record(value, command);
+  const results = array(source.results, command).map((item) => {
+    const result = record(item, command);
+    if (!isBatchStatus(result.status)) throw contractError(command, "批量结果状态无效");
+    return {
+      ...result,
+      id: assertOpaqueId(result.id),
+      status: result.status,
+      reason: result.reason == null ? null : string(result.reason, command, "reason"),
+    };
+  });
+  return {
+    ...source,
+    operationId: assertOpaqueId(source.operationId, "operationId"),
+    revision: nonNegativeInteger(source.revision, command, "revision"),
+    changedIds: opaqueIdArray(source.changedIds, command, "changedIds"),
+    operation: string(source.operation, command, "operation"),
+    results,
+    cancelled: boolean(source.cancelled, command, "cancelled"),
+    timedOut: boolean(source.timedOut, command, "timedOut"),
   };
 }
 
@@ -191,7 +238,27 @@ export function parseIndexEntry(value, command = "index-entry") {
   const entry = { ...source, id: assertOpaqueId(source.id), name: string(source.name, command, "name"), kind: string(source.kind, command, "kind"), type: string(source.type ?? source.fileType, command, "type"), status: string(source.status, command, "status"), invalid: optionalBoolean(source.invalid, command, "invalid"), favorite: optionalBoolean(source.favorite, command, "favorite") };
   for (const field of ["size", "modifiedAt", "addedAt"]) if (source[field] != null) entry[field] = nonNegativeInteger(source[field], command, field);
   if (source.path != null && typeof source.path !== "string") throw contractError(command, "路径字段无效");
+  entry.tags = stringArray(source.tags ?? [], command, "tags").map((tag) => {
+    if (!tag.trim() || /[\u0000-\u001f\u007f-\u009f]/.test(tag)) throw contractError(command, "标签字段无效");
+    return tag;
+  });
+  entry.groupId = source.groupId == null ? null : assertOpaqueId(source.groupId, "groupId");
   return entry;
+}
+
+function parseGroup(value, command) {
+  const source = record(value, command);
+  return { ...source, id: assertOpaqueId(source.id, "groupId"), name: string(source.name, command, "name") };
+}
+
+function parseUndoStatus(value, command) {
+  const source = record(value, command);
+  return {
+    ...source,
+    id: assertOpaqueId(source.id, "undoId"),
+    operation: string(source.operation, command, "operation"),
+    count: nonNegativeInteger(source.count, command, "count"),
+  };
 }
 
 export function assertOpaqueId(value, field = "id") {
@@ -259,6 +326,10 @@ function boolean(value, command, field) {
 
 function optionalBoolean(value, command, field) {
   return value == null ? false : boolean(value, command, field);
+}
+
+function isBatchStatus(value) {
+  return value === "success" || value === "failed" || value === "skipped";
 }
 
 function previewStatus(value, command) {

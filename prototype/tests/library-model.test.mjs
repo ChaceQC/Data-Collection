@@ -3,6 +3,9 @@ import assert from "node:assert/strict";
 import {
   filterEntries,
   getFileKind,
+  getDuplicateNameIds,
+  getEntryLocation,
+  getParentSummary,
   getRecentEntries,
   getNavigationCount,
   paginateEntries,
@@ -28,6 +31,41 @@ test("search normalizes whitespace and matches name, type, and status", () => {
     filterEntries(entries, { query: "研究计划" }).map((entry) => entry.id),
     ["c"],
   );
+});
+
+test("search includes safe indexed locations and keeps directory children relative", () => {
+  const root = { id: "folder-1", name: "资料根", path: "C:\\研究\\资料根", kind: "folder" };
+  const directoryView = { trail: [root] };
+  const children = [
+    { id: "child-a", name: "报告.txt", kind: "text", type: "文本文件", status: "已登记", relativePath: ["项目 A", "报告.txt"], directoryId: root.id },
+    { id: "child-b", name: "报告.txt", kind: "text", type: "文本文件", status: "已登记", relativePath: ["项目 B", "报告.txt"], directoryId: root.id },
+  ];
+  assert.equal(getEntryLocation(children[0], directoryView).fullPath, "C:\\研究\\资料根\\项目 A\\报告.txt");
+  assert.equal(getParentSummary(children[1], directoryView), "C:\\研究\\资料根\\项目 B");
+  assert.deepEqual(filterEntries(children, { query: "项目 B", directory: true, directoryView }).map((entry) => entry.id), ["child-b"]);
+  assert.deepEqual([...getDuplicateNameIds(children)].sort(), ["child-a", "child-b"]);
+});
+
+test("removes the Windows extended-length prefix from displayed locations only", () => {
+  assert.equal(
+    getEntryLocation({ path: "\\\\?\\D:\\下载\\Wx记录.js" }).fullPath,
+    "D:\\下载\\Wx记录.js",
+  );
+  assert.equal(
+    getEntryLocation({ path: "\\\\?\\UNC\\server\\share\\记录.txt" }).fullPath,
+    "\\\\server\\share\\记录.txt",
+  );
+});
+
+test("combines type, tag, and multi-group filters without reading content", () => {
+  const grouped = [
+    { id: "a", name: "a.txt", type: "文本文件", tags: ["工作", "重点"], groupId: "group-a", invalid: false },
+    { id: "b", name: "b.md", type: "Markdown", tags: ["工作"], groupId: "group-b", invalid: false },
+    { id: "c", name: "c.txt", type: "文本文件", tags: ["重点"], groupId: null, invalid: false },
+  ];
+  const groups = [{ id: "group-a", name: "项目 A" }, { id: "group-b", name: "项目 B" }];
+  assert.deepEqual(filterEntries(grouped, { types: ["文本文件"], tags: ["工作"], groupIds: ["group-a", "group-b"], groups }).map((entry) => entry.id), ["a"]);
+  assert.deepEqual(filterEntries(grouped, { query: "项目 B" , groups }).map((entry) => entry.id), ["b"]);
 });
 
 test("navigation filters and counts use current entry state", () => {

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-batch-update-tags"
+description = "Enables the batch_update_tags command without any pre-configured scope."
+commands.allow = ["batch_update_tags"]
+
+[[permission]]
+identifier = "deny-batch-update-tags"
+description = "Denies the batch_update_tags command without any pre-configured scope."
+commands.deny = ["batch_update_tags"]

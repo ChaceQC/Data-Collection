@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { FILE_TYPE_DEFINITIONS, PREVIEW_LIMITS } from "../src/lib/fileTypes.js";
-import { createBrowserEntries, validateRename } from "../src/features/library/libraryControllerModel.js";
+import { createBrowserEntries, summarizeBatchResult, validateRename, validateTagInput } from "../src/features/library/libraryControllerModel.js";
 
 test("the shared manifest drives preview types and limits", () => {
   assert.equal(FILE_TYPE_DEFINITIONS.find((item) => item.extension === "xlsx").kind, "xlsx");
@@ -14,6 +14,18 @@ test("browser fallback entries use the shared type manifest", () => {
   assert.equal(entry.kind, "text");
   assert.equal(entry.type, "代码或配置");
   assert.equal(entry.addedAt, 1_700_000_000);
+  assert.deepEqual(entry.tags, []);
+  assert.equal(entry.groupId, null);
+});
+
+test("summarizes partial batch results and validates tag input", () => {
+  assert.deepEqual(
+    summarizeBatchResult({ results: [{ status: "success" }, { status: "skipped" }, { status: "failed" }] }),
+    { success: 1, skipped: 1, failed: 1 },
+  );
+  assert.equal(validateTagInput("  重点  ").value, "重点");
+  assert.equal(validateTagInput("").valid, false);
+  assert.equal(validateTagInput("x".repeat(33)).valid, false);
 });
 
 test("rename validation reports each Windows and index conflict reason", () => {
