@@ -21,6 +21,8 @@ import { SettingsPanel } from "./features/settings/SettingsPanel";
 import { DEFAULT_SETTINGS } from "./features/settings/settingsModel";
 import { useSettingsController } from "./features/settings/useSettingsController";
 import { useWindowController } from "./features/window/useWindowController";
+import { OperationCenter } from "./features/operations/OperationCenter.jsx";
+import { useOperationController } from "./features/operations/useOperationController.js";
 import {
   clearSelectionOnContextChange,
   getNavigationCount,
@@ -138,6 +140,7 @@ function App() {
     showToast,
     clearSelection: clearBatchSelection,
   });
+  const operations = useOperationController({ isTauriRuntime: IS_TAURI_RUNTIME, showToast });
   const handleLibraryContextChange = useCallback((nextContextKey) => {
     const previousContextKey = libraryContextKeyRef.current;
     libraryContextKeyRef.current = nextContextKey;
@@ -160,6 +163,7 @@ function App() {
     setPreviewEntryId: navigation.setPreviewEntryId,
     setDirectoryView: navigation.setDirectoryView,
     showToast,
+    operationReporter: operations,
   });
   filesRef.current = index.files;
   const settingsController = useSettingsController({
@@ -185,6 +189,7 @@ function App() {
     setSelectedIds,
     setIndexing: index.setIndexing,
     showToast,
+    operationReporter: operations,
   });
   const {
     applySettings,
@@ -210,7 +215,7 @@ function App() {
   });
   const { files, groups, indexReady, indexRecovery, indexing, refreshing, refreshError, diagnosticExporting, undoStatus } = index;
   const { activeNav, directoryLoading, directoryView, handleRowClick, handleRowKeyDown, openBreadcrumb, previewEntryId, searchQuery, selectNav, selectedId, setSearchQuery } = navigation;
-  const { addTag, batchBusy, busyFileId, choosePaths, closePendingAction, confirmBatchRemove, confirmDelete, confirmGroup, confirmRemove, confirmRename, confirmTags, createGroup, deleteGroup, dragActive, fileInputRef, folderInputRef, groupBusy, groupDraft, handleBatchFavorite, handleBatchGroup, handleBatchTags, handleCancelBatch, handleCopy, handleCopyLocation, handleDragLeave, handleDragOver, handleDrop, handleFavorite, handleOpenDefault, handleReveal, handleRetryBatch, handleUndo, openRepositionPicker, pendingAction, repositionInputRef, repositionInvalidPath, removeTag, renameName, renameGroup, renameValidation, requestBatchRemove, requestDelete, requestEditTags, requestRemove, requestRename, requestSetGroup, retryBatch, setGroupDraft, setRenameName, setTagInput, tagDraft, tagInput } = actions;
+  const { addTag, batchBusy, busyFileId, choosePaths, closePendingAction, confirmBatchRemove, confirmDelete, confirmGroup, confirmRemove, confirmRename, confirmTags, createGroup, deleteGroup, dragActive, fileInputRef, folderInputRef, groupBusy, groupDraft, handleBatchFavorite, handleBatchGroup, handleBatchTags, handleCancelBatch, handleCopy, handleCopyLocation, handleDragLeave, handleDragOver, handleDrop, handleFavorite, handleOpenDefault, handleReveal, handleRetryBatch, handleUndo, openRepositionPicker, pendingAction, repositionInputRef, repositionInvalidPath, removeTag, renameName, renameGroup, renameValidation, requestBatchRemove, requestDelete, requestEditTags, requestRemove, requestRename, requestSetGroup, retryBatch, retryOperation, setGroupDraft, setRenameName, setTagInput, tagDraft, tagInput } = actions;
   const { floatingWindowError, floatingWindowRetrying, handleWindowAction, retryFloatingBall } = windowController;
 
   const handlePreviewNavigate = useCallback((nextEntry) => {
@@ -329,7 +334,10 @@ function App() {
 
       <main className="main-content">
         <header className="page-header" data-tauri-drag-region="deep">
-          <h1>把资料放进一个可检索的本地库</h1>
+          <div className="page-header-row" data-tauri-drag-region="deep">
+            <h1>把资料放进一个可检索的本地库</h1>
+            <OperationCenter records={operations.records} files={files} loading={operations.historyLoading} warning={operations.historyWarning} onClear={operations.clearHistory} onRetry={retryOperation} />
+          </div>
         </header>
 
         {floatingWindowError && (

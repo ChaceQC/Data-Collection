@@ -1,6 +1,6 @@
 # 本地资料工作台原型
 
-这是基于 `AGENT.md` 方案 3“收纳入口”实现的本地资料工作台。当前代码候选版本 `0.3.20` 建立在正式发布版本 `0.3.16` 之上，已完成新计划阶段 A-D 的代码、最小自动验证和浏览器回退检查；阶段 A-D 的 Windows 11/Tauri/WebView2 原生验收仍需单独执行，浏览器运行时仍只保留安全的原型回退。
+这是基于 `AGENT.md` 方案 3“收纳入口”实现的本地资料工作台。当前代码候选版本 `0.3.21` 建立在正式发布版本 `0.3.16` 之上，已完成新计划阶段 A-E 的代码、最小自动验证和浏览器回退检查；阶段 A-E 的 Windows 11/Tauri/WebView2 原生验收仍需单独执行，浏览器运行时仍只保留安全的原型回退。
 
 ## 启动
 
@@ -30,7 +30,8 @@ npm.cmd run tauri:build
 - 导入文件夹会登记为一条文件夹记录，不在一级列表展开其中的文件；点击文件夹后按需读取直接子项并支持进入子目录。目录 command 只接受已登记文件夹 ID 加受控相对路径片段，不跟随符号链接或 Windows reparse point，单次读取最多 20,000 项。
 - 索引保存于 Tauri app data 目录的版本 `4` `index.json`，记录路径、文件元数据、`favorite`、`addedAt`、`lastRecordedAt`、标签和可选分组引用；分组表与有限的索引撤销日志同样只保存元数据，不复制文件内容。v1/v2/v3 索引迁移会保留用户字段并为新字段补空值，重复 ID/路径按稳定顺序合并。每次索引变更携带单调 revision，刷新请求不会用旧响应覆盖新状态。
 - 索引损坏、未知版本或迁移写入失败时会先保留备份并进入可操作恢复状态；主窗口提供诊断导出和重建空索引入口。设置损坏时会备份原文件、修复为安全默认值并显示明确提示。
-- 设置保存于同一 Tauri app data 目录的版本 `2` `settings.json`，记录默认排序、每页数量、索引移除确认、`hideToTray` 和 `showFloatingWindow`；读取版本 `1` 时保留旧字段并原子迁移。
+- 设置保存于同一 Tauri app data 目录的版本 `3` `settings.json`，记录 revision、默认排序、每页数量、索引移除确认、`hideToTray` 和 `showFloatingWindow`；读取版本 `1`/`2` 时保留旧字段并原子迁移，保存使用 expected revision 防止跨窗口覆盖。
+- 操作历史保存于同一 Tauri app data 目录的版本 `1` `operation-history.json`，最多保留 100 条导入、刷新、索引整理和撤销记录；记录只包含计数、状态、受控资料 ID、跳过原因和重试参数，不保存正文或完整路径。文件损坏时先备份并回退为空历史，不阻塞应用启动。
 - 失效路径可以通过用户明确选择的同类型新文件或文件夹重新定位，不会自动移动、复制或删除原文件。
 - 点击普通文件行会打开模态预览对话框；关闭对话框、切换资料、目录返回和窗口退出都会取消当前预览任务并释放资源会话。
 - 纯文本和 Markdown 使用 Rust 受限读取，支持 UTF-8 BOM、UTF-8 和 GB18030 判断；Markdown 的渲染结果经过 DOMPurify 清理，原文、HTML、JS、JSON 和配置内容都按安全文本显示。
@@ -42,10 +43,12 @@ npm.cmd run tauri:build
 - 浏览器运行时继续使用内存演示数据和 HTML 文件选择器，不触碰真实文件；浏览器中收藏、标签、分组和索引移除只模拟内存状态。
 - 资料库视图支持收藏/取消收藏、从索引移除、按名称/类型/状态/位置/标签搜索、按添加时间/修改时间/名称/大小排序和每页 20 条分页；“最近添加”按持久化 `addedAt` 排序并限制为最近 50 条，目录视图不再使用临时 `addedAt` 排序。类型、标签、分组、收藏和失效路径可以组合筛选。
 - 资料库使用语义化表格；位置可省略、展开、复制并通过受控 command 定位，分组单独显示为一列，标签显示在名称下方。行操作收进更多菜单，并将“删除原文件”放在独立危险操作分组；主索引支持多选、批量收藏/标签/分组/移除、部分成功报告、取消/超时和受控重试。
+- 操作中心将导入、刷新、单条和批量索引操作从短时 toast 提升为可回看的记录，展示进行中、成功、部分成功、失败、取消和超时状态；批量逐项结果、跳过原因和失败项重试可在记录详情中查看。
 - `0.3.18` 候选会把活动导航、搜索、类型/标签/分组筛选和目录面包屑作为列表上下文；上下文变化时收束批量选择，刷新时保留仍存在的选择、预览对象、页码和滚动位置。
 - `0.3.18` 候选的行操作菜单通过 document overlay 和 fixed 定位显示，按窗口空间自动上下展开，支持边界约束、焦点返回、方向键、Home、End、Escape 和 Tab；已有资料时拖放入口收缩为紧凑导入条，筛选 chip 和结果数显示在列表上方。
 - `0.3.19` 候选的预览窗口按当前可见列表快照提供上一项/下一项浏览；预览失败状态提供重试、重新定位、默认程序打开、资源管理器定位或返回列表动作，DOC 转换器缺失会显示本机 LibreOffice 依赖；浏览器回退明确显示“浏览器演示限制”。
 - `0.3.20` 候选的主索引行菜单提供资料详情、单条标签和分组编辑；标签编辑支持去重、添加和删除，详情弹窗提供预览、收藏、复制位置、定位和默认程序打开，删除分组前会展示影响数量并要求确认；标签 chip 可进入标签筛选。
+- `0.3.21` 候选增加操作结果中心、操作历史持久化和设置草稿冲突保护；设置从 v2 迁移为带 revision 的 v3，操作历史独立限制为 100 条。
 - 分组支持创建、重命名和删除；删除分组只解除资料归属，不删除索引记录或原文件。收藏、标签、分组和索引移除写入最多 50 条本地元数据撤销记录，只有当前 revision 和目标状态均匹配时才允许撤销。
 - `shared/file-types.json` 是前端和 Rust 共用的类型/预览限制 manifest；`src/lib/ipcContracts.js` 和 `ipcContracts.d.ts` 负责 IPC 结构校验，`features/library` 下的 repository/controller 负责 command 与页面状态协调。
 - 预览、设置、重命名、索引移除和原文件删除共用 Dialog 焦点陷阱；窄窗口将资料表切换为保留名称、类型、状态和高频操作的紧凑卡片，样式提供 reduced-motion 和深色模式策略。
@@ -60,8 +63,8 @@ npm.cmd run tauri:build
 - 无装饰主窗口使用明确的标题栏拖动区域；窗口顶部拖动带和页面标题使用 Tauri `data-tauri-drag-region="deep"`，窗口控制、搜索、排序、资料列表、拖放区和模态对话框均标记为非拖动区域。
 - 托盘最近任务与悬浮球共享索引 v4 的最近记录和收藏状态，最多显示 5 项；每项只携带不透明索引 ID，不在菜单或事件中暴露完整路径。
 - 一级列表和文件夹内容按每页 20 条显示，文件夹浏览提供面包屑和返回上级操作。
-- 设置面板支持默认排序、排序方向、每页 10/20/50 条、索引移除确认、关闭隐藏到托盘和悬浮窗可见性；预览大小/图片像素上限只读展示，物理删除确认始终开启。浏览器回退仅在当前会话应用设置。
-- 已接入 `load_file_index`、`list_directory`、`reveal_directory_child`、`index_paths`、`refresh_index`、`reposition_file`、`record_floating_paths`、`get_floating_recent`、`open_main_from_floating`、`load_floating_placement`、`save_floating_placement`、`floating_window_status`、`retry_floating_ball`、`set_favorite`、`remove_index_entry`、`copy_indexed_file`、`open_indexed_file`、`reveal_indexed_file`、`rename_indexed_file`、`delete_original_file`、`set_entry_tags`、`set_entry_group`、`create_group`、`rename_group`、`delete_group`、`batch_set_favorite`、`batch_remove_index_entries`、`batch_update_tags`、`batch_set_group`、`cancel_batch_operation`、`undo_last`、`get_index_recovery`、`reset_index_recovery`、`export_index_diagnostic`、`load_settings`、`update_settings`、`set_floating_window_visible`、`show_main_window`、`tray_status`、`exit_app`、`can_preview`、`load_preview`、`dispose_preview` 和 `cancel_preview_task` 四十四个 Tauri command。
+- 设置面板支持默认排序、排序方向、每页 10/20/50 条、索引移除确认、关闭隐藏到托盘和悬浮窗可见性；预览大小/图片像素上限只读展示，物理删除确认始终开启。设置窗口打开后会记录 revision/草稿，跨窗口变更会提示并按字段合并；浏览器回退仅在当前会话应用设置。
+- 已接入 `load_file_index`、`list_directory`、`reveal_directory_child`、`index_paths`、`refresh_index`、`reposition_file`、`record_floating_paths`、`get_floating_recent`、`open_main_from_floating`、`load_floating_placement`、`save_floating_placement`、`floating_window_status`、`retry_floating_ball`、`set_favorite`、`remove_index_entry`、`copy_indexed_file`、`open_indexed_file`、`reveal_indexed_file`、`rename_indexed_file`、`delete_original_file`、`set_entry_tags`、`set_entry_group`、`create_group`、`rename_group`、`delete_group`、`batch_set_favorite`、`batch_remove_index_entries`、`batch_update_tags`、`batch_set_group`、`cancel_batch_operation`、`undo_last`、`load_operation_history`、`save_operation_record`、`clear_operation_history`、`get_index_recovery`、`reset_index_recovery`、`export_index_diagnostic`、`load_settings`、`update_settings`、`set_floating_window_visible`、`show_main_window`、`tray_status`、`exit_app`、`can_preview`、`load_preview`、`dispose_preview` 和 `cancel_preview_task` 四十七个 Tauri command。
 
 ## 预览依赖与边界
 
@@ -81,7 +84,7 @@ Windows WebView2 使用 `http://preview.localhost/<previewId>` 访问受控资�
 
 PDF 的初始无范围请求返回完整 `200` 响应，客户端明确发起的范围请求仍按 `Content-Range` 分段返回，以兼容 PDF.js 的文件长度探测和分页读取。
 
-预览、资料库核心功能、阶段 F 的设置和显式外部操作，以及悬浮球阶段 A-F 的实现、自动验证、Windows 11 桌面手工验收和 `v0.3.6` GitHub Release 均已完成。新计划阶段 A-I 的代码级实现、自动验证和 Windows 11/Tauri/WebView2 桌面验收已作为整体纳入 `v0.3.16` 发布；当前 `0.3.20` 候选新增的阶段 A-D 界面改动只完成了代码级和浏览器回退检查，未替代新的 Windows 原生验收。不把所有格式写成无条件“已支持”，视频编码、LibreOffice 和 WebView2 Runtime 仍按各自外部依赖边界处理。
+预览、资料库核心功能、阶段 F 的设置和显式外部操作，以及悬浮球阶段 A-F 的实现、自动验证、Windows 11 桌面手工验收和 `v0.3.6` GitHub Release 均已完成。新计划阶段 A-I 的代码级实现、自动验证和 Windows 11/Tauri/WebView2 桌面验收已作为整体纳入 `v0.3.16` 发布；当前 `0.3.21` 候选新增的阶段 A-E 界面和数据改动只完成了代码级和浏览器回退检查，未替代新的 Windows 原生验收。不把所有格式写成无条件“已支持”，视频编码、LibreOffice 和 WebView2 Runtime 仍按各自外部依赖边界处理。
 
 依赖审计注意事项：当前公开 `xlsx@0.18.5` 没有可用的 npm 修复版本，并存在已知 Prototype Pollution/ReDoS 报告。应用不打开宏、外部链接或 HTML，限制工作簿大小和展示范围，并在 Worker 中解析以便超时或异常时终止；在替换为有修复的兼容库前，该风险仍需纳入发布判断。
 
@@ -90,7 +93,7 @@ PDF 的初始无范围请求返回完整 `200` 响应，客户端明确发起的
 - 索引仍只保存路径和元数据，预览正文、资源会话 ID 和临时 PDF 不写入 `index.json`。
 - SVG、MOV、AVI、MKV 等未登记格式返回 `unsupported`；视频不提供隐藏转码。
 - DOC 预览依赖本机 LibreOffice；当前构建未内置或下载 WebView2 Runtime，也未签名。
-- 当前不提供全文检索、批量物理复制/重命名/删除或跨任意历史的通用撤销栈；阶段 G-I 的位置搜索、标签/分组、批量索引操作和有限撤销已随 `0.3.16` 发布。当前 `0.3.20` 候选新增的单条标签、分组和详情代码尚未完成新的 Windows 11 原生验收。阶段 F 的原始数据模型、影响范围和失败恢复决策记录在 `docs/phase-f-settings-and-external-operations.md`。
+- 当前不提供全文检索、批量物理复制/重命名/删除或跨任意历史的通用撤销栈；阶段 G-I 的位置搜索、标签/分组、批量索引操作和有限撤销已随 `0.3.16` 发布。当前 `0.3.21` 候选新增的阶段 A-E 代码尚未完成新的 Windows 11 原生验收。阶段 F 的原始数据模型、影响范围和失败恢复决策记录在 `docs/phase-f-settings-and-external-operations.md`。
 - 悬浮球透明置顶窗口、资源管理器真实拖放、位置恢复以及本轮新增的悬停状态机、四边四角几何、跨 DPI 和组合交互均已由用户在 Windows 11 桌面端验收通过；浏览器回退只展示内存演示状态。
 - 浏览器回退不会执行真实文件剪贴板、重命名、原文件删除或外部打开/定位；桌面端复制到剪贴板、资源管理器粘贴、设置持久化和显式外部操作已由用户在 Windows 环境完成手工验收。
 - 解析失败、缺失、权限不足、过大、转换器缺失和暂不支持均保留索引并在模态对话框显示可执行的下一步。
@@ -103,6 +106,7 @@ npm.cmd run build
 npm.cmd run test:library
 npm.cmd run test:contracts
 npm.cmd run test:settings
+npm.cmd run test:operations
   npm.cmd run test:preview
   npm.cmd run test:floating-ball
   npm.cmd run test:tray
@@ -121,6 +125,6 @@ cargo test
 cargo clippy --all-targets --all-features -- -D warnings
 ```
 
-`npm.cmd run build` 会生成 Sites 所需的 `dist/client/index.html`、`dist/server/index.js` 和 `dist/.openai/hosting.json`。浏览器/Sites 模式不会调用真实文件预览、托盘或窗口 command；上一版 Windows 桌面预览、资料库操作、阶段 F、悬浮球基础能力和阶段 H 验收记录在根目录 `PROJECT_PROGRESS.md`，新计划阶段 A-I 的代码级验证和 `0.3.16` 发布验收已完成；`0.3.20` 阶段 A-D 的浏览器检查、NSIS 构建结果与待执行的 Windows 原生验收记录在同一进度文档中。
+`npm.cmd run build` 会生成 Sites 所需的 `dist/client/index.html`、`dist/server/index.js` 和 `dist/.openai/hosting.json`。浏览器/Sites 模式不会调用真实文件预览、托盘或窗口 command；上一版 Windows 桌面预览、资料库操作、阶段 F、悬浮球基础能力和阶段 H 验收记录在根目录 `PROJECT_PROGRESS.md`，新计划阶段 A-I 的代码级验证和 `0.3.16` 发布验收已完成；`0.3.21` 阶段 A-E 的浏览器检查、NSIS 构建结果与待执行的 Windows 原生验收记录在同一进度文档中。
 
 悬浮球阶段的自动验证使用 `npm.cmd run test:floating-ball`、`cargo test`、`cargo check` 和 `cargo clippy`；真实 Windows 窗口、文件拖放、多显示器位置和关闭/重启行为的验收记录均保留，本轮悬停面板优化的四边四角、DPI 和组合行为已由用户完成手工确认，代理不以浏览器页面或开发侧命令结果替代该验收。

@@ -2,10 +2,18 @@ import { SORT_OPTIONS } from "../library/libraryModel.js";
 import { PREVIEW_LIMITS } from "../../lib/fileTypes.js";
 
 export const PAGE_SIZE_OPTIONS = Object.freeze([10, 20, 50]);
+export const SETTINGS_EDITABLE_FIELDS = Object.freeze([
+  "defaultSort",
+  "pageSize",
+  "confirmBeforeRemove",
+  "hideToTray",
+  "showFloatingWindow",
+]);
 
 export const DEFAULT_PREVIEW_LIMITS = PREVIEW_LIMITS.map(({ key, ...limit }) => Object.freeze(limit));
 
 export const DEFAULT_SETTINGS = Object.freeze({
+  revision: 0,
   defaultSort: Object.freeze({ key: "addedAt", direction: "desc" }),
   pageSize: 20,
   confirmBeforeRemove: true,
@@ -28,6 +36,7 @@ export function normalizeSettings(value) {
   const previewLimits = normalizePreviewLimits(source.previewLimits);
 
   return {
+    revision: Number.isSafeInteger(source.revision) && source.revision >= 0 ? source.revision : DEFAULT_SETTINGS.revision,
     defaultSort,
     pageSize,
     confirmBeforeRemove: source.confirmBeforeRemove !== false,
@@ -36,6 +45,26 @@ export function normalizeSettings(value) {
     previewLimits,
     warning: typeof source.warning === "string" ? source.warning : "",
   };
+}
+
+export function getChangedSettingsFields(base, next) {
+  const previous = normalizeSettings(base);
+  const current = normalizeSettings(next);
+  return SETTINGS_EDITABLE_FIELDS.filter((field) => {
+    if (field === "defaultSort") return previous.defaultSort.key !== current.defaultSort.key || previous.defaultSort.direction !== current.defaultSort.direction;
+    return previous[field] !== current[field];
+  });
+}
+
+export function mergeSettingsFields(latest, draft, fields = SETTINGS_EDITABLE_FIELDS) {
+  const current = normalizeSettings(latest);
+  const next = normalizeSettings(draft);
+  const merged = { ...current };
+  for (const field of fields) {
+    if (!SETTINGS_EDITABLE_FIELDS.includes(field)) continue;
+    merged[field] = field === "defaultSort" ? { ...next.defaultSort } : next[field];
+  }
+  return normalizeSettings(merged);
 }
 
 export function formatByteLimit(value) {

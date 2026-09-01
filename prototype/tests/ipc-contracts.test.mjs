@@ -6,6 +6,8 @@ import {
   makeDirectoryTarget,
   parseBatchMutationResult,
   parseIndexChangedEvent,
+  parseOperationHistory,
+  parseOperationRecord,
   parseMutationResult,
   parseIndexSnapshot,
   parsePreviewResult,
@@ -78,4 +80,34 @@ test("validates single-entry mutation responses used by tag and group editors", 
   assert.equal(result.entry.tags[0], "重点");
   assert.equal(result.entry.groupId, "group-a");
   assert.throws(() => parseMutationResult({ revision: 7, changedIds: ["C:\\secret"], entry: null }, "set_entry_group"), IpcContractError);
+});
+
+test("validates operation history details without accepting file paths", () => {
+  const record = parseOperationRecord({
+    id: "batch-a",
+    operation: "batch-tags",
+    status: "partial-success",
+    startedAt: 10,
+    finishedAt: 20,
+    totalCount: 2,
+    addedCount: 0,
+    updatedCount: 0,
+    invalidCount: 0,
+    recoveredCount: 0,
+    successCount: 1,
+    skippedCount: 1,
+    failedCount: 0,
+    results: [{ id: "file-1", status: "success", reason: null }, { id: "file-2", status: "skipped", reason: "已跳过" }],
+    retryableIds: [],
+    skippedReasons: ["已跳过"],
+    truncated: false,
+    cancelled: false,
+    timedOut: false,
+    message: null,
+    request: { favorite: null, tags: ["重点"], add: true, groupId: null },
+  });
+  assert.equal(record.results[1].reason, "已跳过");
+  assert.equal(parseOperationHistory({ records: [record], warning: null }).records.length, 1);
+  assert.throws(() => parseOperationRecord({ ...record, id: "C:\\secret" }), TypeError);
+  assert.throws(() => parseOperationRecord({ ...record, status: "unknown" }), IpcContractError);
 });

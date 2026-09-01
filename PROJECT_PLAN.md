@@ -4,7 +4,7 @@
 > 编制日期：2026-09-01
 > 当前工作分支：dev
 > 当前发布基线：0.3.16
-> 下一阶段版本：0.3.21
+> 下一阶段版本：0.3.22
 > 适用平台：Windows 11 x64、Tauri 2、Rust stable、React 19、Vite 6
 > 计划目的：在已完成的资料登记、目录浏览、预览、收藏、标签、分组、批量索引操作、悬浮球和托盘能力之上，继续改善日常整理效率、错误恢复、窄窗口使用和本地检索能力。
 
@@ -319,6 +319,7 @@
 - prototype/src/features/settings/useSettingsController.js
 - prototype/src/features/settings/settingsModel.js
 - prototype/src/features/window/useWindowController.js
+- prototype/src/features/operations/OperationCenter.jsx、operationModel.js、operationApi.js、useOperationController.js
 - prototype/src-tauri/src/storage/ 下新增或拆分的操作记录模块
 - prototype/src-tauri/src/commands/ 下新增的操作历史 command
 - prototype/src/lib/ipcContracts.js、ipcContracts.d.ts
@@ -326,15 +327,15 @@
 
 ### 8.3 实现清单
 
-- [ ] 建立 OperationRecord 模型，区分导入、刷新、批量收藏、标签、分组、索引移除和撤销。
-- [ ] 操作中心展示进行中、成功、部分成功、失败、已取消和超时状态。
-- [ ] 导入结果显示新增、更新、跳过、跳过原因和达到上限；批量结果显示成功、跳过、失败和可重试项。
-- [ ] 为部分成功结果提供“查看详情”和“重试失败项”，取消和超时结果保留已完成项。
-- [ ] toast 只做短确认，不再承担唯一的错误详情来源。
-- [ ] 批量操作仍保持现有最大选择数量、取消标记、10 秒任务边界和逐项结果，不因为 UI 改造开放批量物理删除。
-- [ ] 操作历史只保存必要元数据，限制记录数量，提供清除入口；损坏时回退为空历史而不阻塞启动。
-- [ ] SettingsPanel 在打开时记录设置 revision 或快照；外部 settings-changed 到来时提示草稿已过期，避免静默覆盖。
-- [ ] 设置保存采用合并或冲突提示，确保只修改用户实际编辑的字段。
+- [x] 建立 OperationRecord 模型，区分导入、刷新、批量收藏、标签、分组、索引移除和撤销。
+- [x] 操作中心展示进行中、成功、部分成功、失败、已取消和超时状态。
+- [x] 导入结果显示新增、更新、跳过、跳过原因和达到上限；批量结果显示成功、跳过、失败和可重试项。
+- [x] 为部分成功结果提供“查看详情”和“重试失败项”，取消和超时结果保留已完成项。
+- [x] toast 只做短确认，不再承担唯一的错误详情来源。
+- [x] 批量操作仍保持现有最大选择数量、取消标记、10 秒任务边界和逐项结果，不因为 UI 改造开放批量物理删除。
+- [x] 操作历史只保存必要元数据，限制记录数量，提供清除入口；损坏时回退为空历史而不阻塞启动。
+- [x] SettingsPanel 在打开时记录设置 revision 或快照；外部 settings-changed 到来时提示草稿已过期，避免静默覆盖。
+- [x] 设置保存采用合并或冲突提示，确保只修改用户实际编辑的字段。
 
 ### 8.4 验证
 
@@ -342,8 +343,8 @@
 - [ ] 批量操作模拟成功、跳过、失败、取消、超时和重试，详情与当前索引一致。
 - [ ] 关闭并重启应用，操作历史按限制恢复；损坏历史文件不阻塞启动。
 - [ ] 打开设置后从托盘改变悬浮窗状态，再保存资料库设置，不会把悬浮窗状态改回旧值。
-- [ ] 运行 npm.cmd run test:library、npm.cmd run test:contracts、npm.cmd run test:settings 和 npm.cmd run build。
-- [ ] Rust 侧新增存储或 command 后运行对应 cargo test、cargo check 和 cargo clippy。
+- [x] 运行 npm.cmd run test:library、npm.cmd run test:contracts、npm.cmd run test:settings 和 npm.cmd run build。
+- [x] Rust 侧新增存储或 command 后运行对应 cargo test、cargo check 和 cargo clippy。
 
 ### 8.5 阶段版本门禁
 
@@ -636,16 +637,16 @@
 
 - 已切换到 dev 分支，基线为 0.3.16。
 - 已删除旧版总体计划内容并建立本文件。
-- 阶段 A `0.3.17`、阶段 B `0.3.18`、阶段 C `0.3.19` 和阶段 D `0.3.20` 已完成代码候选、最小自动验证和浏览器回退检查。
+- 阶段 A `0.3.17`、阶段 B `0.3.18`、阶段 C `0.3.19`、阶段 D `0.3.20` 和阶段 E `0.3.21` 已完成代码候选、最小自动验证和浏览器回退检查。
 
 当前未完成：
 
-- 阶段 E-J 尚未实现；当前版本入口为阶段 D 的 `0.3.20` 代码候选，正式发布基线仍为 `v0.3.16`。
-- 阶段 A-D 的 Windows 11/Tauri/WebView2 原生窗口、真实文件预览、外部操作、多 DPI 和阶段 D 元数据持久化验收仍需单独执行。
-- `0.3.20` 已构建本地 Windows x64 NSIS 安装包，但尚未创建 Tag 或 Release；它表示阶段 D 代码候选，不代表正式发布。
+- 阶段 F-J 尚未实现；当前版本入口为阶段 E 的 `0.3.21` 代码候选，正式发布基线仍为 `v0.3.16`。
+- 阶段 A-E 的 Windows 11/Tauri/WebView2 原生窗口、真实文件预览、外部操作、多 DPI、元数据持久化、操作历史和设置冲突验收仍需单独执行。
+- `0.3.20` 阶段 D 安装包已保留；阶段 E 的 `0.3.21` Windows x64 NSIS 安装包已构建，尚未创建 Tag 或 Release。
 
 下一步：
 
-1. 安装并验证 `0.3.20` NSIS 候选，单独记录 Windows 11/Tauri/WebView2 下阶段 D 元数据持久化、分组和详情操作结果。
-2. 根据具体桌面回归修复，或按计划进入阶段 E 的操作结果中心和设置一致性。
+1. 由用户安装并核对 `0.3.21` NSIS 候选，单独记录 Windows 11/Tauri/WebView2 下阶段 E 操作历史、批量取消/重试和设置冲突结果。
+2. 根据具体桌面回归修复，或按计划进入阶段 F 的键盘、范围选择和响应式细节。
 3. 保持阶段 C 的预览任务、资源释放、可见列表快照和浏览器演示限制作为后续阶段的兼容基线。

@@ -17,6 +17,7 @@ use uuid::Uuid;
 use crate::filesystem::IndexEntry;
 
 pub(crate) mod floating_ball;
+pub(crate) mod operation_history;
 #[cfg(not(test))]
 pub(crate) mod repository;
 pub(crate) mod settings;

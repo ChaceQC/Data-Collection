@@ -16,6 +16,7 @@ export function updateSettings(settings) {
       confirmBeforeRemove: normalized.confirmBeforeRemove,
       hideToTray: normalized.hideToTray,
       showFloatingWindow: normalized.showFloatingWindow,
+      expectedRevision: normalized.revision,
     },
   }, parseSettings).then(normalizeSettings);
 }

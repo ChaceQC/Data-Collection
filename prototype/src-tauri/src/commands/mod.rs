@@ -20,6 +20,7 @@ use crate::{
 
 pub(crate) mod floating_ball;
 pub(crate) mod library;
+pub(crate) mod operation_history;
 pub(crate) mod settings;
 pub(crate) mod window;
 

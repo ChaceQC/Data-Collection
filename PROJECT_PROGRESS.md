@@ -1,5 +1,65 @@
 # 项目进度
 
+## 2026-09-02
+
+### 阶段 E：操作结果中心和设置一致性（0.3.21 代码候选）
+
+#### 已完成
+
+- 新增 `features/operations`：`OperationRecord` 前端模型、操作历史 API、持久化队列和操作中心；导入、刷新、单条收藏/标签/分组/重命名/索引移除、批量收藏/标签/分组/索引移除和撤销均会显示进行中及最终结果。
+- 操作中心区分成功、部分完成、失败、已取消和已超时状态；批量详情保留逐项成功/跳过/失败、跳过原因、已完成项和失败项重试入口。toast 继续只承担短确认，详情可在 toast 消失后回看。
+- 新增 Rust `storage/operation_history.rs` 与 `commands/operation_history.rs`，使用版本 `1` 的独立 `operation-history.json`、原子替换、最多 100 条记录、结果/原因/重试参数上限和损坏备份；历史只写入操作元数据和不透明资料 ID，不写入正文、完整路径或密钥，损坏时回退空历史且不阻塞索引启动。
+- 设置文件格式升级为 v3，新增持久化 revision；v1/v2 设置保留原字段并原子迁移。`update_settings` 使用 expected revision，前端设置草稿记录打开时快照和实际编辑字段，跨窗口 `settings-changed` 到来时提示并只合并用户编辑字段，过期保存由 Rust CAS 拒绝。
+- 新增操作历史 IPC runtime contract、TypeScript 声明、Tauri command 清单和 capability 权限；补充阶段 E 操作模型、IPC、设置合并和 Rust 存储测试。
+- 五个版本入口已统一为 `0.3.21`：`prototype/package.json`、`prototype/package-lock.json` 根包、`prototype/src-tauri/tauri.conf.json`、`prototype/src-tauri/Cargo.toml` 和 `prototype/src-tauri/Cargo.lock` 根包；README、计划和本进度已同步。
+- `0.3.21` Windows x64 NSIS 安装包已构建：`prototype/src-tauri/target/release/bundle/nsis/本地资料工作台_0.3.21_x64-setup.exe`，大小 `8716353` bytes，SHA-256 为 `FF1263C8C2599392A01417DBD8B8AE6CFDA4C7F96F16B4BB7C2E1C9F091C0BC0`。
+
+#### 进行中
+
+- 等待用户安装 `0.3.21` 候选并执行 Windows 11/Tauri/WebView2 阶段 E 原生验收。
+
+#### 阻塞与风险
+
+- 浏览器回退只验证操作中心空状态、设置入口和 360px 层级/布局，不能验证 Tauri IPC、真实导入跳过、批量取消/超时、跨窗口托盘设置或重启后的 app data 历史恢复。
+- Windows 11/Tauri/WebView2 原生安装、启动、操作历史重启恢复、批量取消/重试、设置冲突和卸载仍需用户手工验收；安装包不签名且不内置 WebView2 Runtime 的既有发布边界不变。
+- 设置数据从 v2 迁移到 v3 时 revision 从文件默认 `0` 开始；操作历史为新增附属文件，无旧版本迁移，损坏时备份后清空并允许继续启动。
+
+#### 下一步
+
+- 由用户安装并核对 `0.3.21` NSIS 候选，随后记录 Windows 11/Tauri/WebView2 下阶段 E 原生验收，再决定是否创建 Tag/Release。
+
+#### 涉及文件
+
+- `prototype/src/App.jsx`
+- `prototype/src/features/operations/OperationCenter.jsx`
+- `prototype/src/features/operations/operationModel.js`
+- `prototype/src/features/operations/operationApi.js`
+- `prototype/src/features/operations/useOperationController.js`
+- `prototype/src/features/library/useLibraryActions.js`
+- `prototype/src/features/library/useIndexController.js`
+- `prototype/src/features/settings/SettingsPanel.jsx`
+- `prototype/src/features/settings/useSettingsController.js`
+- `prototype/src/features/settings/settingsModel.js`
+- `prototype/src/lib/ipcContracts.js`、`ipcContracts.d.ts`
+- `prototype/src-tauri/src/storage/operation_history.rs`
+- `prototype/src-tauri/src/storage/settings.rs`
+- `prototype/src-tauri/src/commands/operation_history.rs`
+- `prototype/src-tauri/src/commands/settings.rs`
+- `prototype/src-tauri/src/lib.rs`、`build.rs`、`capabilities/default.json`
+- `PROJECT_PLAN.md`、`README.md`、`prototype/README.md`
+
+#### 验证
+
+- `npm.cmd run test:library`：14 项通过。
+- `npm.cmd run test:contracts`：12 项通过。
+- `npm.cmd run test:settings`：5 项通过。
+- `npm.cmd run test:operations`：2 项通过。
+- `npm.cmd run build`：通过，生成 `dist/client/index.html`、`dist/server/index.js` 和 `dist/.openai/hosting.json`。
+- `cargo fmt --check`、`cargo test --lib`：65 项通过、0 失败；`cargo check` 和 `cargo clippy --all-targets --all-features -- -D warnings` 通过。
+- Microsoft Edge 回退检查：1280px 操作中心展开正常；360px 资料列表无页面横向溢出，设置面板内容可滚动，修复了操作中心覆盖设置 Dialog 的层级问题；临时 Vite 服务和浏览器标签已关闭。
+- `npm.cmd run tauri:build`：通过，生成 Windows x64 NSIS 安装包；`verify-webview2-loader.mjs` 通过，`WebView2Loader.dll` 大小 `160320` bytes，SHA-256 为 `8427B1FC58EC707813E5C0A51EB5D69397BB333250A7B891BE4D3B123F1E0F1C`，与 release 主程序位于同一目录。
+
+
 ## 2026-09-01
 
 ### 阶段 D：单条标签、分组和详情面板（0.3.20 代码候选）

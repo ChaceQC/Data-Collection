@@ -7,6 +7,7 @@ export type IpcCommand =
   | "rename_indexed_file" | "delete_original_file" | "set_entry_tags" | "set_entry_group"
   | "create_group" | "rename_group" | "delete_group" | "batch_set_favorite"
   | "batch_remove_index_entries" | "batch_update_tags" | "batch_set_group" | "cancel_batch_operation" | "undo_last"
+  | "load_operation_history" | "save_operation_record" | "clear_operation_history"
   | "load_settings" | "update_settings"
   | "floating_window_status" | "retry_floating_ball" | "tray_status" | "get_floating_recent"
   | "record_floating_paths" | "open_main_from_floating" | "load_floating_placement"
@@ -86,6 +87,61 @@ export interface BatchMutationResult {
   results: BatchItemResult[];
   cancelled: boolean;
   timedOut: boolean;
+}
+
+export type OperationStatus = "in-progress" | "success" | "partial-success" | "failed" | "cancelled" | "timed-out";
+
+export interface OperationRequest {
+  favorite: boolean | null;
+  tags: string[];
+  add: boolean | null;
+  groupId: string | null;
+}
+
+export interface OperationItemRecord {
+  id: string;
+  status: "success" | "failed" | "skipped";
+  reason: string | null;
+}
+
+export interface OperationRecord {
+  id: string;
+  operation: string;
+  status: OperationStatus;
+  startedAt: number;
+  finishedAt: number | null;
+  totalCount: number;
+  addedCount: number;
+  updatedCount: number;
+  invalidCount: number;
+  recoveredCount: number;
+  successCount: number;
+  skippedCount: number;
+  failedCount: number;
+  results: OperationItemRecord[];
+  retryableIds: string[];
+  skippedReasons: string[];
+  truncated: boolean;
+  cancelled: boolean;
+  timedOut: boolean;
+  message: string | null;
+  request: OperationRequest | null;
+}
+
+export interface OperationHistorySnapshot {
+  records: OperationRecord[];
+  warning: string | null;
+}
+
+export interface AppSettings {
+  revision: number;
+  defaultSort: { key: string; direction: "asc" | "desc" };
+  pageSize: number;
+  confirmBeforeRemove: boolean;
+  hideToTray: boolean;
+  showFloatingWindow: boolean;
+  previewLimits: Array<{ label: string; maxBytes: number; maxPixels: number | null }>;
+  warning: string | null;
 }
 
 export interface PreviewResult {

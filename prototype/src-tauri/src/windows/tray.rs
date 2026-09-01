@@ -300,6 +300,7 @@ fn toggle_floating<R: Runtime>(app: &AppHandle<R>) {
         confirm_before_remove: current.confirm_before_remove,
         hide_to_tray: current.hide_to_tray,
         show_floating_window: next_visible,
+        expected_revision: Some(current.revision),
     };
     match settings_state.update(update) {
         Ok(saved) => {

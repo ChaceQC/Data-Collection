@@ -34,6 +34,7 @@ pub fn run() {
         })
         .manage(storage::AppState::default())
         .manage(commands::BatchState::default())
+        .manage(storage::operation_history::OperationHistoryState::default())
         .manage(storage::settings::SettingsState::default())
         .manage({
             let state = preview::PreviewState::default();
@@ -53,6 +54,9 @@ pub fn run() {
                 .map_err(|error| Error::other(error.to_string()))?;
             app.state::<storage::settings::SettingsState>()
                 .initialize(data_dir.join("settings.json"))
+                .map_err(|error| Error::other(error.to_string()))?;
+            app.state::<storage::operation_history::OperationHistoryState>()
+                .initialize(data_dir.join("operation-history.json"))
                 .map_err(|error| Error::other(error.to_string()))?;
             let settings = app
                 .state::<storage::settings::SettingsState>()
@@ -121,6 +125,9 @@ pub fn run() {
             commands::library::batch_set_group,
             commands::library::cancel_batch_operation,
             commands::library::undo_last,
+            commands::operation_history::load_operation_history,
+            commands::operation_history::save_operation_record,
+            commands::operation_history::clear_operation_history,
             commands::settings::load_settings,
             commands::settings::update_settings,
             commands::window::set_floating_window_visible,

@@ -7,6 +7,7 @@ export const IPC_COMMANDS = Object.freeze([
   "rename_indexed_file", "delete_original_file", "set_entry_tags", "set_entry_group",
   "create_group", "rename_group", "delete_group", "batch_set_favorite",
   "batch_remove_index_entries", "batch_update_tags", "batch_set_group", "cancel_batch_operation", "undo_last",
+  "load_operation_history", "save_operation_record", "clear_operation_history",
   "load_settings", "update_settings",
   "floating_window_status", "retry_floating_ball", "tray_status", "get_floating_recent",
   "record_floating_paths", "open_main_from_floating", "load_floating_placement",
@@ -40,6 +41,9 @@ const OPERATION_MESSAGES = Object.freeze({
   "invalid-batch": "请先选择资料",
   "undo-unavailable": "撤销不可用，索引已经发生变化",
   "undo-conflict": "撤销目标已经发生变化，请先刷新索引",
+  "settings-conflict": "设置已在其他窗口更新，请检查后重新保存",
+  "settings-invalid": "设置值无效，请恢复后重试",
+  "settings-unavailable": "本地设置暂时不可用，请重试",
   "folder-not-supported": "此操作暂时只支持普通文件",
   "task-failed": "操作任务未完成，请重试",
 });
@@ -183,7 +187,55 @@ export function parsePreviewResult(value, command = "load_preview") {
 }
 
 export function parseSettings(value, command = "settings") {
-  return record(value, command);
+  const source = record(value, command);
+  return { ...source, revision: nonNegativeInteger(source.revision ?? 0, command, "revision") };
+}
+
+export function parseOperationHistory(value, command = "load_operation_history") {
+  const source = record(value, command);
+  return {
+    ...source,
+    records: array(source.records, command).map((item) => parseOperationRecord(item, command)),
+    warning: source.warning == null ? null : string(source.warning, command, "warning"),
+  };
+}
+
+export function parseOperationRecord(value, command = "save_operation_record") {
+  const source = record(value, command);
+  const results = array(source.results ?? [], command).map((item) => {
+    const result = record(item, command);
+    if (!isBatchStatus(result.status)) throw contractError(command, "操作结果状态无效");
+    return {
+      ...result,
+      id: assertOpaqueId(result.id, "operationItemId"),
+      status: result.status,
+      reason: result.reason == null ? null : string(result.reason, command, "reason"),
+    };
+  });
+  return {
+    ...source,
+    id: assertOpaqueId(source.id, "operationId"),
+    operation: string(source.operation, command, "operation"),
+    status: operationStatus(source.status, command),
+    startedAt: nonNegativeInteger(source.startedAt, command, "startedAt"),
+    finishedAt: source.finishedAt == null ? null : nonNegativeInteger(source.finishedAt, command, "finishedAt"),
+    totalCount: nonNegativeInteger(source.totalCount, command, "totalCount"),
+    addedCount: nonNegativeInteger(source.addedCount, command, "addedCount"),
+    updatedCount: nonNegativeInteger(source.updatedCount, command, "updatedCount"),
+    invalidCount: nonNegativeInteger(source.invalidCount ?? 0, command, "invalidCount"),
+    recoveredCount: nonNegativeInteger(source.recoveredCount ?? 0, command, "recoveredCount"),
+    successCount: nonNegativeInteger(source.successCount, command, "successCount"),
+    skippedCount: nonNegativeInteger(source.skippedCount, command, "skippedCount"),
+    failedCount: nonNegativeInteger(source.failedCount, command, "failedCount"),
+    results,
+    retryableIds: opaqueIdArray(source.retryableIds ?? [], command, "retryableIds"),
+    skippedReasons: stringArray(source.skippedReasons ?? [], command, "skippedReasons"),
+    truncated: boolean(source.truncated, command, "truncated"),
+    cancelled: boolean(source.cancelled, command, "cancelled"),
+    timedOut: boolean(source.timedOut, command, "timedOut"),
+    message: source.message == null ? null : string(source.message, command, "message"),
+    request: source.request == null ? null : parseOperationRequest(source.request, command),
+  };
 }
 
 export function parseFloatingRecentResult(value, command = "get_floating_recent") {
@@ -261,6 +313,21 @@ function parseUndoStatus(value, command) {
   };
 }
 
+function parseOperationRequest(value, command) {
+  const source = record(value, command);
+  const tags = stringArray(source.tags ?? [], command, "tags");
+  if (tags.some((tag) => !tag.trim() || tag.length > 32 || /[\u0000-\u001f\u007f-\u009f]/.test(tag))) {
+    throw contractError(command, "操作标签参数无效");
+  }
+  return {
+    ...source,
+    favorite: source.favorite == null ? null : boolean(source.favorite, command, "favorite"),
+    tags,
+    add: source.add == null ? null : boolean(source.add, command, "add"),
+    groupId: source.groupId == null ? null : assertOpaqueId(source.groupId, "groupId"),
+  };
+}
+
 export function assertOpaqueId(value, field = "id") {
   if (typeof value !== "string" || value.length === 0 || value.length > 96 || /[\\/:\s]|\.\.|[\u0000-\u001f\u007f-\u009f]/.test(value)) throw new TypeError(`${field} 无效`);
   return value;
@@ -330,6 +397,11 @@ function optionalBoolean(value, command, field) {
 
 function isBatchStatus(value) {
   return value === "success" || value === "failed" || value === "skipped";
+}
+
+function operationStatus(value, command) {
+  if (["in-progress", "success", "partial-success", "failed", "cancelled", "timed-out"].includes(value)) return value;
+  throw contractError(command, "操作状态无效");
 }
 
 function previewStatus(value, command) {
