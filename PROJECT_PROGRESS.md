@@ -2,6 +2,29 @@
 
 ## 2026-09-01
 
+### 构建 0.3.18 Windows x64 NSIS 安装包
+
+#### 已完成
+
+- 在 `dev` 分支基于阶段 A-B 的 `0.3.18` 代码候选完成 Windows x64 NSIS 安装包构建；没有执行推送、Tag 或 GitHub Release 发布。
+- 安装包路径为 `prototype/src-tauri/target/release/bundle/nsis/本地资料工作台_0.3.18_x64-setup.exe`，大小为 `8657734` bytes，SHA-256 为 `0AD7C66071F51CAFD310481FA776BA729AD93267A91E85017896E2D3EE6A3DDF`。
+- `WebView2Loader.dll` 校验通过，大小为 `160320` bytes，SHA-256 为 `8427B1FC58EC707813E5C0A51EB5D69397BB333250A7B891BE4D3B123F1E0F1C`；loader 与 release 主程序位于同一目录，目标架构为 Windows x64。
+
+#### 进行中
+
+- 安装器尚未在 Windows 11 上执行安装、首次启动、卸载、托盘/悬浮球和阶段 A-B 原生窗口验收；浏览器回退检查不能替代这些验收。
+
+#### 下一步
+
+- 用户安装该 `0.3.18` 候选包，复核 Windows 11/Tauri/WebView2 下的多选上下文、列表滚动、行菜单边界、导入条和 360px/不同 DPI 行为；收到结果后再处理具体回归或决定是否发布。
+
+#### 验证
+
+- `npm.cmd run tauri:build`：通过，前端生产构建、Rust release 编译、Windows x64 NSIS 打包和 `verify-webview2-loader.mjs` 均通过；构建保留既有大 chunk 提示。
+- 构建后 `git diff` 无内容差异，生成的 schema/permission 文件仅触发 Git 状态刷新，未产生需要提交的原生权限变化。
+
+## 2026-09-01
+
 ### 阶段 A：多选范围和列表状态（0.3.17 代码候选）
 
 #### 已完成
