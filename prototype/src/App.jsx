@@ -8,6 +8,11 @@ import {
   RenameDialog,
   RemoveIndexDialog,
 } from "./features/library/LibraryActions";
+import {
+  EditGroupDialog,
+  EditTagsDialog,
+  EntryDetailsDialog,
+} from "./features/library/LibraryEntryDialogs.jsx";
 import { LibraryPanel } from "./features/library/LibraryPanel";
 import { useIndexController } from "./features/library/useIndexController";
 import { useLibraryActions } from "./features/library/useLibraryActions";
@@ -16,11 +21,17 @@ import { SettingsPanel } from "./features/settings/SettingsPanel";
 import { DEFAULT_SETTINGS } from "./features/settings/settingsModel";
 import { useSettingsController } from "./features/settings/useSettingsController";
 import { useWindowController } from "./features/window/useWindowController";
-import { getNavigationCount } from "./features/library/libraryModel";
+import {
+  clearSelectionOnContextChange,
+  getNavigationCount,
+  retainExistingSelection,
+} from "./features/library/libraryModel";
+import { isMainIndexEntry } from "./features/library/libraryControllerModel.js";
 import {
   ArrowClockwise,
   CheckCircle,
   Clock,
+  DotsThree,
   FolderOpen,
   FolderSimple,
   GearSix,
@@ -111,13 +122,37 @@ function App() {
   const [pageSize, setPageSize] = useState(DEFAULT_SETTINGS.pageSize);
   const [selectedIds, setSelectedIds] = useState([]);
   const [groupManagerOpen, setGroupManagerOpen] = useState(false);
+  const [detailsEntryId, setDetailsEntryId] = useState("");
+  const [tagFilterRequest, setTagFilterRequest] = useState(null);
+  const [previewEntries, setPreviewEntries] = useState([]);
+  const [previewRetryNonce, setPreviewRetryNonce] = useState(0);
   const showToast = useCallback((message) => setToast(message), []);
   const filesRef = useRef([]);
+  const previewEntriesRef = useRef([]);
+  const tagFilterSequenceRef = useRef(0);
+  const libraryContextKeyRef = useRef("");
+  const clearBatchSelection = useCallback(() => setSelectedIds([]), []);
   const navigation = useLibraryNavigation({
     filesRef,
     initialSelectedId: IS_TAURI_RUNTIME ? "" : "research-plan",
     showToast,
+    clearSelection: clearBatchSelection,
   });
+  const handleLibraryContextChange = useCallback((nextContextKey) => {
+    const previousContextKey = libraryContextKeyRef.current;
+    libraryContextKeyRef.current = nextContextKey;
+    setSelectedIds((current) => clearSelectionOnContextChange(previousContextKey, nextContextKey, current));
+    if (previousContextKey && previousContextKey !== nextContextKey) {
+      previewEntriesRef.current = [];
+      setPreviewEntries([]);
+      setPreviewRetryNonce(0);
+      navigation.setPreviewEntryId(null);
+    }
+  }, [navigation.setPreviewEntryId]);
+  const handleVisibleEntriesChange = useCallback((entries) => {
+    previewEntriesRef.current = entries;
+    setPreviewEntries(entries);
+  }, []);
   const index = useIndexController({
     isTauriRuntime: IS_TAURI_RUNTIME,
     initialFiles: INITIAL_FILES,
@@ -175,11 +210,56 @@ function App() {
   });
   const { files, groups, indexReady, indexRecovery, indexing, refreshing, refreshError, diagnosticExporting, undoStatus } = index;
   const { activeNav, directoryLoading, directoryView, handleRowClick, handleRowKeyDown, openBreadcrumb, previewEntryId, searchQuery, selectNav, selectedId, setSearchQuery } = navigation;
-  const { batchBusy, busyFileId, choosePaths, closePendingAction, confirmBatchRemove, confirmDelete, confirmRemove, confirmRename, createGroup, deleteGroup, dragActive, fileInputRef, folderInputRef, groupBusy, handleBatchFavorite, handleBatchGroup, handleBatchTags, handleCancelBatch, handleCopy, handleCopyLocation, handleDragLeave, handleDragOver, handleDrop, handleFavorite, handleOpenDefault, handleReveal, handleRetryBatch, handleUndo, openRepositionPicker, pendingAction, repositionInputRef, repositionInvalidPath, renameName, renameGroup, renameValidation, requestBatchRemove, requestDelete, requestRemove, requestRename, retryBatch, setRenameName } = actions;
+  const { addTag, batchBusy, busyFileId, choosePaths, closePendingAction, confirmBatchRemove, confirmDelete, confirmGroup, confirmRemove, confirmRename, confirmTags, createGroup, deleteGroup, dragActive, fileInputRef, folderInputRef, groupBusy, groupDraft, handleBatchFavorite, handleBatchGroup, handleBatchTags, handleCancelBatch, handleCopy, handleCopyLocation, handleDragLeave, handleDragOver, handleDrop, handleFavorite, handleOpenDefault, handleReveal, handleRetryBatch, handleUndo, openRepositionPicker, pendingAction, repositionInputRef, repositionInvalidPath, removeTag, renameName, renameGroup, renameValidation, requestBatchRemove, requestDelete, requestEditTags, requestRemove, requestRename, requestSetGroup, retryBatch, setGroupDraft, setRenameName, setTagInput, tagDraft, tagInput } = actions;
   const { floatingWindowError, floatingWindowRetrying, handleWindowAction, retryFloatingBall } = windowController;
 
+  const handlePreviewNavigate = useCallback((nextEntry) => {
+    if (!nextEntry?.id || !previewEntriesRef.current.some((entry) => entry.id === nextEntry.id)) return;
+    navigation.setSelectedId(nextEntry.id);
+    setPreviewRetryNonce(0);
+    navigation.setPreviewEntryId(nextEntry.id);
+  }, [navigation.setPreviewEntryId, navigation.setSelectedId]);
+  const handlePreviewRetry = useCallback(() => {
+    setPreviewRetryNonce((current) => current + 1);
+    showToast("正在重试预览");
+  }, [showToast]);
+  const handlePreviewClose = useCallback(() => {
+    setPreviewRetryNonce(0);
+    navigation.setPreviewEntryId(null);
+  }, [navigation.setPreviewEntryId]);
+  const handlePreviewReveal = useCallback((entry, currentDirectoryView) => handleReveal(entry, currentDirectoryView), [handleReveal]);
+  const handlePreviewCopyLocation = useCallback((entry, currentDirectoryView) => handleCopyLocation(entry, currentDirectoryView), [handleCopyLocation]);
+
+  const handleOpenDetails = useCallback((file) => {
+    if (!isMainIndexEntry(file)) return;
+    navigation.setSelectedId(file.id);
+    setDetailsEntryId(file.id);
+  }, [navigation.setSelectedId]);
+  const handleTagFilter = useCallback((tag) => {
+    const normalized = String(tag ?? "").trim();
+    if (!normalized) return;
+    tagFilterSequenceRef.current += 1;
+    setTagFilterRequest({ tag: normalized, sequence: tagFilterSequenceRef.current });
+    setDetailsEntryId("");
+  }, []);
+  const handleOpenEditTags = useCallback((file) => {
+    setDetailsEntryId("");
+    requestEditTags(file);
+  }, [requestEditTags]);
+  const handleOpenSetGroup = useCallback((file) => {
+    setDetailsEntryId("");
+    requestSetGroup(file);
+  }, [requestSetGroup]);
+  const handleDetailsPreview = useCallback((file) => {
+    if (!file?.id || file.invalid || file.kind === "folder") return;
+    setDetailsEntryId("");
+    navigation.setSelectedId(file.id);
+    navigation.setPreviewEntryId(file.id);
+  }, [navigation.setPreviewEntryId, navigation.setSelectedId]);
+  const detailsEntry = detailsEntryId ? files.find((file) => file.id === detailsEntryId) : null;
+
   useEffect(() => {
-    setSelectedIds((current) => current.filter((id) => files.some((file) => file.id === id)));
+    setSelectedIds((current) => retainExistingSelection(current, files));
   }, [files]);
 
   const toggleSelection = useCallback((fileId) => {
@@ -234,6 +314,10 @@ function App() {
               <span>设置</span>
             </button>
           </nav>
+          <button type="button" className="nav-item mobile-more-nav" aria-busy={settingsLoading} onClick={() => settingsLoading ? showToast("正在读取设置，请稍候") : setSettingsOpen(true)}>
+            <DotsThree size={23} weight="bold" aria-hidden="true" />
+            <span>更多</span>
+          </button>
         </div>
         <div className="sidebar-bottom">
           <button type="button" className="nav-item" onClick={() => void choosePaths("folder")}>
@@ -277,9 +361,9 @@ function App() {
           </div>
         )}
 
-        <section className={`drop-zone ${dragActive ? "is-dragging" : ""}`} data-tauri-drag-region="false" data-testid="drop-zone" onDrop={handleDrop} onDragOver={handleDragOver} onDragLeave={handleDragLeave}>
+        <section className={`drop-zone ${files.length ? "has-library-files" : ""} ${dragActive ? "is-dragging" : ""}`} data-tauri-drag-region="false" data-testid="drop-zone" onDrop={handleDrop} onDragOver={handleDragOver} onDragLeave={handleDragLeave}>
           <div className="drop-zone-icon" aria-hidden="true"><FolderOpen size={42} weight="regular" /></div>
-          <h2>{indexing ? "正在建立本地索引..." : dragActive ? "松开鼠标即可登记资料" : "将文件或文件夹拖到这里"}</h2>
+          <h2>{indexing ? "正在建立本地索引..." : dragActive ? "松开鼠标即可登记资料" : files.length ? "继续添加资料或拖放到这里" : "将文件或文件夹拖到这里"}</h2>
           <div className="drop-actions">
             <button type="button" className="button button-primary" data-testid="import-folder" onClick={() => void choosePaths("folder")} disabled={indexing}>
               <FolderOpen size={19} weight="regular" aria-hidden="true" /><span>导入文件夹</span>
@@ -301,6 +385,8 @@ function App() {
           pageSize={pageSize}
           selectedId={selectedId}
           selectedIds={selectedIds}
+          onContextChange={handleLibraryContextChange}
+          onVisibleEntriesChange={handleVisibleEntriesChange}
           onSelectionChange={navigation.setSelectedId}
           onToggleSelection={toggleSelection}
           onSelectPage={selectPage}
@@ -321,7 +407,7 @@ function App() {
           onUndo={handleUndo}
           onRetryBatch={handleRetryBatch}
           onCancelBatch={handleCancelBatch}
-          onClearSelection={() => setSelectedIds([])}
+          onClearSelection={clearBatchSelection}
           onManageGroups={() => setGroupManagerOpen(true)}
           onCopyLocation={handleCopyLocation}
           onImport={() => void choosePaths("file")}
@@ -337,21 +423,45 @@ function App() {
           onDelete={requestDelete}
           onOpenDefault={handleOpenDefault}
           onReveal={handleReveal}
+          onDetails={handleOpenDetails}
+          onEditTags={handleOpenEditTags}
+          onSetGroup={handleOpenSetGroup}
+          tagFilterRequest={tagFilterRequest}
+          onTagFilter={handleTagFilter}
         />
       </main>
 
       {previewEntryId && (() => {
-        const currentEntries = directoryView?.entries || files;
+        const currentEntries = previewEntries.length ? previewEntries : (directoryView?.entries || files);
         const previewEntry = currentEntries.find((file) => file.id === previewEntryId);
-        return previewEntry ? <PreviewPane entry={previewEntry} onClose={() => navigation.setPreviewEntryId(null)} /> : null;
+        return previewEntry ? (
+          <PreviewPane
+            entry={previewEntry}
+            navigationEntries={currentEntries}
+            directoryView={directoryView}
+            onClose={handlePreviewClose}
+            onRetry={handlePreviewRetry}
+            onReposition={openRepositionPicker}
+            onOpenDefault={handleOpenDefault}
+            onReveal={handlePreviewReveal}
+            onCopyLocation={handlePreviewCopyLocation}
+            onFavorite={handleFavorite}
+            onNavigate={handlePreviewNavigate}
+            retryNonce={previewRetryNonce}
+          />
+        ) : null;
       })()}
+
+      {detailsEntry && <EntryDetailsDialog file={detailsEntry} groups={groups} busy={busyFileId === detailsEntry.id} onClose={() => setDetailsEntryId("")} onFavorite={handleFavorite} onPreview={handleDetailsPreview} onCopyLocation={handleCopyLocation} onReveal={handleReveal} onOpenDefault={handleOpenDefault} onEditTags={handleOpenEditTags} onSetGroup={handleOpenSetGroup} onTagClick={handleTagFilter} />}
 
       {settingsOpen && <SettingsPanel settings={settings} saving={settingsSaving} onCancel={() => setSettingsOpen(false)} onSave={handleSettingsSave} />}
       {pendingAction?.type === "remove" && <RemoveIndexDialog file={pendingAction.file} busy={busyFileId === pendingAction.file.id} onCancel={closePendingAction} onConfirm={() => void confirmRemove()} />}
       {pendingAction?.type === "batch-remove" && <BatchRemoveDialog files={pendingAction.files} busy={batchBusy} onCancel={closePendingAction} onConfirm={() => void confirmBatchRemove()} />}
       {pendingAction?.type === "rename" && <RenameDialog file={pendingAction.file} value={renameName} validation={renameValidation} busy={busyFileId === pendingAction.file.id} onChange={setRenameName} onCancel={closePendingAction} onConfirm={() => void confirmRename()} />}
+      {pendingAction?.type === "edit-tags" && <EditTagsDialog file={pendingAction.file} tags={tagDraft} tagInput={tagInput} busy={busyFileId === pendingAction.file.id} onInputChange={setTagInput} onAdd={addTag} onRemove={removeTag} onCancel={closePendingAction} onConfirm={() => void confirmTags()} />}
+      {pendingAction?.type === "set-group" && <EditGroupDialog file={pendingAction.file} groups={groups} value={groupDraft} busy={busyFileId === pendingAction.file.id} onChange={setGroupDraft} onCancel={closePendingAction} onConfirm={() => void confirmGroup()} />}
       {pendingAction?.type === "delete" && <DeleteOriginalDialog file={pendingAction.file} busy={busyFileId === pendingAction.file.id} onCancel={closePendingAction} onConfirm={() => void confirmDelete()} />}
-      {groupManagerOpen && <GroupManagerDialog groups={groups} busy={groupBusy} onClose={() => setGroupManagerOpen(false)} onCreate={createGroup} onRename={renameGroup} onDelete={deleteGroup} />}
+      {groupManagerOpen && <GroupManagerDialog groups={groups} files={files} busy={groupBusy} onClose={() => setGroupManagerOpen(false)} onCreate={createGroup} onRename={renameGroup} onDelete={deleteGroup} />}
 
       <input ref={folderInputRef} className="hidden-input" type="file" multiple webkitdirectory="true" directory="true" onChange={(event) => { actions.addBrowserFiles(event.target.files); event.target.value = ""; }} aria-hidden="true" tabIndex={-1} />
       <input ref={fileInputRef} className="hidden-input" type="file" multiple onChange={(event) => { actions.addBrowserFiles(event.target.files); event.target.value = ""; }} aria-hidden="true" tabIndex={-1} />

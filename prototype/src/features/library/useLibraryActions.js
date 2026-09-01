@@ -5,10 +5,14 @@ import { getOperationError } from "../../lib/ipcContracts.js";
 import { getFileKind, getFileType } from "../../lib/fileTypes.js";
 import { libraryRepository } from "./libraryRepository.js";
 import {
+  addTagToList,
   createBrowserEntries,
   getNextSelection,
   getSelectedEntries,
-  normalizeTagInput,
+  isMainIndexEntry,
+  MAX_TAGS_PER_ENTRY,
+  normalizeTagList,
+  removeTagFromList,
   summarizeBatchResult,
   validateRename,
   validateTagInput,
@@ -35,6 +39,9 @@ export function useLibraryActions({
   const [busyFileId, setBusyFileId] = useState("");
   const [pendingAction, setPendingAction] = useState(null);
   const [renameName, setRenameName] = useState("");
+  const [tagDraft, setTagDraft] = useState([]);
+  const [tagInput, setTagInput] = useState("");
+  const [groupDraft, setGroupDraft] = useState("");
   const [batchBusy, setBatchBusy] = useState(false);
   const [retryBatch, setRetryBatch] = useState(null);
   const [groupBusy, setGroupBusy] = useState(false);
@@ -123,6 +130,19 @@ export function useLibraryActions({
     setPendingAction({ type: "rename", file });
   }
 
+  function requestEditTags(file) {
+    if (!isMainIndexEntry(file)) return;
+    setTagDraft(normalizeTagList(file.tags));
+    setTagInput("");
+    setPendingAction({ type: "edit-tags", file });
+  }
+
+  function requestSetGroup(file) {
+    if (!isMainIndexEntry(file)) return;
+    setGroupDraft(file.groupId || "");
+    setPendingAction({ type: "set-group", file });
+  }
+
   function requestDelete(file) {
     if (!isTauriRuntime) {
       showToast("删除原文件请在桌面应用中执行");
@@ -183,6 +203,79 @@ export function useLibraryActions({
       showToast("文件已重命名");
     } catch (error) {
       showActionError(error, "重命名失败，原文件未改变");
+    } finally {
+      finishBusy();
+    }
+  }
+
+  function addTag() {
+    const next = addTagToList(tagDraft, tagInput);
+    if (!next.valid) {
+      showToast(next.message);
+      return false;
+    }
+    setTagDraft(next.tags);
+    setTagInput("");
+    return true;
+  }
+
+  function removeTag(tag) {
+    setTagDraft((current) => removeTagFromList(current, tag));
+  }
+
+  async function confirmTags() {
+    if (pendingAction?.type !== "edit-tags" || busyFileIdRef.current) return;
+    if (tagInput.trim()) {
+      const validation = validateTagInput(tagInput);
+      showToast(validation.valid ? "请先点击添加标签" : validation.message);
+      return;
+    }
+    const file = pendingAction.file;
+    const fileId = file.id;
+    const tags = normalizeTagList(tagDraft);
+    if (tags.length > MAX_TAGS_PER_ENTRY) {
+      showToast(`每条资料最多 ${MAX_TAGS_PER_ENTRY} 个标签`);
+      return;
+    }
+    busyFileIdRef.current = fileId;
+    setBusyFileId(fileId);
+    try {
+      if (isTauriRuntime) {
+        const result = await libraryRepository.setEntryTags(fileId, tags);
+        if (result.entry) setFiles((current) => current.map((item) => item.id === fileId ? result.entry : item));
+        await reloadIndexPreservingState(result.revision);
+      } else {
+        setFiles((current) => current.map((item) => item.id === fileId ? { ...item, tags } : item));
+      }
+      setSelectedId(fileId);
+      setPendingAction(null);
+      showToast("标签已更新");
+    } catch (error) {
+      showActionError(error, "更新标签失败，请重试");
+    } finally {
+      finishBusy();
+    }
+  }
+
+  async function confirmGroup() {
+    if (pendingAction?.type !== "set-group" || busyFileIdRef.current) return;
+    const file = pendingAction.file;
+    const fileId = file.id;
+    busyFileIdRef.current = fileId;
+    setBusyFileId(fileId);
+    try {
+      if (isTauriRuntime) {
+        const result = await libraryRepository.setEntryGroup(fileId, groupDraft || null);
+        if (result.entry) setFiles((current) => current.map((item) => item.id === fileId ? result.entry : item));
+        await reloadIndexPreservingState(result.revision);
+      } else {
+        setFiles((current) => current.map((item) => item.id === fileId ? { ...item, groupId: groupDraft || null } : item));
+      }
+      setSelectedId(fileId);
+      setPendingAction(null);
+      showToast(groupDraft ? "资料已设置分组" : "资料已解除分组归属");
+    } catch (error) {
+      showActionError(error, "更新分组失败，请重试");
     } finally {
       finishBusy();
     }
@@ -594,6 +687,8 @@ export function useLibraryActions({
     confirmDelete,
     confirmRemove,
     confirmRename,
+    confirmTags,
+    confirmGroup,
     confirmBatchRemove,
     batchBusy,
     dragActive,
@@ -625,6 +720,15 @@ export function useLibraryActions({
     requestBatchRemove,
     requestRemove,
     requestRename,
+    requestEditTags,
+    requestSetGroup,
+    groupDraft,
+    setGroupDraft,
+    tagDraft,
+    tagInput,
+    setTagInput,
+    addTag,
+    removeTag,
     setRenameName,
     createGroup,
     deleteGroup,

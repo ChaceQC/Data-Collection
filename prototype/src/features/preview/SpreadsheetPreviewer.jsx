@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { normalizePreviewResourceUrl } from "./previewTypes";
+import { UnsupportedPreviewer } from "./UnsupportedPreviewer";
 
 function columnLabel(index) {
   let value = index + 1;
@@ -12,7 +13,7 @@ function columnLabel(index) {
   return label;
 }
 
-export function SpreadsheetPreviewer({ content }) {
+export function SpreadsheetPreviewer({ content, onFailure, ...failureActions }) {
   const [state, setState] = useState({ status: "loading", workbook: null, reason: "" });
   const [selectedSheet, setSelectedSheet] = useState(0);
   const workerRef = useRef(null);
@@ -31,6 +32,7 @@ export function SpreadsheetPreviewer({ content }) {
     function setFailure(reason) {
       if (cancelled) return;
       setState({ status: "parse-error", workbook: null, reason });
+      onFailure?.("parse-error", reason);
     }
 
     function resetTimeout() {
@@ -130,7 +132,9 @@ export function SpreadsheetPreviewer({ content }) {
     sheetTimeoutRef.current = window.setTimeout(() => {
       if (requestIdRef.current !== requestId) return;
       worker.terminate();
-      setState({ status: "parse-error", workbook: null, reason: "工作表解析超时，已终止解析任务。" });
+      const reason = "工作表解析超时，已终止解析任务。";
+      setState({ status: "parse-error", workbook: null, reason });
+      onFailure?.("parse-error", reason);
     }, 30000);
     worker.postMessage({ type: "load-sheet", index: selectedSheet, requestId });
     return () => window.clearTimeout(sheetTimeoutRef.current);
@@ -142,7 +146,7 @@ export function SpreadsheetPreviewer({ content }) {
   );
 
   if (state.status === "loading") return <div className="preview-loading-state">正在解析 Excel 工作簿...</div>;
-  if (state.status !== "ready" || !state.workbook) return <div className="preview-error-state">{state.reason}</div>;
+  if (state.status !== "ready" || !state.workbook) return <UnsupportedPreviewer status="parse-error" reason={state.reason} {...failureActions} />;
 
   return (
     <div className="preview-spreadsheet-content">

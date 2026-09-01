@@ -35,6 +35,43 @@ export function getDisplayType(entry) {
   return entry?.type || entry?.fileType || getFileType(entry?.name, entry?.kind);
 }
 
+export function getLibraryContextKey({
+  activeNav = "library",
+  searchQuery = "",
+  filters = {},
+  directoryView = null,
+} = {}) {
+  const normalizedTags = [...new Set((filters.tags || []).map(normalizeSearchQuery).filter(Boolean))].sort((left, right) => COLLATOR.compare(left, right));
+  const normalizedGroups = [...new Set((filters.groupIds || []).filter(Boolean).map(String))].sort(COLLATOR.compare);
+  const trail = (directoryView?.trail || []).map((folder) => ({
+    id: String(folder?.directoryId || folder?.id || ""),
+    relativePath: Array.isArray(folder?.relativePath) ? folder.relativePath.map(String) : [],
+  }));
+  return JSON.stringify({
+    activeNav: String(activeNav || "library"),
+    searchQuery: normalizeSearchQuery(searchQuery),
+    type: normalizeSearchQuery(filters.type),
+    tags: normalizedTags,
+    groupIds: normalizedGroups,
+    trail,
+  });
+}
+
+export function clearSelectionOnContextChange(previousContextKey, nextContextKey, selectedIds = []) {
+  const normalizedIds = [...new Set((selectedIds || []).filter(Boolean))];
+  return previousContextKey && previousContextKey !== nextContextKey ? [] : normalizedIds;
+}
+
+export function retainExistingSelection(selectedIds = [], entries = []) {
+  const availableIds = new Set((entries || []).map((entry) => entry?.id).filter(Boolean));
+  return [...new Set((selectedIds || []).filter((id) => availableIds.has(id)))];
+}
+
+export function getSelectedIdsInEntries(selectedIds = [], entries = []) {
+  const selected = new Set(selectedIds || []);
+  return (entries || []).map((entry) => entry?.id).filter((id) => id && selected.has(id));
+}
+
 export function getEntryLocation(entry, directoryView) {
   if (typeof entry?.path === "string" && entry.path.trim()) {
     const fullPath = normalizeDisplayPath(entry.path);
@@ -90,6 +127,11 @@ export function matchesNavigation(entry, activeNav) {
 export function getNavigationCount(entries, activeNav) {
   if (activeNav === "recent") return getRecentEntries(entries).length;
   return entries.filter((entry) => matchesNavigation(entry, activeNav)).length;
+}
+
+export function countEntriesInGroup(entries, groupId) {
+  if (!groupId) return 0;
+  return (entries || []).filter((entry) => entry?.groupId === groupId).length;
 }
 
 export function filterEntries(

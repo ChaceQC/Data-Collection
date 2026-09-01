@@ -2,6 +2,243 @@
 
 ## 2026-09-01
 
+### 阶段 D：单条标签、分组和详情面板（0.3.20 代码候选）
+
+#### 已完成
+
+- 行操作菜单已为主索引资料增加“查看资料详情”“编辑标签”和“设置分组”；目录浏览的临时子项仍不渲染这些入口，不能绕过目录授权。
+- 新增标签编辑对话框，展示现有标签，支持添加、删除、去重和空值/长度/数量提示；保存复用 `setEntryTags` 与既有 IPC 错误映射，桌面端返回的 `entry` 先更新当前行，再按 `revision` 同步索引。
+- 新增分组编辑对话框，支持“未分组”和已有分组；保存复用 `setEntryGroup`，当前行和索引 revision 同步更新。分组变化后无效的筛选 ID 会自动清除，避免列表、筛选 chip 和批量状态不一致。
+- 新增资料详情对话框，显示名称、类型、大小、修改时间、来源位置、收藏、标签、分组和状态，并提供收藏、预览、复制位置、定位、默认程序打开、编辑标签和设置分组入口；标签 chip 可直接进入标签筛选。
+- 管理分组中的删除操作改为先展示受影响资料数量并确认，明确只解除分组归属，不删除索引记录和原文件；取消不会触发 command。
+- 索引格式保持 v4，没有新增持久化字段或迁移方案。
+- 五个版本入口已统一为 `0.3.20`：`prototype/package.json`、`prototype/package-lock.json` 根包、`prototype/src-tauri/tauri.conf.json`、`prototype/src-tauri/Cargo.toml` 和 `prototype/src-tauri/Cargo.lock` 根包。
+
+#### 进行中
+
+- `0.3.20` Windows x64 NSIS 安装包已构建；Windows 11 安装、首次启动、重启后的标签持久化、真实分组操作和卸载仍需用户手工验收。
+
+#### 阻塞与风险
+
+- 浏览器回退只验证演示数据、列表状态、对话框布局和前端筛选，不验证 Tauri IPC、本地索引写入、Windows 文件关联、资源管理器定位或真实文件副作用。
+- 安装包不签名且不内置 WebView2 Runtime；DOC 预览仍依赖目标机 LibreOffice。这些是既有发布边界，不是阶段 D 新增依赖。
+
+#### 下一步
+
+- 由用户安装 `0.3.20` 候选，验收单条标签持久化、分组编辑/删除确认、详情快捷操作和窄窗口行为；收到具体回归后再进入阶段 E。
+
+#### 涉及文件
+
+- `prototype/src/App.jsx`
+- `prototype/src/features/library/LibraryActions.jsx`
+- `prototype/src/features/library/LibraryEntryDialogs.jsx`
+- `prototype/src/features/library/LibraryPanel.jsx`
+- `prototype/src/features/library/LibraryPanelParts.jsx`
+- `prototype/src/features/library/LibraryRowActionMenu.jsx`
+- `prototype/src/features/library/libraryControllerModel.js`
+- `prototype/src/features/library/libraryModel.js`
+- `prototype/src/features/library/libraryOverlayModel.js`
+- `prototype/src/features/library/useLibraryActions.js`
+- `prototype/src/styles.css`
+- `prototype/tests/library-controller.test.mjs`
+- `prototype/tests/library-model.test.mjs`
+- `prototype/tests/ipc-contracts.test.mjs`
+- `PROJECT_PLAN.md`、`README.md`、`prototype/README.md`
+
+#### 验证
+
+- `npm.cmd run test:library`：14 项通过。
+- `npm.cmd run test:contracts`：11 项通过；`npm.cmd run test:settings`：4 项通过。
+- `npm.cmd run build`：通过，生成 `dist/client/index.html`、`dist/server/index.js` 和 `dist/.openai/hosting.json`。
+- Microsoft Edge 回退检查：1280px 下行菜单显示详情/标签/分组入口；标签编辑添加标签后列表立即显示新 chip，详情标签点击会生成筛选 chip；360px 下详情对话框可滚动，操作按钮和表格没有互相覆盖。
+- 修复标签筛选 chip 清除时错误访问 `filters["tag:..."]` 的问题；修复后浏览器控制台新增错误为 0、警告为 0。
+- `npm.cmd run tauri:build`：通过，生成 Windows x64 NSIS 安装包 `prototype/src-tauri/target/release/bundle/nsis/本地资料工作台_0.3.20_x64-setup.exe`，大小 `8663311` bytes，SHA-256 为 `DEC740706A5A68D77E40422A53D3D3788E290E26B955E3B4EFE0C42034DBDBB2`。
+- `verify-webview2-loader.mjs`：通过；`WebView2Loader.dll` 大小 `160320` bytes，SHA-256 为 `8427B1FC58EC707813E5C0A51EB5D69397BB333250A7B891BE4D3B123F1E0F1C`，与 release 主程序同目录。
+- 尚未执行安装器启动/卸载和 Windows 11 原生手工验收。
+
+## 2026-09-01
+
+### 阶段 C：预览错误恢复和连续浏览（0.3.19 代码候选）及安装包构建
+
+#### 已完成
+
+- 按 `PROJECT_PLAN.md` 完成阶段 C：预览失败页按状态提供重试、重新定位、系统默认程序打开、资源管理器定位和返回列表动作；缺少 DOC 转换器时显示本机 LibreOffice 依赖说明。
+- `PreviewPane` 增加重试、默认程序打开、定位、复制位置、收藏和相邻资料导航回调；重试使用新的 task ID，旧请求在效果清理时取消，旧 preview resource 在切换、关闭、失败和过期响应时释放。
+- 资料库将当前导航、搜索、筛选和排序后的完整可见列表快照交给预览；切换搜索、筛选、导航或目录时关闭旧预览，上一项/下一项不会跨列表上下文跳转；目录临时子项只保留受控预览和定位能力。
+- 图片、视频、DOCX、XLSX 和 PDF 的内部异步失败统一回到预览失败动作页；Markdown、图片缩放旋转、PDF 分页缩放、XLSX Sheet 切换和视频控制主流程保持不变。
+- 浏览器回退结果增加 `demoOnly` 标记和“浏览器演示限制”状态，不读取真实本地文件；已同步阶段 C 的计划勾选、根 README、原型 README 和进度入口。
+- 五个版本入口已统一为 `0.3.19`：`prototype/package.json`、`prototype/package-lock.json` 根包、`prototype/src-tauri/tauri.conf.json`、`prototype/src-tauri/Cargo.toml` 和 `prototype/src-tauri/Cargo.lock` 根包。
+- 已构建 Windows x64 NSIS 安装包，产物为 `prototype/src-tauri/target/release/bundle/nsis/本地资料工作台_0.3.19_x64-setup.exe`，大小 `8658797` bytes，SHA-256 为 `E5304B2643671E5FCEC89C8258027398A82DF95467D90E00576FEC89C9521A92`。
+
+#### 进行中
+
+- `0.3.19` 仍是未发布代码候选；安装包尚未在 Windows 11 上执行安装、首次启动、卸载、真实文件预览或外部操作验收。
+
+#### 阻塞与风险
+
+- 浏览器回退不能验证 Tauri IPC、Windows 默认文件关联、资源管理器定位、DOC 缺少 LibreOffice、文件移动后的真实恢复和 WebView2 编解码行为。
+- 安装包未签名，构建配置不内置 WebView2 Runtime；这些发布边界与阶段 C 本身无关但继续保留。
+
+#### 下一步
+
+- 用户安装 `0.3.19` 候选包，使用测试夹具在 Windows 11/Tauri/WebView2 下验收各预览成功/失败状态、重试、默认程序打开、资源管理器定位、DOC 转换器缺失和文件移动后的重新定位；收到具体回归后再修复或进入阶段 D。
+
+#### 涉及文件
+
+- `prototype/src/App.jsx`
+- `prototype/src/features/library/LibraryPanel.jsx`
+- `prototype/src/features/preview/PreviewPane.jsx`
+- `prototype/src/features/preview/UnsupportedPreviewer.jsx`
+- `prototype/src/features/preview/previewApi.js`
+- `prototype/src/features/preview/previewTypes.js`
+- `prototype/src/features/preview/ImagePreviewer.jsx`
+- `prototype/src/features/preview/VideoPreviewer.jsx`
+- `prototype/src/features/preview/OfficePreviewer.jsx`
+- `prototype/src/features/preview/SpreadsheetPreviewer.jsx`
+- `prototype/src/features/preview/PdfPreviewer.jsx`
+- `prototype/src/styles.css`
+- `prototype/tests/preview-registry.test.mjs`
+- `PROJECT_PLAN.md`、`README.md`、`prototype/README.md`
+
+#### 验证
+
+- `npm.cmd run test:preview`：11 项通过，覆盖预览注册表、失败动作集合、浏览器演示标记、相邻项边界、XLSX 正常/损坏夹具、Markdown 安全引用和 PDF canvas 模型。
+- `npm.cmd run test:contracts`：8 项通过；`npm.cmd run build`：通过并生成 `dist/client/index.html`、`dist/server/index.js` 和 `dist/.openai/hosting.json`。
+- Microsoft Edge 回退检查：1280px 预览对话框宽度 `1080px` 且头部控件不重叠；360px 下 `body.scrollWidth=360`、头部 `scrollWidth=clientWidth=360`，连续浏览和搜索上下文关闭行为通过；临时浏览器和 Vite 服务已清理。
+- 版本一致性检查通过，五个版本入口均为 `0.3.19`；`git diff --check` 通过。
+- `npm.cmd run tauri:build`：通过，前端生产构建、Rust release 编译、Windows x64 NSIS 打包和 loader 验证均通过；`WebView2Loader.dll` 为 `160320` bytes，SHA-256 为 `8427B1FC58EC707813E5C0A51EB5D69397BB333250A7B891BE4D3B123F1E0F1C`，与 release 主程序同目录。
+- 本次未执行安装器启动/卸载、Windows 11 原生手工验收、Tag、Release 或远程推送。
+
+### 构建 0.3.18 Windows x64 NSIS 安装包
+
+#### 已完成
+
+- 在 `dev` 分支基于阶段 A-B 的 `0.3.18` 代码候选完成 Windows x64 NSIS 安装包构建；没有执行推送、Tag 或 GitHub Release 发布。
+- 安装包路径为 `prototype/src-tauri/target/release/bundle/nsis/本地资料工作台_0.3.18_x64-setup.exe`，大小为 `8657734` bytes，SHA-256 为 `0AD7C66071F51CAFD310481FA776BA729AD93267A91E85017896E2D3EE6A3DDF`。
+- `WebView2Loader.dll` 校验通过，大小为 `160320` bytes，SHA-256 为 `8427B1FC58EC707813E5C0A51EB5D69397BB333250A7B891BE4D3B123F1E0F1C`；loader 与 release 主程序位于同一目录，目标架构为 Windows x64。
+
+#### 进行中
+
+- 安装器尚未在 Windows 11 上执行安装、首次启动、卸载、托盘/悬浮球和阶段 A-B 原生窗口验收；浏览器回退检查不能替代这些验收。
+
+#### 下一步
+
+- 用户安装该 `0.3.18` 候选包，复核 Windows 11/Tauri/WebView2 下的多选上下文、列表滚动、行菜单边界、导入条和 360px/不同 DPI 行为；收到结果后再处理具体回归或决定是否发布。
+
+#### 验证
+
+- `npm.cmd run tauri:build`：通过，前端生产构建、Rust release 编译、Windows x64 NSIS 打包和 `verify-webview2-loader.mjs` 均通过；构建保留既有大 chunk 提示。
+- 构建后 `git diff` 无内容差异，生成的 schema/permission 文件仅触发 Git 状态刷新，未产生需要提交的原生权限变化。
+
+## 2026-09-01
+
+### 阶段 A：多选范围和列表状态（0.3.17 代码候选）
+
+#### 已完成
+
+- 在 `codex/implement-phases-a-b` 分支完成阶段 A，并继续进入阶段 B；没有修改用户已有的 dev 基线历史。
+- 在 `libraryModel.js` 增加列表上下文 key、上下文变化清空选择、刷新后保留有效 ID 和可见选择统计的纯函数。
+- 导航、目录面包屑、搜索、类型/标签/分组筛选变化时清空 `selectedIds`；`selectedId` 和当前预览状态保持独立，复选框事件继续阻止行点击冒泡。
+- 表格滚动容器保存为 ref；列表上下文变化滚动到顶部，刷新开始时保存并在刷新结束后恢复滚动位置；页眉全选仍只作用于当前页。
+- 阶段 A 代码门禁通过后进入阶段 B，最终将版本入口同步到 `0.3.18`；`0.3.17` 未创建 Tag、安装包或 Release。
+
+#### 进行中
+
+- 阶段 A 的 Windows 11/Tauri/WebView2 原生刷新、目录、分页和多 DPI 验收仍需用户在桌面环境执行；浏览器回退只证明前端状态和布局。
+
+#### 涉及文件
+
+- `prototype/src/App.jsx`
+- `prototype/src/features/library/LibraryPanel.jsx`
+- `prototype/src/features/library/useLibraryNavigation.js`
+- `prototype/src/features/library/libraryModel.js`
+- `prototype/tests/library-model.test.mjs`
+
+#### 验证
+
+- `npm.cmd run test:library`：阶段 A 模型以及阶段 B 菜单定位测试共 14 项通过。
+- `npm.cmd run test:contracts`：8 项通过。
+- Microsoft Edge 回退检查确认切换“收藏”和输入搜索词后批量工具栏被清空，未打开预览对话框；临时浏览器和 Vite 服务已关闭。
+
+### 阶段 B：行菜单弹层和首屏布局（0.3.18 代码候选）
+
+#### 已完成
+
+- 新增 `LibraryRowActionMenu.jsx` 和 `libraryOverlayModel.js`；行菜单通过 `document.body` portal 渲染，使用 `getBoundingClientRect()`、fixed 定位、上下展开判断、左右边界约束和可用高度限制，不再受表格滚动容器裁切。
+- 菜单监听窗口 resize、visual viewport、页面/表格滚动和列表上下文变化；打开后聚焦第一项，支持方向键、Home、End、Escape、Tab、焦点返回和阻止行点击冒泡。
+- 已有资料时导入区收缩为紧凑导入条，保留导入文件夹、选择文件和拖放入口；桌面搜索框使用剩余宽度，筛选 chip 支持逐项清除，结果数显示当前结果和总索引数。
+- 360px 下隐藏低频的桌面设置按钮，显示明确的“更多”入口并打开同一设置面板；新菜单定位测试已接入 `test:library`。
+- 已同步 `prototype/package.json`、`package-lock.json` 根包、Tauri 配置、Rust crate、`Cargo.lock` 根 package、根 README、原型 README 和本计划到 `0.3.18` 代码候选口径；未执行推送、Tag、安装包构建或 Release 发布。
+
+#### 进行中
+
+- 阶段 B 的 Windows 11/Tauri/WebView2 原生窗口尺寸、真实索引刷新、滚动菜单和多 DPI 验收仍需用户执行；浏览器检查不替代桌面验收。
+
+#### 涉及文件
+
+- `prototype/src/features/library/LibraryActions.jsx`
+- `prototype/src/features/library/LibraryRowActionMenu.jsx`
+- `prototype/src/features/library/libraryOverlayModel.js`
+- `prototype/src/features/library/LibraryPanel.jsx`
+- `prototype/src/features/library/LibraryPanelParts.jsx`
+- `prototype/src/App.jsx`
+- `prototype/src/styles.css`
+- `prototype/tests/library-overlay.test.mjs`
+
+#### 验证
+
+- `npm.cmd run test:library`：14 项通过，包含上下文选择模型、刷新选择保留和菜单位置边界。
+- `npm.cmd run test:contracts`：8 项通过。
+- `npm.cmd run build`：通过，生成 `dist/client/index.html`、`dist/server/index.js` 和 `dist/.openai/hosting.json`；保留既有大 chunk 提示。
+- Microsoft Edge 回退检查：1280px 下确认已有资料的导入区高度收缩、搜索框占用剩余宽度，首行和靠近底部的菜单均在窗口内；菜单挂在 `BODY` 且使用 `position: fixed`，Escape 返回触发按钮，Home/End 可切换菜单项；调整到 360px 后菜单仍在窗口内。
+- Microsoft Edge 回退检查：680px 的表格 `scrollWidth=clientWidth=629`，360px 的页面 `body.scrollWidth=clientWidth=360`、表格 `scrollWidth=clientWidth=309`；导入条和表格没有重叠，更多入口可见。临时截图、浏览器 session 和 Vite 服务已清理。
+- 未运行 `npm.cmd run tauri:build`，未进行 Windows 11 安装器启动/卸载或原生手工验收；本轮没有改动原生行为，只同步版本入口。
+
+#### 下一步
+
+- 进入 `PROJECT_PLAN.md` 阶段 C，补齐预览失败后的重试、定位、复制位置和连续浏览状态；保持 `0.3.18` 为当前未发布代码候选，收到 Windows 原生验收结果后再处理具体回归。
+
+## 2026-09-01
+
+### 切换 dev 并重写 0.3.x 后续界面与功能计划
+
+#### 已完成
+
+- 已确认工作树在切换前干净，并从 `main` 切换到现有 `dev` 分支；当前 HEAD 为 `59aa977`，版本基线为 `0.3.16`。
+- 已删除旧版 `PROJECT_PLAN.md` 的阶段 A-J 计划内容，并重新编写以界面和功能增强为主题的新总体计划。
+- 新计划从 `0.3.17` 开始，按阶段覆盖多选范围、菜单弹层、首屏布局、预览错误恢复、单条标签/分组、操作结果中心、键盘与响应式、最近打开、DOCX 性能、递归导入和全文检索。
+- 已明确每个阶段在代码、最小自动验证和文档同步完成后立即更新 `package.json`、`package-lock.json`、Tauri 配置、Rust crate 和 `Cargo.lock` 的版本入口；Windows 11 手工验收和 Release 不再作为版本号更新的前置条件。
+
+#### 进行中
+
+- 阶段 A `0.3.17` 尚未开始实现，应用版本入口暂时保持 `0.3.16`。
+- 当前只完成计划重写和分支切换，没有开始修改选择状态、列表滚动或其他功能代码。
+
+#### 阻塞与风险
+
+- 新计划仍需按阶段执行；未完成代码和最小验证前，不得提前把应用版本改为 `0.3.17` 或创建 Release。
+- Windows 原生验收继续与代码候选版本分开记录；涉及无边框窗口、托盘、悬浮球、预览、文件操作、递归扫描或安装包的阶段需要安排对应 Windows 11/Tauri/WebView2 手工检查。
+- 新增全文索引、操作历史、索引迁移或 DOCX 任务时，必须继续保持 local-first、原子写入、路径授权、资源清理和不记录正文/密钥的边界。
+
+#### 下一步
+
+- 按 `PROJECT_PLAN.md` 阶段 A 实现多选上下文收束、筛选/导航切换后的选择清理和列表滚动位置规则。
+- 完成阶段 A 的前端模型、契约、构建和 1280px/680px/360px 检查后，立即同步版本到 `0.3.17`，再进入阶段 B。
+
+#### 涉及文件
+
+- `PROJECT_PLAN.md`
+- `PROJECT_PROGRESS.md`
+
+#### 验证
+
+- `git status --short --branch`：切换前工作树干净。
+- `git switch dev`：成功，当前分支为 `dev`，并跟踪 `origin/dev`。
+- 计划文档结构检查：已确认 `0.3.17` 至 `0.3.26` 阶段和各阶段版本门禁均已写入。
+- 本次为计划和进度文档变更，未重复运行完整测试、构建或安装包构建。
+
+## 2026-09-01
+
 ### 阶段 A-J Windows 验收完成与 0.3.16 发布完成
 
 #### 已完成

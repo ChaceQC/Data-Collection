@@ -7,12 +7,13 @@ import {
   getPdfCanvasMetrics,
   PDF_CANVAS_PIXEL_LIMIT,
 } from "./pdfRenderModel";
+import { UnsupportedPreviewer } from "./UnsupportedPreviewer";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl;
 
 const MAX_PDF_PAGES = 200;
 
-export function PdfPreviewer({ content }) {
+export function PdfPreviewer({ content, onFailure, ...failureActions }) {
   const canvasRef = useRef(null);
   const [documentState, setDocumentState] = useState({ status: "loading", document: null, reason: "" });
   const [page, setPage] = useState(1);
@@ -46,7 +47,9 @@ export function PdfPreviewer({ content }) {
         }
         if (!Number.isInteger(document.numPages) || document.numPages < 1 || document.numPages > MAX_PDF_PAGES) {
           void document.destroy().catch(() => undefined);
-          setDocumentState({ status: "too-large", document: null, reason: "PDF 页数超过 200 页预览限制。" });
+          const reason = "PDF 页数超过 200 页预览限制。";
+          setDocumentState({ status: "too-large", document: null, reason });
+          onFailure?.("too-large", reason);
           return;
         }
         setDocumentState({ status: "ready", document, reason: "" });
@@ -57,6 +60,7 @@ export function PdfPreviewer({ content }) {
             ? "加密 PDF 暂不支持预览。"
             : "PDF 无法解析，请检查文件是否损坏。";
           setDocumentState({ status: "parse-error", document: null, reason });
+          onFailure?.("parse-error", reason);
         }
       });
     return () => {
@@ -114,6 +118,12 @@ export function PdfPreviewer({ content }) {
               ? "当前 PDF 页面尺寸超过预览像素限制，请缩小或使用系统程序打开。"
               : "PDF 页面渲染失败，请重试。",
           }));
+          onFailure?.(
+            error?.message === "page-too-large" ? "too-large" : "parse-error",
+            error?.message === "page-too-large"
+              ? "当前 PDF 页面尺寸超过预览像素限制，请缩小或使用系统程序打开。"
+              : "PDF 页面渲染失败，请重试。",
+          );
         }
       }
     }
@@ -134,7 +144,7 @@ export function PdfPreviewer({ content }) {
   }, [documentState.document, page, scale]);
 
   if (documentState.status === "loading") return <div className="preview-loading-state">正在加载 PDF...</div>;
-  if (documentState.status !== "ready" || !documentState.document) return <div className="preview-error-state">{documentState.reason}</div>;
+  if (documentState.status !== "ready" || !documentState.document) return <UnsupportedPreviewer status={documentState.status} reason={documentState.reason} {...failureActions} />;
 
   const pageCount = documentState.document.numPages;
   return (

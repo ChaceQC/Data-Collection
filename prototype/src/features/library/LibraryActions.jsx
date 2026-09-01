@@ -1,13 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import {
-  ArrowSquareOut,
   ArrowCounterClockwise,
   Check,
-  Copy,
-  DotsThree,
-  FolderOpen,
   PencilSimpleLine,
-  PencilSimple,
   Plus,
   Star,
   Tag,
@@ -15,111 +10,7 @@ import {
   X,
 } from "@phosphor-icons/react";
 import { Dialog } from "../../components/Dialog.jsx";
-import { formatFileSize, getEntryLocation } from "./libraryModel";
-
-export function LibraryRowActions({
-  file,
-  persistent,
-  busy,
-  onFavorite,
-  onRemove,
-  onCopy,
-  onRename,
-  onDelete,
-  onOpenDefault,
-  onReveal,
-}) {
-  const [menuOpen, setMenuOpen] = useState(false);
-  const menuRef = useRef(null);
-  const menuTriggerRef = useRef(null);
-  const isFavorite = Boolean(file.favorite);
-  const isFolder = file.kind === "folder";
-  const isInvalid = Boolean(file.invalid);
-
-  useEffect(() => {
-    if (!menuOpen) return undefined;
-    function handlePointerDown(event) {
-      if (!menuRef.current?.contains(event.target)) setMenuOpen(false);
-    }
-    function handleKeyDown(event) {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        setMenuOpen(false);
-      }
-    }
-    document.addEventListener("pointerdown", handlePointerDown);
-    document.addEventListener("keydown", handleKeyDown);
-    return () => {
-      document.removeEventListener("pointerdown", handlePointerDown);
-      document.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [menuOpen]);
-
-  if (!persistent) return null;
-
-  function run(action) {
-    document.querySelectorAll("[data-dialog-return-focus=\"true\"]").forEach((element) => element.removeAttribute("data-dialog-return-focus"));
-    menuTriggerRef.current?.setAttribute("data-dialog-return-focus", "true");
-    setMenuOpen(false);
-    action(file);
-  }
-
-  return (
-    <div className="file-row-actions" ref={menuRef} onClick={(event) => event.stopPropagation()}>
-      <button
-        type="button"
-        className={`row-action-button ${isFavorite ? "is-favorite" : ""}`}
-        aria-label={isFavorite ? "取消收藏" : "收藏"}
-        aria-pressed={isFavorite}
-        title={isFavorite ? "取消收藏" : "收藏"}
-        disabled={busy}
-        onClick={() => onFavorite(file)}
-      >
-        <Star size={18} weight={isFavorite ? "fill" : "regular"} aria-hidden="true" />
-      </button>
-      <button
-        type="button"
-        className="row-action-button row-action-menu-trigger"
-        ref={menuTriggerRef}
-        aria-label="打开资料操作菜单"
-        title="更多操作"
-        aria-haspopup="menu"
-        aria-expanded={menuOpen}
-        disabled={busy}
-        onClick={() => setMenuOpen((value) => !value)}
-      >
-        <DotsThree size={20} weight="bold" aria-hidden="true" />
-      </button>
-      {menuOpen && (
-        <div className="row-action-menu" role="menu" aria-label={`${file.name} 的操作`}>
-          <div role="group" aria-label="常用操作">
-            {!isInvalid && !isFolder && (
-              <MenuAction icon={ArrowSquareOut} label="用默认程序打开" onClick={() => run(onOpenDefault)} />
-            )}
-            {!isInvalid && <MenuAction icon={FolderOpen} label="在资源管理器中定位" onClick={() => run(onReveal)} />}
-            {!isInvalid && !isFolder && <MenuAction icon={Copy} label="复制到剪贴板" onClick={() => run(onCopy)} />}
-            {!isInvalid && !isFolder && <MenuAction icon={PencilSimple} label="重命名文件" onClick={() => run(onRename)} />}
-            <MenuAction icon={TrashSimple} label="从资料库移除" danger onClick={() => run(onRemove)} />
-          </div>
-          {!isInvalid && !isFolder && (
-            <div className="row-action-menu-danger" role="group" aria-label="危险操作">
-              <MenuAction icon={TrashSimple} label="删除原文件并移入回收站" danger onClick={() => run(onDelete)} />
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function MenuAction({ icon: Icon, label, danger = false, onClick }) {
-  return (
-    <button type="button" className={`row-action-menu-item ${danger ? "is-danger" : ""}`} role="menuitem" onClick={onClick}>
-      <Icon size={16} weight="regular" aria-hidden="true" />
-      <span>{label}</span>
-    </button>
-  );
-}
+import { countEntriesInGroup, formatFileSize, getEntryLocation } from "./libraryModel";
 
 export function LibraryActionDialog({
   title,
@@ -245,6 +136,7 @@ export function BatchRemoveDialog({ files, busy, onCancel, onConfirm }) {
 
 export function BulkLibraryToolbar({
   selectedIds,
+  visibleSelectedCount,
   groups,
   busy,
   retryBatch,
@@ -261,11 +153,12 @@ export function BulkLibraryToolbar({
   const [tagValue, setTagValue] = useState("");
   const [groupId, setGroupId] = useState("__unset__");
   const ids = selectedIds || [];
+  const visibleCount = Number.isFinite(visibleSelectedCount) ? visibleSelectedCount : ids.length;
   const hasTag = Boolean(tagValue.trim());
   const hasGroup = groupId !== "__unset__";
   return (
     <div className="library-bulk-toolbar" role="region" aria-label="批量操作">
-      <strong>{ids.length} 项已选</strong>
+      <strong>当前列表 {visibleCount} 项 / 共 {ids.length} 项已选</strong>
       <div className="bulk-action-group" role="group" aria-label="收藏操作">
         <button type="button" className="bulk-action-button" disabled={busy} onClick={() => onBatchFavorite(ids, true)}><Star size={16} weight="fill" aria-hidden="true" />收藏</button>
         <button type="button" className="bulk-action-button" disabled={busy} onClick={() => onBatchFavorite(ids, false)}><Star size={16} weight="regular" aria-hidden="true" />取消收藏</button>
@@ -293,10 +186,11 @@ export function BulkLibraryToolbar({
   );
 }
 
-export function GroupManagerDialog({ groups, busy, onClose, onCreate, onRename, onDelete }) {
+export function GroupManagerDialog({ groups, files = [], busy, onClose, onCreate, onRename, onDelete }) {
   const [newName, setNewName] = useState("");
   const [editingId, setEditingId] = useState("");
   const [editingName, setEditingName] = useState("");
+  const [deleteTarget, setDeleteTarget] = useState(null);
 
   async function create() {
     if (await onCreate(newName)) setNewName("");
@@ -312,6 +206,34 @@ export function GroupManagerDialog({ groups, busy, onClose, onCreate, onRename, 
   function startRename(group) {
     setEditingId(group.id);
     setEditingName(group.name);
+  }
+
+  async function confirmDelete() {
+    if (!deleteTarget || busy) return;
+    if (await onDelete(deleteTarget.id)) setDeleteTarget(null);
+  }
+
+  if (deleteTarget) {
+    const affectedCount = countEntriesInGroup(files, deleteTarget.id);
+    return (
+      <Dialog
+        title="确认删除分组"
+        description={`删除“${deleteTarget.name}”只会解除资料的分组归属，不会删除资料记录或原文件。`}
+        busy={busy}
+        onClose={() => setDeleteTarget(null)}
+        footer={(
+          <>
+            <button type="button" className="dialog-button dialog-button-secondary" disabled={busy} onClick={() => setDeleteTarget(null)}>取消</button>
+            <button type="button" className="dialog-button dialog-button-danger" disabled={busy} onClick={() => void confirmDelete()}>{busy ? "处理中..." : "删除分组"}</button>
+          </>
+        )}
+      >
+        <div className="group-delete-confirmation">
+          <strong>{deleteTarget.name}</strong>
+          <p>当前有 {affectedCount} 项资料属于此分组。删除后这些资料仍保留在资料库和原位置。</p>
+        </div>
+      </Dialog>
+    );
   }
 
   return (
@@ -342,7 +264,7 @@ export function GroupManagerDialog({ groups, busy, onClose, onCreate, onRename, 
                   <>
                     <span className="group-name">{group.name}</span>
                     <button type="button" className="icon-button" aria-label={`重命名分组 ${group.name}`} title="重命名" disabled={busy} onClick={() => startRename(group)}><PencilSimpleLine size={17} weight="regular" aria-hidden="true" /></button>
-                    <button type="button" className="icon-button group-delete-button" aria-label={`删除分组 ${group.name}，只解除归属`} title="删除分组（只解除归属）" disabled={busy} onClick={() => void onDelete(group.id)}><TrashSimple size={17} weight="regular" aria-hidden="true" /></button>
+                    <button type="button" className="icon-button group-delete-button" aria-label={`删除分组 ${group.name}，只解除归属`} title="删除分组（只解除归属）" disabled={busy} onClick={() => setDeleteTarget(group)}><TrashSimple size={17} weight="regular" aria-hidden="true" /></button>
                   </>
                 )}
               </li>

@@ -3,6 +3,11 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import * as XLSX from "xlsx";
 import { getPreviewDefinition } from "../src/features/preview/previewRegistry.js";
+import {
+  getAdjacentPreviewEntries,
+  getPreviewFailureActions,
+  getPreviewStatusLabel,
+} from "../src/features/preview/previewTypes.js";
 
 test("registers every planned preview extension", () => {
   const extensions = [
@@ -18,6 +23,28 @@ test("registers every planned preview extension", () => {
 test("does not register SVG or unknown containers as previewable", () => {
   assert.equal(getPreviewDefinition({ name: "diagram.svg", kind: "other" }), null);
   assert.equal(getPreviewDefinition({ name: "archive.zip", kind: "other" }), null);
+});
+
+test("keeps browser fallback distinct from format failures", () => {
+  assert.equal(getPreviewStatusLabel("unsupported", { demoOnly: true }), "浏览器演示限制");
+  assert.deepEqual(getPreviewFailureActions("missing"), ["reposition", "close"]);
+  assert.deepEqual(getPreviewFailureActions("too-large"), ["open-default", "close"]);
+  assert.deepEqual(getPreviewFailureActions("converter-missing"), ["open-default", "close"]);
+  assert.deepEqual(getPreviewFailureActions("unsupported"), ["open-default", "reveal", "close"]);
+  assert.deepEqual(getPreviewFailureActions("permission-denied"), ["retry", "open-default", "reveal", "close"]);
+  assert.deepEqual(getPreviewFailureActions("cancelled"), ["retry", "open-default", "reveal", "close"]);
+  assert.deepEqual(getPreviewFailureActions("parse-error"), ["retry", "open-default", "reveal", "close"]);
+  assert.deepEqual(getPreviewFailureActions("parse-error", { isDirectoryEntry: true }), ["retry", "reveal", "close"]);
+  assert.deepEqual(getPreviewFailureActions("unsupported", { demoOnly: true }), ["close"]);
+});
+
+test("calculates adjacent preview entries from the supplied visible snapshot", () => {
+  const entries = [{ id: "first" }, { id: "current" }, { id: "last" }];
+  assert.deepEqual(getAdjacentPreviewEntries(entries, "current"), {
+    previous: entries[0],
+    next: entries[2],
+  });
+  assert.deepEqual(getAdjacentPreviewEntries(entries, "unknown"), { previous: null, next: null });
 });
 
 test("parses the safe workbook fixture without evaluating formulas", async () => {

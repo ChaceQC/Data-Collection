@@ -2,8 +2,9 @@ import { useEffect, useState } from "react";
 import mammoth from "mammoth/mammoth.browser.js";
 import { normalizePreviewResourceUrl } from "./previewTypes";
 import { sanitizeDocxHtml } from "./previewSecurity";
+import { UnsupportedPreviewer } from "./UnsupportedPreviewer";
 
-export function OfficePreviewer({ content }) {
+export function OfficePreviewer({ content, onFailure, ...failureActions }) {
   const [state, setState] = useState({ status: "loading", html: "", warningCount: 0, reason: "" });
 
   useEffect(() => {
@@ -25,12 +26,14 @@ export function OfficePreviewer({ content }) {
         });
       } catch (error) {
         if (cancelled || error?.name === "AbortError") return;
+        const reason = "Word 文档无法解析，请检查文件是否损坏或加密。";
         setState({
           status: "parse-error",
           html: "",
           warningCount: 0,
-          reason: "Word 文档无法解析，请检查文件是否损坏或加密。",
+          reason,
         });
+        onFailure?.("parse-error", reason);
       }
     }
     void convert();
@@ -44,7 +47,7 @@ export function OfficePreviewer({ content }) {
     return <div className="preview-loading-state">正在解析 Word 文档...</div>;
   }
   if (state.status !== "ready") {
-    return <div className="preview-error-state">{state.reason}</div>;
+    return <UnsupportedPreviewer status="parse-error" reason={state.reason} {...failureActions} />;
   }
 
   return (

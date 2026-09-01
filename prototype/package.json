@@ -1,13 +1,13 @@
 {
   "name": "local-material-workbench",
-  "version": "0.3.16",
+  "version": "0.3.20",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vite build && node scripts/prepare-sites-build.mjs",
     "preview": "vite preview",
-    "test:library": "node --test tests/library-model.test.mjs",
+    "test:library": "node --test tests/library-model.test.mjs tests/library-overlay.test.mjs",
     "test:contracts": "node --test tests/ipc-contracts.test.mjs tests/library-controller.test.mjs",
     "test:settings": "node --test tests/settings-model.test.mjs",
     "test:preview": "node --test tests/preview-registry.test.mjs tests/preview-security.test.mjs tests/pdf-render-model.test.mjs",

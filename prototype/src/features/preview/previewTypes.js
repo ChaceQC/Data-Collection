@@ -24,8 +24,37 @@ export const PREVIEW_STATUS_LABELS = Object.freeze({
   cancelled: "已取消预览",
 });
 
-export function getPreviewStatusLabel(status) {
+export function getPreviewStatusLabel(status, { demoOnly = false } = {}) {
+  if (demoOnly) return "浏览器演示限制";
   return PREVIEW_STATUS_LABELS[status] || "预览状态未知";
+}
+
+export function getAdjacentPreviewEntries(entries, entryId) {
+  const currentEntries = Array.isArray(entries) ? entries : [];
+  const currentIndex = currentEntries.findIndex((entry) => entry?.id === entryId);
+  if (currentIndex < 0) return { previous: null, next: null };
+  return {
+    previous: currentEntries[currentIndex - 1] || null,
+    next: currentEntries[currentIndex + 1] || null,
+  };
+}
+
+export function getPreviewFailureActions(status, { demoOnly = false, isDirectoryEntry = false } = {}) {
+  if (demoOnly) return ["close"];
+  if (isDirectoryEntry) {
+    const actions = [];
+    if (["permission-denied", "parse-error", "cancelled"].includes(status)) actions.push("retry");
+    if (status !== "missing") actions.push("reveal");
+    actions.push("close");
+    return actions;
+  }
+  if (status === "missing") return ["reposition", "close"];
+  if (status === "too-large" || status === "converter-missing") return ["open-default", "close"];
+  if (status === "unsupported") return ["open-default", "reveal", "close"];
+  if (["permission-denied", "parse-error", "cancelled"].includes(status)) {
+    return ["retry", "open-default", "reveal", "close"];
+  }
+  return ["close"];
 }
 
 export function normalizePreviewResourceUrl(resourceUrl) {
