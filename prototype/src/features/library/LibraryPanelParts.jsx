@@ -129,7 +129,7 @@ export function getModifiedLabel(file) {
 }
 
 export function getNavigationLabel(activeNav) {
-  return { recent: "最近添加", favorites: "收藏", invalid: "失效路径" }[activeNav] || "资料库";
+  return { recent: "最近添加", "recent-opened": "最近打开", favorites: "收藏", invalid: "失效路径" }[activeNav] || "资料库";
 }
 
 export function getEmptyTitle({ activeNav, directoryView, searchQuery, filters }) {
@@ -139,6 +139,7 @@ export function getEmptyTitle({ activeNav, directoryView, searchQuery, filters }
   if (activeNav === "favorites") return "还没有收藏的资料";
   if (activeNav === "invalid") return "没有失效路径";
   if (activeNav === "recent") return "还没有最近添加的资料";
+  if (activeNav === "recent-opened") return "还没有最近打开的资料";
   return "还没有登记资料";
 }
 
@@ -148,6 +149,7 @@ export function getEmptyDescription({ activeNav, directoryView, searchQuery, fil
   if (directoryView) return "返回上一级，或选择其他文件夹继续浏览。";
   if (activeNav === "favorites") return "在资料行操作中添加收藏。";
   if (activeNav === "invalid") return "失效记录会在原路径不可用时显示。";
+  if (activeNav === "recent-opened") return "成功预览或用默认程序打开的资料会显示在这里。";
   return "从上方选择文件或文件夹开始建立索引。";
 }
 
@@ -155,7 +157,7 @@ export function getEmptyActions({ activeNav, directoryView, searchQuery, filters
   if (searchQuery) return <button type="button" className="text-button" onClick={onClearSearch}>清空搜索</button>;
   if (filters.type || filters.tags.length || filters.groupIds.length) return <button type="button" className="text-button" onClick={onClearFilters}>清除筛选</button>;
   if (directoryView) return <button type="button" className="text-button" onClick={() => onOpenBreadcrumb(-1)}>返回资料库</button>;
-  if (activeNav === "library" || activeNav === "favorites" || activeNav === "invalid") return <button type="button" className="text-button" onClick={onImport}>导入资料</button>;
+  if (activeNav === "library" || activeNav === "recent" || activeNav === "recent-opened" || activeNav === "favorites" || activeNav === "invalid") return <button type="button" className="text-button" onClick={onImport}>导入资料</button>;
   if (onManageGroups) return <button type="button" className="text-button" onClick={onManageGroups}>管理分组</button>;
   return null;
 }

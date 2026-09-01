@@ -2,6 +2,56 @@
 
 ## 2026-09-02
 
+### 阶段 G：最近打开和悬浮球连续工作流（0.3.23 代码候选）
+
+#### 已完成
+
+- 索引格式从 v4 升级到 v5，`IndexEntry` 增加可选 `lastOpenedAt`；旧版本迁移前创建 recovery 备份，迁移写入失败时保留旧索引内容并进入已有恢复状态。
+- 预览 command 只有返回 `ready` 且目标是有效主索引普通文件时才记录最近打开；默认程序打开 command 只有外部打开成功后才记录。失效资料、文件夹、预览失败和默认程序打开失败均不会伪造 `lastOpenedAt`。
+- 主窗口新增“最近打开”导航，按 `lastOpenedAt` 倒序并限制最近 50 条；“最近添加”仍使用 `addedAt`，悬浮球和托盘仍使用 `lastRecordedAt` 的“最近记录”，各自的数量和空状态文案已区分。
+- 最近打开的索引变更复用 `index-changed` revision 事件，主窗口、悬浮球和托盘沿用现有刷新路径；从悬浮球打开资料时，主窗口会直接定位并打开文件预览，文件夹记录会进入对应目录。
+- 索引迁移和最近打开记录只保存元数据，不保存正文，不新增完整路径日志；版本入口已统一为 `0.3.23`，README、原型 README、计划和本进度已同步。
+
+#### 进行中
+
+- 阶段 G 代码、Rust/前端自动验证、文档同步和 `0.3.23` Windows x64 NSIS 安装包构建已完成；当前等待用户执行 Windows 11/Tauri/WebView2 原生验收。
+
+#### 阻塞与风险
+
+- 浏览器回退和开发侧测试不能验证 Tauri 原生预览、默认程序、托盘/悬浮球窗口焦点、Windows Shell 和真实升级路径；`0.3.23` 安装包仍需用户在 Windows 11/Tauri/WebView2 环境手工验收。
+- 安装包不签名且不内置 WebView2 Runtime；DOC 预览仍依赖目标机 LibreOffice，`xlsx@0.18.5` 的既有依赖风险保持不变。
+
+#### 下一步
+
+- 用户安装候选后检查 v4 到 v5 迁移备份、最近打开排序/重启恢复、预览和默认程序成功/失败边界、托盘与悬浮球同步以及悬浮球到主窗口的连续工作流。
+- 桌面验收无具体阻断后再进入阶段 H，不创建 Tag、Release 或推送远程。
+
+#### 涉及文件
+
+- `prototype/src-tauri/src/filesystem/mod.rs`
+- `prototype/src-tauri/src/filesystem/operations.rs`
+- `prototype/src-tauri/src/storage/mod.rs`
+- `prototype/src-tauri/src/commands/mod.rs`
+- `prototype/src-tauri/src/commands/library.rs`
+- `prototype/src/App.jsx`
+- `prototype/src/features/library/libraryModel.js`
+- `prototype/src/features/library/useLibraryNavigation.js`
+- `prototype/src/features/library/LibraryPanel.jsx`
+- `prototype/src/features/library/LibraryPanelParts.jsx`
+- `prototype/src/lib/ipcContracts.js`、`ipcContracts.d.ts`
+- `prototype/tests/library-model.test.mjs`、`ipc-contracts.test.mjs`
+- `prototype/package.json`、`package-lock.json`、`src-tauri/Cargo.toml`、`Cargo.lock`、`tauri.conf.json`
+- `README.md`、`prototype/README.md`、`PROJECT_PLAN.md`
+
+#### 验证
+
+- `cargo fmt --all -- --check`：通过；`cargo check --locked`：通过；`cargo test --lib`：66 项通过。
+- `npm.cmd run test:library`：19 项通过；`npm.cmd run test:contracts`：12 项通过。
+- `npm.cmd run test:preview`：11 项通过；`npm.cmd run test:floating-ball`：17 项通过；`npm.cmd run test:tray`：3 项通过；`npm.cmd run test:sites`：4 项通过。
+- `cargo clippy --all-targets --all-features -- -D warnings`：通过；`npm.cmd run build`：通过，生成 Sites 所需的 `dist/client/index.html`、`dist/server/index.js` 和 `dist/.openai/hosting.json`。
+- `npm.cmd run tauri:build`：通过，生成 Windows x64 NSIS 安装包 `prototype/src-tauri/target/release/bundle/nsis/本地资料工作台_0.3.23_x64-setup.exe`，大小 `8712755` bytes，SHA-256 为 `9AAD808A22E34EC38299E69DCA8427F69183D66722BCE5B80CBF6AFA3156D716`。
+- `verify-webview2-loader.mjs`：通过；`WebView2Loader.dll` 大小 `160320` bytes，SHA-256 为 `8427B1FC58EC707813E5C0A51EB5D69397BB333250A7B891BE4D3B123F1E0F1C`，与 release 主程序位于同一目录，目标架构为 Windows x64。
+
 ### 阶段 F：键盘、范围选择和响应式细节（0.3.22 代码候选）
 
 #### 已完成

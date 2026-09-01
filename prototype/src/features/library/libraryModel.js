@@ -20,6 +20,7 @@ export const SORT_OPTIONS = Object.freeze([
 
 export const DEFAULT_SORT = Object.freeze({ key: "addedAt", direction: "desc" });
 export const RECENT_ENTRY_LIMIT = 50;
+export const RECENT_OPENED_ENTRY_LIMIT = 50;
 
 export function normalizeSearchQuery(value) {
   return String(value || "")
@@ -132,11 +133,13 @@ export function matchesNavigation(entry, activeNav) {
   if (activeNav === "favorites") return Boolean(entry.favorite);
   if (activeNav === "invalid") return Boolean(entry.invalid);
   if (activeNav === "recent") return !entry.invalid;
+  if (activeNav === "recent-opened") return !entry.invalid && Number.isFinite(entry.lastOpenedAt) && entry.lastOpenedAt > 0;
   return true;
 }
 
 export function getNavigationCount(entries, activeNav) {
   if (activeNav === "recent") return getRecentEntries(entries).length;
+  if (activeNav === "recent-opened") return getRecentOpenedEntries(entries).length;
   return entries.filter((entry) => matchesNavigation(entry, activeNav)).length;
 }
 
@@ -163,7 +166,11 @@ export function filterEntries(
   const selectedTypes = types.map(normalizeSearchQuery).filter(Boolean);
   const selectedGroups = new Set(groupIds.filter(Boolean));
   const groupNameById = new Map((groups || []).map((group) => [group.id, group.name]));
-  const sourceEntries = !directory && activeNav === "recent" ? getRecentEntries(entries) : entries;
+  const sourceEntries = !directory && activeNav === "recent"
+    ? getRecentEntries(entries)
+    : !directory && activeNav === "recent-opened"
+      ? getRecentOpenedEntries(entries)
+      : entries;
   return sourceEntries.filter((entry) => {
     const matchesNav = directory || activeNav === "library" || matchesNavigation(entry, activeNav);
     if (!matchesNav) return false;
@@ -198,6 +205,16 @@ export function getRecentEntries(entries) {
       || COLLATOR.compare(String(left.id || ""), String(right.id || ""))
     ))
     .slice(0, RECENT_ENTRY_LIMIT);
+}
+
+export function getRecentOpenedEntries(entries) {
+  return [...entries]
+    .filter((entry) => Number.isFinite(entry.lastOpenedAt) && entry.lastOpenedAt > 0 && !entry.invalid)
+    .sort((left, right) => (
+      Number(right.lastOpenedAt) - Number(left.lastOpenedAt)
+      || COLLATOR.compare(String(left.id || ""), String(right.id || ""))
+    ))
+    .slice(0, RECENT_OPENED_ENTRY_LIMIT);
 }
 
 export function sortEntries(entries, { key = DEFAULT_SORT.key, direction = DEFAULT_SORT.direction } = {}) {

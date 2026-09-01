@@ -23,6 +23,7 @@ export interface IndexEntry {
   size?: number;
   modifiedAt?: number;
   addedAt?: number;
+  lastOpenedAt?: number | null;
   status: string;
   invalid?: boolean;
   favorite?: boolean;

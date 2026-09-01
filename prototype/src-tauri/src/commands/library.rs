@@ -672,6 +672,7 @@ pub async fn copy_indexed_file(
 pub async fn open_indexed_file(
     file_id: String,
     state: State<'_, AppState>,
+    app: AppHandle,
 ) -> Result<ExternalOpenResult, CommandError> {
     if file_id.trim().is_empty() {
         return Err(structured_storage_error(StorageError::InvalidId));
@@ -702,6 +703,7 @@ pub async fn open_indexed_file(
             "unchanged",
         )
     })??;
+    super::record_entry_opened(state.inner(), &app, &file_id).map_err(structured_storage_error)?;
     Ok(ExternalOpenResult { name })
 }
 
@@ -789,6 +791,7 @@ pub async fn rename_indexed_file(
         replacement.added_at = entry.added_at;
         replacement.preview_status = entry.preview_status.clone();
         replacement.last_recorded_at = entry.last_recorded_at;
+        replacement.last_opened_at = entry.last_opened_at;
         replacement.tags = entry.tags.clone();
         replacement.group_id = entry.group_id.clone();
         Ok::<(PathBuf, PathBuf, IndexEntry), CommandError>((source, target, replacement))

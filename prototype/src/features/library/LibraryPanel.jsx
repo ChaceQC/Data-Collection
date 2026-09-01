@@ -41,6 +41,8 @@ import {
   getDisplayType,
   getDuplicateNameIds,
   getParentSummary,
+  getRecentEntries,
+  getRecentOpenedEntries,
   getLibraryContextKey,
   getSelectedIdsInEntries,
   getSelectionRangeIds,
@@ -144,6 +146,7 @@ export function LibraryPanel({
       directoryView,
     });
     const directorySort = sort.key === "addedAt" ? { key: "name", direction: "asc" } : sort;
+    if (!directoryView && activeNav === "recent-opened") return filtered;
     return sortEntries(filtered, directoryView ? directorySort : sort);
   }, [activeNav, directoryView, filters, groups, searchQuery, sort, sourceEntries]);
   const page = useMemo(() => paginateEntries(visibleFiles, currentPage, pageSize), [currentPage, pageSize, visibleFiles]);
@@ -153,7 +156,13 @@ export function LibraryPanel({
   const allPageSelected = selectablePageIds.length > 0 && selectablePageIds.every((id) => selectedIdSet.has(id));
   const somePageSelected = selectablePageIds.some((id) => selectedIdSet.has(id));
   const visibleSelectedCount = getSelectedIdsInEntries(selectedIds, visibleFiles).length;
-  const totalEntryCount = directoryView ? sourceEntries.length : files.length;
+  const totalEntryCount = directoryView
+    ? sourceEntries.length
+    : activeNav === "recent"
+      ? getRecentEntries(files).length
+      : activeNav === "recent-opened"
+        ? getRecentOpenedEntries(files).length
+        : files.length;
   const activeFilterChips = getActiveFilterChips(filters, groups);
 
   useEffect(() => {

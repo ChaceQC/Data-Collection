@@ -288,7 +288,7 @@ export function parseSettingsChangedEvent(value, command = "settings-changed") {
 export function parseIndexEntry(value, command = "index-entry") {
   const source = record(value, command);
   const entry = { ...source, id: assertOpaqueId(source.id), name: string(source.name, command, "name"), kind: string(source.kind, command, "kind"), type: string(source.type ?? source.fileType, command, "type"), status: string(source.status, command, "status"), invalid: optionalBoolean(source.invalid, command, "invalid"), favorite: optionalBoolean(source.favorite, command, "favorite") };
-  for (const field of ["size", "modifiedAt", "addedAt"]) if (source[field] != null) entry[field] = nonNegativeInteger(source[field], command, field);
+  for (const field of ["size", "modifiedAt", "addedAt", "lastOpenedAt"]) if (source[field] != null) entry[field] = nonNegativeInteger(source[field], command, field);
   if (source.path != null && typeof source.path !== "string") throw contractError(command, "路径字段无效");
   entry.tags = stringArray(source.tags ?? [], command, "tags").map((tag) => {
     if (!tag.trim() || /[\u0000-\u001f\u007f-\u009f]/.test(tag)) throw contractError(command, "标签字段无效");

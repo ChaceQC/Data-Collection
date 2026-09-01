@@ -37,6 +37,7 @@ import {
 import {
   ArrowClockwise,
   CheckCircle,
+  ClockCounterClockwise,
   Clock,
   DotsThree,
   FolderOpen,
@@ -61,6 +62,7 @@ const INITIAL_FILES = [
     modified: "2026-08-28 10:24",
     modifiedAt: 1787883840,
     addedAt: 1787883840,
+    lastOpenedAt: 1787883900000,
     size: 2048,
     favorite: true,
     tags: ["研究"],
@@ -76,6 +78,7 @@ const INITIAL_FILES = [
     modified: "2026-08-28 09:41",
     modifiedAt: 1787881260,
     addedAt: 1787881260,
+    lastOpenedAt: 1787883960000,
     size: 8192,
     favorite: false,
     tags: ["访谈"],
@@ -117,6 +120,7 @@ const INITIAL_FILES = [
 const NAV_ITEMS = [
   { key: "library", label: "资料库", icon: FolderSimple },
   { key: "recent", label: "最近添加", icon: Clock },
+  { key: "recent-opened", label: "最近打开", icon: ClockCounterClockwise },
   { key: "favorites", label: "收藏", icon: Star },
   { key: "invalid", label: "失效路径", icon: WarningCircle },
 ];

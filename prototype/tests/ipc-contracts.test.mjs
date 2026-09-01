@@ -22,6 +22,7 @@ const entry = {
   size: 12,
   modifiedAt: 1,
   addedAt: 1,
+  lastOpenedAt: 2,
   status: "已登记",
   invalid: false,
   favorite: false,
@@ -31,9 +32,11 @@ test("validates index snapshots and preserves revision semantics", () => {
   const snapshot = parseIndexSnapshot({ entries: [entry], revision: 4, recovery: null });
   assert.equal(snapshot.revision, 4);
   assert.equal(snapshot.entries[0].id, "file-1");
+  assert.equal(snapshot.entries[0].lastOpenedAt, 2);
   assert.deepEqual(snapshot.groups, []);
   assert.equal(snapshot.undo, null);
   assert.throws(() => parseIndexSnapshot({ entries: [entry], revision: -1, recovery: null }), IpcContractError);
+  assert.throws(() => parseIndexSnapshot({ entries: [{ ...entry, lastOpenedAt: -1 }], revision: 4, recovery: null }), IpcContractError);
 });
 
 test("validates versioned group metadata and partial batch results", () => {

@@ -392,6 +392,7 @@ pub async fn reposition_file(
             let added_at = entries[position].added_at;
             let preview_status = entries[position].preview_status.clone();
             let last_recorded_at = entries[position].last_recorded_at;
+            let last_opened_at = entries[position].last_opened_at;
             let tags = entries[position].tags.clone();
             let group_id = entries[position].group_id.clone();
             let mut replacement = replacement;
@@ -400,6 +401,7 @@ pub async fn reposition_file(
             replacement.added_at = added_at;
             replacement.preview_status = preview_status;
             replacement.last_recorded_at = last_recorded_at;
+            replacement.last_opened_at = last_opened_at;
             replacement.tags = tags;
             replacement.group_id = group_id;
             entries[position] = replacement;
@@ -440,6 +442,7 @@ pub async fn load_preview(
     options: Option<PreviewOptions>,
     index_state: State<'_, AppState>,
     state: State<'_, PreviewState>,
+    app: AppHandle,
 ) -> Result<PreviewResult, String> {
     let (path, _) = resolve_preview_target(&index_state, &target)?;
     let preview_state = state.inner().clone();
@@ -460,7 +463,14 @@ pub async fn load_preview(
     })
     .await;
     match join_result {
-        Ok(result) => Ok(result),
+        Ok(result) => {
+            if result.status == "ready" {
+                if let Some(file_id) = target.file_id.as_deref() {
+                    let _ = record_entry_opened(index_state.inner(), &app, file_id);
+                }
+            }
+            Ok(result)
+        }
         Err(_) => {
             state.cancel_task(&task_id);
             state.finish_task(&task_id, &cancellation);
@@ -710,4 +720,21 @@ pub(crate) fn emit_index_changed<R: Runtime>(
     let _ = app.emit_to("floating-ball", "index-changed", event.clone());
     let _ = app.emit_to("main", "index-changed", event);
     crate::windows::tray::refresh_menu(app);
+}
+
+pub(crate) fn record_entry_opened<R: Runtime>(
+    state: &AppState,
+    app: &AppHandle<R>,
+    file_id: &str,
+) -> Result<bool, StorageError> {
+    let repository = IndexRepository::new(state);
+    let outcome = repository.update_entries_with(|entries| {
+        let changed =
+            storage::set_last_opened(entries, file_id, storage::current_timestamp_millis())?;
+        Ok((changed, ()))
+    })?;
+    if outcome.changed {
+        emit_index_changed(app, outcome.revision, vec![file_id.to_string()], "opened");
+    }
+    Ok(outcome.changed)
 }
