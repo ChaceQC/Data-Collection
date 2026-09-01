@@ -2,6 +2,57 @@
 
 ## 2026-09-01
 
+### 阶段 C：预览错误恢复和连续浏览（0.3.19 代码候选）及安装包构建
+
+#### 已完成
+
+- 按 `PROJECT_PLAN.md` 完成阶段 C：预览失败页按状态提供重试、重新定位、系统默认程序打开、资源管理器定位和返回列表动作；缺少 DOC 转换器时显示本机 LibreOffice 依赖说明。
+- `PreviewPane` 增加重试、默认程序打开、定位、复制位置、收藏和相邻资料导航回调；重试使用新的 task ID，旧请求在效果清理时取消，旧 preview resource 在切换、关闭、失败和过期响应时释放。
+- 资料库将当前导航、搜索、筛选和排序后的完整可见列表快照交给预览；切换搜索、筛选、导航或目录时关闭旧预览，上一项/下一项不会跨列表上下文跳转；目录临时子项只保留受控预览和定位能力。
+- 图片、视频、DOCX、XLSX 和 PDF 的内部异步失败统一回到预览失败动作页；Markdown、图片缩放旋转、PDF 分页缩放、XLSX Sheet 切换和视频控制主流程保持不变。
+- 浏览器回退结果增加 `demoOnly` 标记和“浏览器演示限制”状态，不读取真实本地文件；已同步阶段 C 的计划勾选、根 README、原型 README 和进度入口。
+- 五个版本入口已统一为 `0.3.19`：`prototype/package.json`、`prototype/package-lock.json` 根包、`prototype/src-tauri/tauri.conf.json`、`prototype/src-tauri/Cargo.toml` 和 `prototype/src-tauri/Cargo.lock` 根包。
+- 已构建 Windows x64 NSIS 安装包，产物为 `prototype/src-tauri/target/release/bundle/nsis/本地资料工作台_0.3.19_x64-setup.exe`，大小 `8658797` bytes，SHA-256 为 `E5304B2643671E5FCEC89C8258027398A82DF95467D90E00576FEC89C9521A92`。
+
+#### 进行中
+
+- `0.3.19` 仍是未发布代码候选；安装包尚未在 Windows 11 上执行安装、首次启动、卸载、真实文件预览或外部操作验收。
+
+#### 阻塞与风险
+
+- 浏览器回退不能验证 Tauri IPC、Windows 默认文件关联、资源管理器定位、DOC 缺少 LibreOffice、文件移动后的真实恢复和 WebView2 编解码行为。
+- 安装包未签名，构建配置不内置 WebView2 Runtime；这些发布边界与阶段 C 本身无关但继续保留。
+
+#### 下一步
+
+- 用户安装 `0.3.19` 候选包，使用测试夹具在 Windows 11/Tauri/WebView2 下验收各预览成功/失败状态、重试、默认程序打开、资源管理器定位、DOC 转换器缺失和文件移动后的重新定位；收到具体回归后再修复或进入阶段 D。
+
+#### 涉及文件
+
+- `prototype/src/App.jsx`
+- `prototype/src/features/library/LibraryPanel.jsx`
+- `prototype/src/features/preview/PreviewPane.jsx`
+- `prototype/src/features/preview/UnsupportedPreviewer.jsx`
+- `prototype/src/features/preview/previewApi.js`
+- `prototype/src/features/preview/previewTypes.js`
+- `prototype/src/features/preview/ImagePreviewer.jsx`
+- `prototype/src/features/preview/VideoPreviewer.jsx`
+- `prototype/src/features/preview/OfficePreviewer.jsx`
+- `prototype/src/features/preview/SpreadsheetPreviewer.jsx`
+- `prototype/src/features/preview/PdfPreviewer.jsx`
+- `prototype/src/styles.css`
+- `prototype/tests/preview-registry.test.mjs`
+- `PROJECT_PLAN.md`、`README.md`、`prototype/README.md`
+
+#### 验证
+
+- `npm.cmd run test:preview`：11 项通过，覆盖预览注册表、失败动作集合、浏览器演示标记、相邻项边界、XLSX 正常/损坏夹具、Markdown 安全引用和 PDF canvas 模型。
+- `npm.cmd run test:contracts`：8 项通过；`npm.cmd run build`：通过并生成 `dist/client/index.html`、`dist/server/index.js` 和 `dist/.openai/hosting.json`。
+- Microsoft Edge 回退检查：1280px 预览对话框宽度 `1080px` 且头部控件不重叠；360px 下 `body.scrollWidth=360`、头部 `scrollWidth=clientWidth=360`，连续浏览和搜索上下文关闭行为通过；临时浏览器和 Vite 服务已清理。
+- 版本一致性检查通过，五个版本入口均为 `0.3.19`；`git diff --check` 通过。
+- `npm.cmd run tauri:build`：通过，前端生产构建、Rust release 编译、Windows x64 NSIS 打包和 loader 验证均通过；`WebView2Loader.dll` 为 `160320` bytes，SHA-256 为 `8427B1FC58EC707813E5C0A51EB5D69397BB333250A7B891BE4D3B123F1E0F1C`，与 release 主程序同目录。
+- 本次未执行安装器启动/卸载、Windows 11 原生手工验收、Tag、Release 或远程推送。
+
 ### 构建 0.3.18 Windows x64 NSIS 安装包
 
 #### 已完成

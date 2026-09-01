@@ -75,6 +75,7 @@ export function LibraryPanel({
   selectedId,
   selectedIds = [],
   onContextChange,
+  onVisibleEntriesChange,
   onSelectionChange,
   onToggleSelection,
   onSelectPage,
@@ -148,6 +149,10 @@ export function LibraryPanel({
   useEffect(() => {
     onContextChange?.(contextKey);
   }, [contextKey, onContextChange]);
+
+  useEffect(() => {
+    onVisibleEntriesChange?.(visibleFiles, contextKey);
+  }, [contextKey, onVisibleEntriesChange, visibleFiles]);
 
   useEffect(() => {
     if (!previousContextKeyRef.current) {

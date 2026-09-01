@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { normalizePreviewResourceUrl } from "./previewTypes";
+import { UnsupportedPreviewer } from "./UnsupportedPreviewer";
 
 function formatDuration(seconds) {
   if (!Number.isFinite(seconds) || seconds < 0) return "未知时长";
@@ -8,7 +9,7 @@ function formatDuration(seconds) {
   return `${String(minutes).padStart(2, "0")}:${String(totalSeconds % 60).padStart(2, "0")}`;
 }
 
-export function VideoPreviewer({ content, title = "视频" }) {
+export function VideoPreviewer({ content, title = "视频", onFailure, ...failureActions }) {
   const [status, setStatus] = useState("loading");
   const [metadata, setMetadata] = useState(null);
 
@@ -33,10 +34,14 @@ export function VideoPreviewer({ content, title = "视频" }) {
           setStatus("ready");
         }}
         onCanPlay={() => setStatus("ready")}
-        onError={() => setStatus("parse-error")}
+        onError={() => {
+          const reason = "当前 WebView2 无法播放此视频容器或编码。";
+          setStatus("parse-error");
+          onFailure?.("parse-error", reason);
+        }}
       />
       {status === "loading" && <div className="preview-loading-state">正在读取视频元数据...</div>}
-      {status === "parse-error" && <div className="preview-error-state">当前 WebView2 无法播放此视频容器或编码。</div>}
+      {status === "parse-error" && <UnsupportedPreviewer status="parse-error" reason="当前 WebView2 无法播放此视频容器或编码。" {...failureActions} />}
       {metadata && (
         <div className="preview-content-meta">
           <span>时长：{formatDuration(metadata.duration)}</span>

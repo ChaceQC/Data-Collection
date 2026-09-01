@@ -116,21 +116,34 @@ function App() {
   const [pageSize, setPageSize] = useState(DEFAULT_SETTINGS.pageSize);
   const [selectedIds, setSelectedIds] = useState([]);
   const [groupManagerOpen, setGroupManagerOpen] = useState(false);
+  const [previewEntries, setPreviewEntries] = useState([]);
+  const [previewRetryNonce, setPreviewRetryNonce] = useState(0);
   const showToast = useCallback((message) => setToast(message), []);
   const filesRef = useRef([]);
+  const previewEntriesRef = useRef([]);
   const libraryContextKeyRef = useRef("");
   const clearBatchSelection = useCallback(() => setSelectedIds([]), []);
-  const handleLibraryContextChange = useCallback((nextContextKey) => {
-    const previousContextKey = libraryContextKeyRef.current;
-    libraryContextKeyRef.current = nextContextKey;
-    setSelectedIds((current) => clearSelectionOnContextChange(previousContextKey, nextContextKey, current));
-  }, []);
   const navigation = useLibraryNavigation({
     filesRef,
     initialSelectedId: IS_TAURI_RUNTIME ? "" : "research-plan",
     showToast,
     clearSelection: clearBatchSelection,
   });
+  const handleLibraryContextChange = useCallback((nextContextKey) => {
+    const previousContextKey = libraryContextKeyRef.current;
+    libraryContextKeyRef.current = nextContextKey;
+    setSelectedIds((current) => clearSelectionOnContextChange(previousContextKey, nextContextKey, current));
+    if (previousContextKey && previousContextKey !== nextContextKey) {
+      previewEntriesRef.current = [];
+      setPreviewEntries([]);
+      setPreviewRetryNonce(0);
+      navigation.setPreviewEntryId(null);
+    }
+  }, [navigation.setPreviewEntryId]);
+  const handleVisibleEntriesChange = useCallback((entries) => {
+    previewEntriesRef.current = entries;
+    setPreviewEntries(entries);
+  }, []);
   const index = useIndexController({
     isTauriRuntime: IS_TAURI_RUNTIME,
     initialFiles: INITIAL_FILES,
@@ -190,6 +203,23 @@ function App() {
   const { activeNav, directoryLoading, directoryView, handleRowClick, handleRowKeyDown, openBreadcrumb, previewEntryId, searchQuery, selectNav, selectedId, setSearchQuery } = navigation;
   const { batchBusy, busyFileId, choosePaths, closePendingAction, confirmBatchRemove, confirmDelete, confirmRemove, confirmRename, createGroup, deleteGroup, dragActive, fileInputRef, folderInputRef, groupBusy, handleBatchFavorite, handleBatchGroup, handleBatchTags, handleCancelBatch, handleCopy, handleCopyLocation, handleDragLeave, handleDragOver, handleDrop, handleFavorite, handleOpenDefault, handleReveal, handleRetryBatch, handleUndo, openRepositionPicker, pendingAction, repositionInputRef, repositionInvalidPath, renameName, renameGroup, renameValidation, requestBatchRemove, requestDelete, requestRemove, requestRename, retryBatch, setRenameName } = actions;
   const { floatingWindowError, floatingWindowRetrying, handleWindowAction, retryFloatingBall } = windowController;
+
+  const handlePreviewNavigate = useCallback((nextEntry) => {
+    if (!nextEntry?.id || !previewEntriesRef.current.some((entry) => entry.id === nextEntry.id)) return;
+    navigation.setSelectedId(nextEntry.id);
+    setPreviewRetryNonce(0);
+    navigation.setPreviewEntryId(nextEntry.id);
+  }, [navigation.setPreviewEntryId, navigation.setSelectedId]);
+  const handlePreviewRetry = useCallback(() => {
+    setPreviewRetryNonce((current) => current + 1);
+    showToast("正在重试预览");
+  }, [showToast]);
+  const handlePreviewClose = useCallback(() => {
+    setPreviewRetryNonce(0);
+    navigation.setPreviewEntryId(null);
+  }, [navigation.setPreviewEntryId]);
+  const handlePreviewReveal = useCallback((entry, currentDirectoryView) => handleReveal(entry, currentDirectoryView), [handleReveal]);
+  const handlePreviewCopyLocation = useCallback((entry, currentDirectoryView) => handleCopyLocation(entry, currentDirectoryView), [handleCopyLocation]);
 
   useEffect(() => {
     setSelectedIds((current) => retainExistingSelection(current, files));
@@ -319,6 +349,7 @@ function App() {
           selectedId={selectedId}
           selectedIds={selectedIds}
           onContextChange={handleLibraryContextChange}
+          onVisibleEntriesChange={handleVisibleEntriesChange}
           onSelectionChange={navigation.setSelectedId}
           onToggleSelection={toggleSelection}
           onSelectPage={selectPage}
@@ -359,9 +390,24 @@ function App() {
       </main>
 
       {previewEntryId && (() => {
-        const currentEntries = directoryView?.entries || files;
+        const currentEntries = previewEntries.length ? previewEntries : (directoryView?.entries || files);
         const previewEntry = currentEntries.find((file) => file.id === previewEntryId);
-        return previewEntry ? <PreviewPane entry={previewEntry} onClose={() => navigation.setPreviewEntryId(null)} /> : null;
+        return previewEntry ? (
+          <PreviewPane
+            entry={previewEntry}
+            navigationEntries={currentEntries}
+            directoryView={directoryView}
+            onClose={handlePreviewClose}
+            onRetry={handlePreviewRetry}
+            onReposition={openRepositionPicker}
+            onOpenDefault={handleOpenDefault}
+            onReveal={handlePreviewReveal}
+            onCopyLocation={handlePreviewCopyLocation}
+            onFavorite={handleFavorite}
+            onNavigate={handlePreviewNavigate}
+            retryNonce={previewRetryNonce}
+          />
+        ) : null;
       })()}
 
       {settingsOpen && <SettingsPanel settings={settings} saving={settingsSaving} onCancel={() => setSettingsOpen(false)} onSave={handleSettingsSave} />}

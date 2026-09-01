@@ -15,6 +15,7 @@ function browserPreviewState(entry) {
     supported: false,
     kind: entry?.kind || "other",
     status: "unsupported",
+    demoOnly: true,
     reason: "浏览器预览模式不会读取本地文件，请在桌面应用中打开资料。",
   };
 }
@@ -38,6 +39,7 @@ export async function loadPreview(entry, options = {}) {
       previewId: "",
       kind: entry?.kind || "other",
       status: "unsupported",
+      demoOnly: true,
       content: null,
       byteLength: 0,
       reason: browserPreviewState(entry).reason,

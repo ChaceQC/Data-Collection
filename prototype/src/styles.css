@@ -1957,6 +1957,43 @@ input:focus-visible,
   margin-top: 3px;
 }
 
+.preview-dialog-navigation,
+.preview-dialog-actions {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 2px;
+}
+
+.preview-header-action {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  flex: 0 0 32px;
+  place-items: center;
+  padding: 0;
+  color: #6d7b81;
+  border-radius: 5px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.preview-header-action:hover:not(:disabled),
+.preview-header-action:focus-visible {
+  color: var(--blue);
+  background: #f0f6fb;
+}
+
+.preview-header-action.is-favorite {
+  color: #d59718;
+}
+
+.preview-header-action:disabled {
+  color: #bdc6c9;
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
 .preview-dialog-status {
   flex: 0 0 auto;
   color: var(--green);
@@ -2017,6 +2054,58 @@ input:focus-visible,
 
 .preview-status-state svg {
   color: var(--orange);
+}
+
+.preview-status-state > small {
+  max-width: 560px;
+  color: #718087;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.preview-status-actions {
+  display: flex;
+  max-width: min(680px, 100%);
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.preview-status-action {
+  display: inline-flex;
+  min-height: 36px;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  max-width: 100%;
+  padding: 0 13px;
+  color: #1b568b;
+  font-size: 13px;
+  font-weight: 600;
+  border: 1px solid #b9d1e3;
+  border-radius: 5px;
+  background: #f2f7fc;
+  cursor: pointer;
+}
+
+.preview-status-action:hover,
+.preview-status-action:focus-visible {
+  border-color: var(--blue);
+  background: #e7f1f9;
+}
+
+.preview-status-action.is-secondary {
+  color: #5e6c72;
+  border-color: #d5dfe2;
+  background: #ffffff;
+}
+
+.preview-status-action.is-secondary:hover,
+.preview-status-action.is-secondary:focus-visible {
+  color: #344249;
+  border-color: #aebdc2;
+  background: #f5f8f9;
 }
 
 .preview-text-content,
@@ -3066,11 +3155,35 @@ input:focus-visible,
 
   .preview-dialog-header {
     min-height: 64px;
+    gap: 5px;
     padding-inline: 16px;
+  }
+
+  .preview-dialog-heading h2 {
+    font-size: 16px;
+  }
+
+  .preview-dialog-navigation,
+  .preview-dialog-actions {
+    gap: 0;
+  }
+
+  .preview-header-action {
+    width: 30px;
+    height: 30px;
+    flex-basis: 30px;
   }
 
   .preview-dialog-status {
     display: none;
+  }
+
+  .preview-status-actions {
+    width: min(100%, 340px);
+  }
+
+  .preview-status-action {
+    flex: 1 1 140px;
   }
 
   .preview-text-content,
@@ -3241,6 +3354,37 @@ input:focus-visible,
 
   .preview-dialog-body {
     background: #11191c;
+  }
+
+  .preview-header-action {
+    color: var(--muted);
+  }
+
+  .preview-header-action:hover:not(:disabled),
+  .preview-header-action:focus-visible {
+    color: var(--blue);
+    background: var(--surface-subtle);
+  }
+
+  .preview-status-state > small {
+    color: var(--muted);
+  }
+
+  .preview-status-action {
+    color: var(--blue);
+    border-color: var(--line-strong);
+    background: var(--surface-subtle);
+  }
+
+  .preview-status-action:hover,
+  .preview-status-action:focus-visible {
+    background: var(--surface-hover);
+  }
+
+  .preview-status-action.is-secondary {
+    color: var(--muted);
+    border-color: var(--line);
+    background: var(--surface-control);
   }
 
   .preview-markdown-body pre,
