@@ -129,6 +129,11 @@ export function getNavigationCount(entries, activeNav) {
   return entries.filter((entry) => matchesNavigation(entry, activeNav)).length;
 }
 
+export function countEntriesInGroup(entries, groupId) {
+  if (!groupId) return 0;
+  return (entries || []).filter((entry) => entry?.groupId === groupId).length;
+}
+
 export function filterEntries(
   entries,
   {

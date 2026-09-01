@@ -6,6 +6,7 @@ import {
   makeDirectoryTarget,
   parseBatchMutationResult,
   parseIndexChangedEvent,
+  parseMutationResult,
   parseIndexSnapshot,
   parsePreviewResult,
 } from "../src/lib/ipcContracts.js";
@@ -66,4 +67,15 @@ test("validates preview status and maps structured operation errors", () => {
   assert.equal(parsePreviewResult({ previewId: "", kind: "text", status: "unsupported", content: null, byteLength: 0 }).status, "unsupported");
   assert.throws(() => parsePreviewResult({ previewId: "", kind: "text", status: "broken", content: null, byteLength: 0 }), IpcContractError);
   assert.equal(getOperationError({ code: "partial-success", message: "internal" }, "fallback"), "文件操作已部分完成，请刷新索引确认状态");
+});
+
+test("validates single-entry mutation responses used by tag and group editors", () => {
+  const result = parseMutationResult({
+    revision: 7,
+    changedIds: ["file-1"],
+    entry: { ...entry, tags: ["重点"], groupId: "group-a" },
+  }, "set_entry_tags");
+  assert.equal(result.entry.tags[0], "重点");
+  assert.equal(result.entry.groupId, "group-a");
+  assert.throws(() => parseMutationResult({ revision: 7, changedIds: ["C:\\secret"], entry: null }, "set_entry_group"), IpcContractError);
 });

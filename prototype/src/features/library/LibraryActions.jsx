@@ -10,7 +10,7 @@ import {
   X,
 } from "@phosphor-icons/react";
 import { Dialog } from "../../components/Dialog.jsx";
-import { formatFileSize, getEntryLocation } from "./libraryModel";
+import { countEntriesInGroup, formatFileSize, getEntryLocation } from "./libraryModel";
 
 export function LibraryActionDialog({
   title,
@@ -186,10 +186,11 @@ export function BulkLibraryToolbar({
   );
 }
 
-export function GroupManagerDialog({ groups, busy, onClose, onCreate, onRename, onDelete }) {
+export function GroupManagerDialog({ groups, files = [], busy, onClose, onCreate, onRename, onDelete }) {
   const [newName, setNewName] = useState("");
   const [editingId, setEditingId] = useState("");
   const [editingName, setEditingName] = useState("");
+  const [deleteTarget, setDeleteTarget] = useState(null);
 
   async function create() {
     if (await onCreate(newName)) setNewName("");
@@ -205,6 +206,34 @@ export function GroupManagerDialog({ groups, busy, onClose, onCreate, onRename, 
   function startRename(group) {
     setEditingId(group.id);
     setEditingName(group.name);
+  }
+
+  async function confirmDelete() {
+    if (!deleteTarget || busy) return;
+    if (await onDelete(deleteTarget.id)) setDeleteTarget(null);
+  }
+
+  if (deleteTarget) {
+    const affectedCount = countEntriesInGroup(files, deleteTarget.id);
+    return (
+      <Dialog
+        title="确认删除分组"
+        description={`删除“${deleteTarget.name}”只会解除资料的分组归属，不会删除资料记录或原文件。`}
+        busy={busy}
+        onClose={() => setDeleteTarget(null)}
+        footer={(
+          <>
+            <button type="button" className="dialog-button dialog-button-secondary" disabled={busy} onClick={() => setDeleteTarget(null)}>取消</button>
+            <button type="button" className="dialog-button dialog-button-danger" disabled={busy} onClick={() => void confirmDelete()}>{busy ? "处理中..." : "删除分组"}</button>
+          </>
+        )}
+      >
+        <div className="group-delete-confirmation">
+          <strong>{deleteTarget.name}</strong>
+          <p>当前有 {affectedCount} 项资料属于此分组。删除后这些资料仍保留在资料库和原位置。</p>
+        </div>
+      </Dialog>
+    );
   }
 
   return (
@@ -235,7 +264,7 @@ export function GroupManagerDialog({ groups, busy, onClose, onCreate, onRename, 
                   <>
                     <span className="group-name">{group.name}</span>
                     <button type="button" className="icon-button" aria-label={`重命名分组 ${group.name}`} title="重命名" disabled={busy} onClick={() => startRename(group)}><PencilSimpleLine size={17} weight="regular" aria-hidden="true" /></button>
-                    <button type="button" className="icon-button group-delete-button" aria-label={`删除分组 ${group.name}，只解除归属`} title="删除分组（只解除归属）" disabled={busy} onClick={() => void onDelete(group.id)}><TrashSimple size={17} weight="regular" aria-hidden="true" /></button>
+                    <button type="button" className="icon-button group-delete-button" aria-label={`删除分组 ${group.name}，只解除归属`} title="删除分组（只解除归属）" disabled={busy} onClick={() => setDeleteTarget(group)}><TrashSimple size={17} weight="regular" aria-hidden="true" /></button>
                   </>
                 )}
               </li>

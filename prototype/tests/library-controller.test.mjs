@@ -1,7 +1,17 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { FILE_TYPE_DEFINITIONS, PREVIEW_LIMITS } from "../src/lib/fileTypes.js";
-import { createBrowserEntries, summarizeBatchResult, validateRename, validateTagInput } from "../src/features/library/libraryControllerModel.js";
+import {
+  addTagToList,
+  createBrowserEntries,
+  isMainIndexEntry,
+  MAX_TAGS_PER_ENTRY,
+  normalizeTagList,
+  removeTagFromList,
+  summarizeBatchResult,
+  validateRename,
+  validateTagInput,
+} from "../src/features/library/libraryControllerModel.js";
 
 test("the shared manifest drives preview types and limits", () => {
   assert.equal(FILE_TYPE_DEFINITIONS.find((item) => item.extension === "xlsx").kind, "xlsx");
@@ -26,6 +36,18 @@ test("summarizes partial batch results and validates tag input", () => {
   assert.equal(validateTagInput("  重点  ").value, "重点");
   assert.equal(validateTagInput("").valid, false);
   assert.equal(validateTagInput("x".repeat(33)).valid, false);
+});
+
+test("edits tag drafts with normalization, case-insensitive deduplication, and limits", () => {
+  assert.deepEqual(normalizeTagList(["  重点  ", "重点", "工作"]), ["重点", "工作"]);
+  assert.deepEqual(removeTagFromList(["重点", "工作"], "重点"), ["工作"]);
+  assert.deepEqual(addTagToList(["重点"], "重点"), { valid: false, tags: ["重点"], message: "该标签已经存在" });
+  assert.equal(addTagToList(Array.from({ length: MAX_TAGS_PER_ENTRY }, (_, index) => String(index)), "新标签").valid, false);
+});
+
+test("keeps directory children outside the main index mutation entry points", () => {
+  assert.equal(isMainIndexEntry({ id: "file-1" }), true);
+  assert.equal(isMainIndexEntry({ id: "child-1", directoryId: "folder-1", relativePath: ["子目录", "文件.txt"] }), false);
 });
 
 test("rename validation reports each Windows and index conflict reason", () => {

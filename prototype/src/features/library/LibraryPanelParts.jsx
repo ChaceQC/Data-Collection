@@ -97,12 +97,14 @@ export function EntryLocation({ entry, directoryView, onCopy, onReveal }) {
   );
 }
 
-export function EntryMetadata({ entry }) {
+export function EntryMetadata({ entry, onTagClick }) {
   const tags = Array.isArray(entry.tags) ? entry.tags : [];
   if (!tags.length) return null;
   return (
     <div className="file-entry-metadata">
-      {tags.slice(0, 4).map((tag) => <span className="file-tag-chip" key={tag}>{tag}</span>)}
+      {tags.slice(0, 4).map((tag) => onTagClick ? (
+        <button type="button" className="file-tag-chip" key={tag} title={`按标签“${tag}”筛选`} onClick={(event) => { event.stopPropagation(); onTagClick(tag); }}>{tag}</button>
+      ) : <span className="file-tag-chip" key={tag}>{tag}</span>)}
       {tags.length > 4 && <span className="file-tag-overflow">+{tags.length - 4}</span>}
     </div>
   );

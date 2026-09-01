@@ -112,6 +112,11 @@ export function LibraryPanel({
   onDelete,
   onOpenDefault,
   onReveal,
+  onDetails,
+  onEditTags,
+  onSetGroup,
+  tagFilterRequest,
+  onTagFilter,
 }) {
   const [currentPage, setCurrentPage] = useState(1);
   const [filters, setFilters] = useState({ type: "", tags: [], groupIds: [] });
@@ -155,6 +160,20 @@ export function LibraryPanel({
   }, [contextKey, onVisibleEntriesChange, visibleFiles]);
 
   useEffect(() => {
+    const tag = tagFilterRequest?.tag;
+    if (!tag) return;
+    setFilters((current) => current.tags.includes(tag) ? current : { ...current, tags: [...current.tags, tag] });
+  }, [tagFilterRequest]);
+
+  useEffect(() => {
+    const groupIds = new Set(groups.map((group) => group.id));
+    setFilters((current) => {
+      const retained = current.groupIds.filter((groupId) => groupIds.has(groupId));
+      return retained.length === current.groupIds.length ? current : { ...current, groupIds: retained };
+    });
+  }, [groups]);
+
+  useEffect(() => {
     if (!previousContextKeyRef.current) {
       previousContextKeyRef.current = contextKey;
       return;
@@ -187,9 +206,11 @@ export function LibraryPanel({
   }, [allPageSelected, somePageSelected]);
 
   function clearFilter(key, value) {
-    setFilters((current) => key === "type"
-      ? { ...current, type: "" }
-      : { ...current, [key]: current[key].filter((item) => item !== value) });
+    setFilters((current) => {
+      if (key === "type") return { ...current, type: "" };
+      const filterKey = key.startsWith("tag:") ? "tags" : "groupIds";
+      return { ...current, [filterKey]: current[filterKey].filter((item) => item !== value) };
+    });
   }
 
   const heading = directoryView ? (
@@ -263,7 +284,7 @@ export function LibraryPanel({
                           <span className="file-name" title={file.name}>{file.name}</span>
                           {duplicateIds.has(file.id) && <span className="file-parent-summary" title={getParentSummary(file, directoryView)}>位于 {getParentSummary(file, directoryView)}</span>}
                           <EntryLocation entry={file} directoryView={directoryView} onCopy={onCopyLocation} onReveal={onReveal} />
-                          <EntryMetadata entry={file} />
+                           <EntryMetadata entry={file} onTagClick={onTagFilter} />
                         </div>
                       </div>
                     </th>
@@ -274,7 +295,7 @@ export function LibraryPanel({
                       {file.invalid ? <button type="button" className="reposition-button reposition-button-invalid" onClick={(event) => { event.stopPropagation(); onReposition(file); }}>{file.status} · 重新定位</button> : <span>{file.status}</span>}
                     </div></td>
                     <td className="file-modified" data-label="修改时间">{getModifiedLabel(file)}</td>
-                    <td className="file-actions-cell" data-label="操作"><LibraryRowActions file={file} persistent={!directoryView} contextKey={contextKey} busy={busyFileId === file.id} onFavorite={onFavorite} onRemove={onRemove} onCopy={onCopy} onRename={onRename} onDelete={onDelete} onOpenDefault={onOpenDefault} onReveal={onReveal} /></td>
+                    <td className="file-actions-cell" data-label="操作"><LibraryRowActions file={file} persistent={!directoryView} contextKey={contextKey} busy={busyFileId === file.id} onFavorite={onFavorite} onRemove={onRemove} onCopy={onCopy} onRename={onRename} onDelete={onDelete} onOpenDefault={onOpenDefault} onReveal={onReveal} onDetails={onDetails} onEditTags={onEditTags} onSetGroup={onSetGroup} /></td>
                   </tr>
                 ))}
               </tbody>

@@ -5,8 +5,11 @@ import {
   Copy,
   DotsThree,
   FolderOpen,
+  FolderSimple,
+  Info,
   PencilSimple,
   Star,
+  Tag,
   TrashSimple,
 } from "@phosphor-icons/react";
 import {
@@ -27,6 +30,9 @@ export function LibraryRowActions({
   onDelete,
   onOpenDefault,
   onReveal,
+  onDetails,
+  onEditTags,
+  onSetGroup,
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuPosition, setMenuPosition] = useState(null);
@@ -186,7 +192,12 @@ export function LibraryRowActions({
           onClick={(event) => event.stopPropagation()}
           onKeyDown={handleMenuKeyDown}
         >
-          <div role="group" aria-label="常用操作">
+          <div role="group" aria-label="资料信息">
+            <MenuAction icon={Info} label="查看资料详情" onClick={() => run(onDetails)} />
+            <MenuAction icon={Tag} label="编辑标签" onClick={() => run(onEditTags)} />
+            <MenuAction icon={FolderSimple} label="设置分组" onClick={() => run(onSetGroup)} />
+          </div>
+          <div className="row-action-menu-common" role="group" aria-label="常用操作">
             {!isInvalid && !isFolder && (
               <MenuAction icon={ArrowSquareOut} label="用默认程序打开" onClick={() => run(onOpenDefault)} />
             )}

@@ -2,6 +2,62 @@
 
 ## 2026-09-01
 
+### 阶段 D：单条标签、分组和详情面板（0.3.20 代码候选）
+
+#### 已完成
+
+- 行操作菜单已为主索引资料增加“查看资料详情”“编辑标签”和“设置分组”；目录浏览的临时子项仍不渲染这些入口，不能绕过目录授权。
+- 新增标签编辑对话框，展示现有标签，支持添加、删除、去重和空值/长度/数量提示；保存复用 `setEntryTags` 与既有 IPC 错误映射，桌面端返回的 `entry` 先更新当前行，再按 `revision` 同步索引。
+- 新增分组编辑对话框，支持“未分组”和已有分组；保存复用 `setEntryGroup`，当前行和索引 revision 同步更新。分组变化后无效的筛选 ID 会自动清除，避免列表、筛选 chip 和批量状态不一致。
+- 新增资料详情对话框，显示名称、类型、大小、修改时间、来源位置、收藏、标签、分组和状态，并提供收藏、预览、复制位置、定位、默认程序打开、编辑标签和设置分组入口；标签 chip 可直接进入标签筛选。
+- 管理分组中的删除操作改为先展示受影响资料数量并确认，明确只解除分组归属，不删除索引记录和原文件；取消不会触发 command。
+- 索引格式保持 v4，没有新增持久化字段或迁移方案。
+- 五个版本入口已统一为 `0.3.20`：`prototype/package.json`、`prototype/package-lock.json` 根包、`prototype/src-tauri/tauri.conf.json`、`prototype/src-tauri/Cargo.toml` 和 `prototype/src-tauri/Cargo.lock` 根包。
+
+#### 进行中
+
+- `0.3.20` Windows x64 NSIS 安装包已构建；Windows 11 安装、首次启动、重启后的标签持久化、真实分组操作和卸载仍需用户手工验收。
+
+#### 阻塞与风险
+
+- 浏览器回退只验证演示数据、列表状态、对话框布局和前端筛选，不验证 Tauri IPC、本地索引写入、Windows 文件关联、资源管理器定位或真实文件副作用。
+- 安装包不签名且不内置 WebView2 Runtime；DOC 预览仍依赖目标机 LibreOffice。这些是既有发布边界，不是阶段 D 新增依赖。
+
+#### 下一步
+
+- 由用户安装 `0.3.20` 候选，验收单条标签持久化、分组编辑/删除确认、详情快捷操作和窄窗口行为；收到具体回归后再进入阶段 E。
+
+#### 涉及文件
+
+- `prototype/src/App.jsx`
+- `prototype/src/features/library/LibraryActions.jsx`
+- `prototype/src/features/library/LibraryEntryDialogs.jsx`
+- `prototype/src/features/library/LibraryPanel.jsx`
+- `prototype/src/features/library/LibraryPanelParts.jsx`
+- `prototype/src/features/library/LibraryRowActionMenu.jsx`
+- `prototype/src/features/library/libraryControllerModel.js`
+- `prototype/src/features/library/libraryModel.js`
+- `prototype/src/features/library/libraryOverlayModel.js`
+- `prototype/src/features/library/useLibraryActions.js`
+- `prototype/src/styles.css`
+- `prototype/tests/library-controller.test.mjs`
+- `prototype/tests/library-model.test.mjs`
+- `prototype/tests/ipc-contracts.test.mjs`
+- `PROJECT_PLAN.md`、`README.md`、`prototype/README.md`
+
+#### 验证
+
+- `npm.cmd run test:library`：14 项通过。
+- `npm.cmd run test:contracts`：11 项通过；`npm.cmd run test:settings`：4 项通过。
+- `npm.cmd run build`：通过，生成 `dist/client/index.html`、`dist/server/index.js` 和 `dist/.openai/hosting.json`。
+- Microsoft Edge 回退检查：1280px 下行菜单显示详情/标签/分组入口；标签编辑添加标签后列表立即显示新 chip，详情标签点击会生成筛选 chip；360px 下详情对话框可滚动，操作按钮和表格没有互相覆盖。
+- 修复标签筛选 chip 清除时错误访问 `filters["tag:..."]` 的问题；修复后浏览器控制台新增错误为 0、警告为 0。
+- `npm.cmd run tauri:build`：通过，生成 Windows x64 NSIS 安装包 `prototype/src-tauri/target/release/bundle/nsis/本地资料工作台_0.3.20_x64-setup.exe`，大小 `8663311` bytes，SHA-256 为 `DEC740706A5A68D77E40422A53D3D3788E290E26B955E3B4EFE0C42034DBDBB2`。
+- `verify-webview2-loader.mjs`：通过；`WebView2Loader.dll` 大小 `160320` bytes，SHA-256 为 `8427B1FC58EC707813E5C0A51EB5D69397BB333250A7B891BE4D3B123F1E0F1C`，与 release 主程序同目录。
+- 尚未执行安装器启动/卸载和 Windows 11 原生手工验收。
+
+## 2026-09-01
+
 ### 阶段 C：预览错误恢复和连续浏览（0.3.19 代码候选）及安装包构建
 
 #### 已完成

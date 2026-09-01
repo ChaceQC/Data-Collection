@@ -6,6 +6,8 @@ export const LIBRARY_ACTION_TYPES = Object.freeze({
   delete: "delete",
 });
 
+export const MAX_TAGS_PER_ENTRY = 32;
+
 export function createBrowserEntries(fileList, now = Date.now()) {
   const timestamp = Math.floor(now / 1000);
   return Array.from(fileList || {}).slice(0, 8).map((file, index) => {
@@ -46,6 +48,41 @@ export function summarizeBatchResult(result) {
 
 export function normalizeTagInput(value) {
   return String(value ?? "").trim().replace(/\s+/g, " ");
+}
+
+export function normalizeTagList(tags) {
+  const normalized = [];
+  const seen = new Set();
+  for (const tag of Array.isArray(tags) ? tags : []) {
+    const value = normalizeTagInput(tag);
+    const key = value.toLocaleLowerCase("zh-CN");
+    if (!value || seen.has(key)) continue;
+    seen.add(key);
+    normalized.push(value);
+  }
+  return normalized;
+}
+
+export function addTagToList(tags, value) {
+  const current = normalizeTagList(tags);
+  const validation = validateTagInput(value);
+  if (!validation.valid) return { valid: false, tags: current, message: validation.message };
+  if (current.some((tag) => tag.toLocaleLowerCase("zh-CN") === validation.value.toLocaleLowerCase("zh-CN"))) {
+    return { valid: false, tags: current, message: "该标签已经存在" };
+  }
+  if (current.length >= MAX_TAGS_PER_ENTRY) {
+    return { valid: false, tags: current, message: `每条资料最多 ${MAX_TAGS_PER_ENTRY} 个标签` };
+  }
+  return { valid: true, tags: [...current, validation.value], message: "" };
+}
+
+export function removeTagFromList(tags, tag) {
+  const target = normalizeTagInput(tag).toLocaleLowerCase("zh-CN");
+  return normalizeTagList(tags).filter((current) => current.toLocaleLowerCase("zh-CN") !== target);
+}
+
+export function isMainIndexEntry(entry) {
+  return Boolean(entry?.id) && !entry?.directoryId && !Array.isArray(entry?.relativePath);
 }
 
 export function validateTagInput(value) {

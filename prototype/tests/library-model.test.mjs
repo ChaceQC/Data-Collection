@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   filterEntries,
   clearSelectionOnContextChange,
+  countEntriesInGroup,
   getFileKind,
   getDuplicateNameIds,
   getEntryLocation,
@@ -70,6 +71,8 @@ test("combines type, tag, and multi-group filters without reading content", () =
   const groups = [{ id: "group-a", name: "项目 A" }, { id: "group-b", name: "项目 B" }];
   assert.deepEqual(filterEntries(grouped, { types: ["文本文件"], tags: ["工作"], groupIds: ["group-a", "group-b"], groups }).map((entry) => entry.id), ["a"]);
   assert.deepEqual(filterEntries(grouped, { query: "项目 B" , groups }).map((entry) => entry.id), ["b"]);
+  assert.equal(countEntriesInGroup(grouped, "group-a"), 1);
+  assert.equal(countEntriesInGroup(grouped, "missing"), 0);
 });
 
 test("navigation filters and counts use current entry state", () => {
