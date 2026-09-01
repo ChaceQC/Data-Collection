@@ -2,13 +2,17 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   filterEntries,
+  clearSelectionOnContextChange,
   getFileKind,
   getDuplicateNameIds,
   getEntryLocation,
+  getLibraryContextKey,
   getParentSummary,
   getRecentEntries,
   getNavigationCount,
+  getSelectedIdsInEntries,
   paginateEntries,
+  retainExistingSelection,
   sortEntries,
 } from "../src/features/library/libraryModel.js";
 
@@ -109,4 +113,26 @@ test("classifies the planned file extensions", () => {
   assert.equal(getFileKind("代码样本.cpp"), "text");
   assert.equal(getFileKind("照片.WEBP"), "image");
   assert.equal(getFileKind("未知.bin"), "other");
+});
+
+test("list context keys are stable and include navigation, filters, and breadcrumbs", () => {
+  const base = {
+    activeNav: "library",
+    searchQuery: "  研究  计划 ",
+    filters: { type: "Markdown", tags: ["重点", "研究"], groupIds: ["group-b", "group-a"] },
+    directoryView: { trail: [{ id: "root", relativePath: [] }, { id: "child", relativePath: ["项目"] }] },
+  };
+  assert.equal(
+    getLibraryContextKey(base),
+    getLibraryContextKey({ ...base, filters: { ...base.filters, tags: ["研究", "重点"], groupIds: ["group-a", "group-b"] } }),
+  );
+  assert.notEqual(getLibraryContextKey(base), getLibraryContextKey({ ...base, activeNav: "favorites" }));
+  assert.notEqual(getLibraryContextKey(base), getLibraryContextKey({ ...base, directoryView: { trail: [{ id: "root", relativePath: [] }] } }));
+});
+
+test("selection is cleared only when the list context changes and refresh keeps existing ids", () => {
+  assert.deepEqual(clearSelectionOnContextChange("same", "same", ["a", "a", "b"]), ["a", "b"]);
+  assert.deepEqual(clearSelectionOnContextChange("library", "favorites", ["a", "b"]), []);
+  assert.deepEqual(retainExistingSelection(["a", "missing", "a"], [{ id: "a" }, { id: "b" }]), ["a"]);
+  assert.deepEqual(getSelectedIdsInEntries(["a", "missing"], [{ id: "a" }, { id: "b" }]), ["a"]);
 });

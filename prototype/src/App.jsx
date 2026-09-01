@@ -16,11 +16,16 @@ import { SettingsPanel } from "./features/settings/SettingsPanel";
 import { DEFAULT_SETTINGS } from "./features/settings/settingsModel";
 import { useSettingsController } from "./features/settings/useSettingsController";
 import { useWindowController } from "./features/window/useWindowController";
-import { getNavigationCount } from "./features/library/libraryModel";
+import {
+  clearSelectionOnContextChange,
+  getNavigationCount,
+  retainExistingSelection,
+} from "./features/library/libraryModel";
 import {
   ArrowClockwise,
   CheckCircle,
   Clock,
+  DotsThree,
   FolderOpen,
   FolderSimple,
   GearSix,
@@ -113,10 +118,18 @@ function App() {
   const [groupManagerOpen, setGroupManagerOpen] = useState(false);
   const showToast = useCallback((message) => setToast(message), []);
   const filesRef = useRef([]);
+  const libraryContextKeyRef = useRef("");
+  const clearBatchSelection = useCallback(() => setSelectedIds([]), []);
+  const handleLibraryContextChange = useCallback((nextContextKey) => {
+    const previousContextKey = libraryContextKeyRef.current;
+    libraryContextKeyRef.current = nextContextKey;
+    setSelectedIds((current) => clearSelectionOnContextChange(previousContextKey, nextContextKey, current));
+  }, []);
   const navigation = useLibraryNavigation({
     filesRef,
     initialSelectedId: IS_TAURI_RUNTIME ? "" : "research-plan",
     showToast,
+    clearSelection: clearBatchSelection,
   });
   const index = useIndexController({
     isTauriRuntime: IS_TAURI_RUNTIME,
@@ -179,7 +192,7 @@ function App() {
   const { floatingWindowError, floatingWindowRetrying, handleWindowAction, retryFloatingBall } = windowController;
 
   useEffect(() => {
-    setSelectedIds((current) => current.filter((id) => files.some((file) => file.id === id)));
+    setSelectedIds((current) => retainExistingSelection(current, files));
   }, [files]);
 
   const toggleSelection = useCallback((fileId) => {
@@ -234,6 +247,10 @@ function App() {
               <span>设置</span>
             </button>
           </nav>
+          <button type="button" className="nav-item mobile-more-nav" aria-busy={settingsLoading} onClick={() => settingsLoading ? showToast("正在读取设置，请稍候") : setSettingsOpen(true)}>
+            <DotsThree size={23} weight="bold" aria-hidden="true" />
+            <span>更多</span>
+          </button>
         </div>
         <div className="sidebar-bottom">
           <button type="button" className="nav-item" onClick={() => void choosePaths("folder")}>
@@ -277,9 +294,9 @@ function App() {
           </div>
         )}
 
-        <section className={`drop-zone ${dragActive ? "is-dragging" : ""}`} data-tauri-drag-region="false" data-testid="drop-zone" onDrop={handleDrop} onDragOver={handleDragOver} onDragLeave={handleDragLeave}>
+        <section className={`drop-zone ${files.length ? "has-library-files" : ""} ${dragActive ? "is-dragging" : ""}`} data-tauri-drag-region="false" data-testid="drop-zone" onDrop={handleDrop} onDragOver={handleDragOver} onDragLeave={handleDragLeave}>
           <div className="drop-zone-icon" aria-hidden="true"><FolderOpen size={42} weight="regular" /></div>
-          <h2>{indexing ? "正在建立本地索引..." : dragActive ? "松开鼠标即可登记资料" : "将文件或文件夹拖到这里"}</h2>
+          <h2>{indexing ? "正在建立本地索引..." : dragActive ? "松开鼠标即可登记资料" : files.length ? "继续添加资料或拖放到这里" : "将文件或文件夹拖到这里"}</h2>
           <div className="drop-actions">
             <button type="button" className="button button-primary" data-testid="import-folder" onClick={() => void choosePaths("folder")} disabled={indexing}>
               <FolderOpen size={19} weight="regular" aria-hidden="true" /><span>导入文件夹</span>
@@ -301,6 +318,7 @@ function App() {
           pageSize={pageSize}
           selectedId={selectedId}
           selectedIds={selectedIds}
+          onContextChange={handleLibraryContextChange}
           onSelectionChange={navigation.setSelectedId}
           onToggleSelection={toggleSelection}
           onSelectPage={selectPage}
@@ -321,7 +339,7 @@ function App() {
           onUndo={handleUndo}
           onRetryBatch={handleRetryBatch}
           onCancelBatch={handleCancelBatch}
-          onClearSelection={() => setSelectedIds([])}
+          onClearSelection={clearBatchSelection}
           onManageGroups={() => setGroupManagerOpen(true)}
           onCopyLocation={handleCopyLocation}
           onImport={() => void choosePaths("file")}

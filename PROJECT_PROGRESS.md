@@ -2,6 +2,74 @@
 
 ## 2026-09-01
 
+### 阶段 A：多选范围和列表状态（0.3.17 代码候选）
+
+#### 已完成
+
+- 在 `codex/implement-phases-a-b` 分支完成阶段 A，并继续进入阶段 B；没有修改用户已有的 dev 基线历史。
+- 在 `libraryModel.js` 增加列表上下文 key、上下文变化清空选择、刷新后保留有效 ID 和可见选择统计的纯函数。
+- 导航、目录面包屑、搜索、类型/标签/分组筛选变化时清空 `selectedIds`；`selectedId` 和当前预览状态保持独立，复选框事件继续阻止行点击冒泡。
+- 表格滚动容器保存为 ref；列表上下文变化滚动到顶部，刷新开始时保存并在刷新结束后恢复滚动位置；页眉全选仍只作用于当前页。
+- 阶段 A 代码门禁通过后进入阶段 B，最终将版本入口同步到 `0.3.18`；`0.3.17` 未创建 Tag、安装包或 Release。
+
+#### 进行中
+
+- 阶段 A 的 Windows 11/Tauri/WebView2 原生刷新、目录、分页和多 DPI 验收仍需用户在桌面环境执行；浏览器回退只证明前端状态和布局。
+
+#### 涉及文件
+
+- `prototype/src/App.jsx`
+- `prototype/src/features/library/LibraryPanel.jsx`
+- `prototype/src/features/library/useLibraryNavigation.js`
+- `prototype/src/features/library/libraryModel.js`
+- `prototype/tests/library-model.test.mjs`
+
+#### 验证
+
+- `npm.cmd run test:library`：阶段 A 模型以及阶段 B 菜单定位测试共 14 项通过。
+- `npm.cmd run test:contracts`：8 项通过。
+- Microsoft Edge 回退检查确认切换“收藏”和输入搜索词后批量工具栏被清空，未打开预览对话框；临时浏览器和 Vite 服务已关闭。
+
+### 阶段 B：行菜单弹层和首屏布局（0.3.18 代码候选）
+
+#### 已完成
+
+- 新增 `LibraryRowActionMenu.jsx` 和 `libraryOverlayModel.js`；行菜单通过 `document.body` portal 渲染，使用 `getBoundingClientRect()`、fixed 定位、上下展开判断、左右边界约束和可用高度限制，不再受表格滚动容器裁切。
+- 菜单监听窗口 resize、visual viewport、页面/表格滚动和列表上下文变化；打开后聚焦第一项，支持方向键、Home、End、Escape、Tab、焦点返回和阻止行点击冒泡。
+- 已有资料时导入区收缩为紧凑导入条，保留导入文件夹、选择文件和拖放入口；桌面搜索框使用剩余宽度，筛选 chip 支持逐项清除，结果数显示当前结果和总索引数。
+- 360px 下隐藏低频的桌面设置按钮，显示明确的“更多”入口并打开同一设置面板；新菜单定位测试已接入 `test:library`。
+- 已同步 `prototype/package.json`、`package-lock.json` 根包、Tauri 配置、Rust crate、`Cargo.lock` 根 package、根 README、原型 README 和本计划到 `0.3.18` 代码候选口径；未执行推送、Tag、安装包构建或 Release 发布。
+
+#### 进行中
+
+- 阶段 B 的 Windows 11/Tauri/WebView2 原生窗口尺寸、真实索引刷新、滚动菜单和多 DPI 验收仍需用户执行；浏览器检查不替代桌面验收。
+
+#### 涉及文件
+
+- `prototype/src/features/library/LibraryActions.jsx`
+- `prototype/src/features/library/LibraryRowActionMenu.jsx`
+- `prototype/src/features/library/libraryOverlayModel.js`
+- `prototype/src/features/library/LibraryPanel.jsx`
+- `prototype/src/features/library/LibraryPanelParts.jsx`
+- `prototype/src/App.jsx`
+- `prototype/src/styles.css`
+- `prototype/tests/library-overlay.test.mjs`
+
+#### 验证
+
+- `npm.cmd run test:library`：14 项通过，包含上下文选择模型、刷新选择保留和菜单位置边界。
+- `npm.cmd run test:contracts`：8 项通过。
+- `npm.cmd run build`：通过，生成 `dist/client/index.html`、`dist/server/index.js` 和 `dist/.openai/hosting.json`；保留既有大 chunk 提示。
+- Microsoft Edge 回退检查：1280px 下确认已有资料的导入区高度收缩、搜索框占用剩余宽度，首行和靠近底部的菜单均在窗口内；菜单挂在 `BODY` 且使用 `position: fixed`，Escape 返回触发按钮，Home/End 可切换菜单项；调整到 360px 后菜单仍在窗口内。
+- Microsoft Edge 回退检查：680px 的表格 `scrollWidth=clientWidth=629`，360px 的页面 `body.scrollWidth=clientWidth=360`、表格 `scrollWidth=clientWidth=309`；导入条和表格没有重叠，更多入口可见。临时截图、浏览器 session 和 Vite 服务已清理。
+- 未运行 `npm.cmd run tauri:build`，未进行 Windows 11 安装器启动/卸载或原生手工验收；本轮没有改动原生行为，只同步版本入口。
+
+#### 下一步
+
+- 进入 `PROJECT_PLAN.md` 阶段 C，补齐预览失败后的重试、定位、复制位置和连续浏览状态；保持 `0.3.18` 为当前未发布代码候选，收到 Windows 原生验收结果后再处理具体回归。
+
+## 2026-09-01
+
 ### 切换 dev 并重写 0.3.x 后续界面与功能计划
 
 #### 已完成

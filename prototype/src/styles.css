@@ -223,6 +223,10 @@ input:focus-visible,
   border-top: 1px solid var(--line);
 }
 
+.mobile-more-nav {
+  display: none;
+}
+
 .main-content {
   display: flex;
   flex-direction: column;
@@ -371,6 +375,40 @@ input:focus-visible,
   border-radius: 8px;
   background: #ffffff;
   transition: border-color 160ms ease, background-color 160ms ease, transform 160ms ease;
+}
+
+.drop-zone.has-library-files {
+  flex: 0 0 auto;
+  min-height: 0;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 14px;
+  padding: 10px 14px;
+  border-width: 1px;
+}
+
+.drop-zone.has-library-files .drop-zone-icon {
+  display: none;
+}
+
+.drop-zone.has-library-files h2 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.drop-zone.has-library-files .drop-actions {
+  flex: 0 0 auto;
+  gap: 8px;
+  margin-top: 0;
+}
+
+.drop-zone.has-library-files .button {
+  min-width: 0;
+  min-height: 34px;
+  padding-inline: 12px;
+  font-size: 13px;
 }
 
 .drop-zone.is-dragging {
@@ -608,7 +646,53 @@ input:focus-visible,
 }
 
 .library-toolbar .search-field {
+  width: auto;
+  min-width: 0;
+  flex: 1 1 auto;
   margin-top: 0;
+}
+
+.active-filter-summary {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 9px;
+}
+
+.active-filter-label {
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.active-filter-chip {
+  display: inline-flex;
+  max-width: min(260px, 100%);
+  min-height: 28px;
+  align-items: center;
+  gap: 5px;
+  padding: 0 7px 0 9px;
+  color: var(--blue);
+  font-size: 12px;
+  border: 1px solid #c8dce9;
+  border-radius: 4px;
+  background: #f2f7fb;
+  cursor: pointer;
+}
+
+.active-filter-chip span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.active-filter-chip:hover,
+.active-filter-chip:focus-visible {
+  border-color: #8db8d7;
+  background: #e8f2f9;
 }
 
 .library-filter-menu {
@@ -1210,11 +1294,14 @@ input:focus-visible,
 }
 
 .row-action-menu {
-  position: absolute;
-  z-index: 10;
-  top: calc(100% + 5px);
-  right: 0;
+  position: fixed;
+  z-index: 100;
+  top: auto;
+  right: auto;
   width: min(248px, calc(100vw - 32px));
+  max-width: calc(100vw - 24px);
+  overflow: auto;
+  overscroll-behavior: contain;
   padding: 5px;
   border: 1px solid var(--line-strong);
   border-radius: var(--radius-md);
@@ -1240,6 +1327,11 @@ input:focus-visible,
 .row-action-menu-item:hover,
 .row-action-menu-item:focus-visible {
   background: var(--surface-subtle);
+}
+
+.row-action-menu-item span {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .row-action-menu-item.is-danger {
@@ -2661,12 +2753,17 @@ input:focus-visible,
   }
 
   .sidebar {
+    position: relative;
     height: 129px;
     min-height: 0;
     overflow: hidden;
     padding: 18px 16px 8px;
     border-right: 0;
     border-bottom: 1px solid var(--line);
+  }
+
+  .sidebar > div:first-child {
+    padding-right: 68px;
   }
 
   .primary-nav,
@@ -2679,6 +2776,10 @@ input:focus-visible,
     border-top: 0;
   }
 
+  .primary-nav {
+    margin-right: 68px;
+  }
+
   .sidebar-bottom {
     display: none;
   }
@@ -2689,6 +2790,26 @@ input:focus-visible,
     min-height: 42px;
     padding-inline: 11px;
     font-size: 14px;
+  }
+
+  .settings-nav-item {
+    display: none;
+  }
+
+  .mobile-more-nav {
+    position: absolute;
+    right: 16px;
+    bottom: 8px;
+    display: flex;
+    width: 58px;
+    min-width: 58px;
+    min-height: 42px;
+    align-items: center;
+    justify-content: center;
+    gap: 1px;
+    padding: 4px;
+    font-size: 12px;
+    text-align: center;
   }
 
   .main-content {
@@ -2709,6 +2830,21 @@ input:focus-visible,
     padding: clamp(15px, 3vw, 20px) 15px;
   }
 
+  .drop-zone.has-library-files {
+    min-height: 0;
+    flex-basis: auto;
+    align-items: stretch;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 14px;
+    padding: 10px 12px;
+  }
+
+  .drop-zone.has-library-files h2 {
+    font-size: 14px;
+    text-align: left;
+  }
+
   .drop-zone h2 {
     font-size: 19px;
     text-align: center;
@@ -2718,6 +2854,12 @@ input:focus-visible,
     width: 100%;
     gap: 9px;
     margin-top: 22px;
+  }
+
+  .drop-zone.has-library-files .drop-actions {
+    width: 100%;
+    gap: 8px;
+    margin-top: 0;
   }
 
   .button {
@@ -3014,6 +3156,7 @@ input:focus-visible,
   .filter-type-control select,
   .bulk-input-label input,
   .bulk-action-group select,
+  .active-filter-chip,
   .file-location-expanded,
   .group-create-row input,
   .group-list input,
@@ -3082,6 +3225,12 @@ input:focus-visible,
   .preview-docx-body,
   .preview-table-scroll {
     background: var(--surface-control);
+  }
+
+  .active-filter-chip {
+    color: var(--blue);
+    border-color: var(--line-strong);
+    background: var(--surface-subtle);
   }
 
   .drop-zone.is-dragging,

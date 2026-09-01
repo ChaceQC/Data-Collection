@@ -1,6 +1,6 @@
 [package]
 name = "local-material-workbench"
-version = "0.3.16"
+version = "0.3.18"
 description = "本地资料工作台 Tauri 桌面应用"
 authors = ["Local Material Workbench"]
 edition = "2021"

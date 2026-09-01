@@ -2,7 +2,7 @@ import { useState } from "react";
 import { libraryRepository } from "./libraryRepository.js";
 import { getRecentEntries } from "./libraryModel.js";
 
-export function useLibraryNavigation({ filesRef, initialSelectedId = "", showToast }) {
+export function useLibraryNavigation({ filesRef, initialSelectedId = "", showToast, clearSelection }) {
   const [activeNav, setActiveNav] = useState("library");
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedId, setSelectedId] = useState(initialSelectedId);
@@ -14,6 +14,7 @@ export function useLibraryNavigation({ filesRef, initialSelectedId = "", showToa
     const directoryId = folder.directoryId || folder.id;
     const relativePath = Array.isArray(folder.relativePath) ? folder.relativePath : [];
     if (!directoryId || folder.invalid || directoryLoading) return;
+    clearSelection?.();
     setPreviewEntryId(null);
     setDirectoryLoading(true);
     try {
@@ -39,6 +40,7 @@ export function useLibraryNavigation({ filesRef, initialSelectedId = "", showToa
   function openBreadcrumb(index) {
     if (!directoryView) return;
     if (index < 0) {
+      clearSelection?.();
       setDirectoryView(null);
       setPreviewEntryId(null);
       setSelectedId(filesRef.current[0]?.id || "");
@@ -49,6 +51,7 @@ export function useLibraryNavigation({ filesRef, initialSelectedId = "", showToa
   }
 
   function selectNav(key) {
+    if (key !== activeNav || directoryView) clearSelection?.();
     setDirectoryView(null);
     setPreviewEntryId(null);
     setActiveNav(key);
