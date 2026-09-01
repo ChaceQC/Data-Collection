@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ArrowClockwise,
   CaretDown,
@@ -26,7 +26,22 @@ const TIME_FORMATTER = new Intl.DateTimeFormat("zh-CN", {
 export function OperationCenter({ records = [], files = [], loading = false, warning = "", onClear, onRetry }) {
   const [open, setOpen] = useState(false);
   const [expandedId, setExpandedId] = useState("");
+  const triggerRef = useRef(null);
   const activeCount = records.filter((record) => record.status === "in-progress").length;
+
+  useEffect(() => {
+    if (!open) return undefined;
+    function closeOnEscape(event) {
+      if (event.key !== "Escape" || event.defaultPrevented) return;
+      if (event.target?.closest?.("[role=\"dialog\"], [role=\"menu\"], .library-filter-menu[open]")) return;
+      event.preventDefault();
+      event.stopPropagation();
+      setOpen(false);
+      window.requestAnimationFrame(() => triggerRef.current?.focus());
+    }
+    document.addEventListener("keydown", closeOnEscape, true);
+    return () => document.removeEventListener("keydown", closeOnEscape, true);
+  }, [open]);
 
   function toggleRecord(id) {
     setExpandedId((current) => current === id ? "" : id);
@@ -37,6 +52,7 @@ export function OperationCenter({ records = [], files = [], loading = false, war
       <button
         type="button"
         className="operation-center-trigger"
+        ref={triggerRef}
         aria-expanded={open}
         aria-controls="operation-center-panel"
         data-tauri-drag-region="false"

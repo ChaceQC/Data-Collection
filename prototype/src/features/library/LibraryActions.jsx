@@ -178,7 +178,7 @@ export function BulkLibraryToolbar({
         <button type="button" className="bulk-action-button" disabled={busy || !hasGroup} onClick={() => onBatchGroup(ids, groupId)}><Plus size={16} weight="bold" aria-hidden="true" />应用分组</button>
       </div>
       <button type="button" className="bulk-action-button bulk-action-danger" disabled={busy} onClick={() => onBatchRemove(ids)}><TrashSimple size={16} weight="regular" aria-hidden="true" />移除索引</button>
-      {undoStatus && <button type="button" className="bulk-action-button bulk-action-undo" disabled={busy} onClick={onUndo}><ArrowCounterClockwise size={16} weight="bold" aria-hidden="true" />撤销上一项</button>}
+      {undoStatus && <button type="button" className="bulk-action-button bulk-action-undo" aria-keyshortcuts="Control+Z" disabled={busy} onClick={onUndo}><ArrowCounterClockwise size={16} weight="bold" aria-hidden="true" />撤销上一项</button>}
       {retryBatch && !busy && <button type="button" className="bulk-action-button" onClick={onRetry}><ArrowCounterClockwise size={16} weight="bold" aria-hidden="true" />重试 {retryBatch.fileIds.length} 项</button>}
       {busy && <button type="button" className="bulk-action-button bulk-action-cancel" onClick={onCancelBatch}><X size={16} weight="bold" aria-hidden="true" />取消批量操作</button>}
       <button type="button" className="bulk-clear-button" disabled={busy} aria-label="取消选择" title="取消选择" onClick={onClear}><X size={17} weight="bold" aria-hidden="true" /></button>

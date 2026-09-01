@@ -72,6 +72,17 @@ export function getSelectedIdsInEntries(selectedIds = [], entries = []) {
   return (entries || []).map((entry) => entry?.id).filter((id) => id && selected.has(id));
 }
 
+export function getSelectionRangeIds(entries = [], anchorId, targetId) {
+  const ids = [...new Set((entries || []).map((entry) => entry?.id).filter(Boolean))];
+  const targetIndex = ids.indexOf(targetId);
+  if (targetIndex < 0) return [];
+  const anchorIndex = ids.indexOf(anchorId);
+  if (anchorIndex < 0) return [ids[targetIndex]];
+  const start = Math.min(anchorIndex, targetIndex);
+  const end = Math.max(anchorIndex, targetIndex);
+  return ids.slice(start, end + 1);
+}
+
 export function getEntryLocation(entry, directoryView) {
   if (typeof entry?.path === "string" && entry.path.trim()) {
     const fullPath = normalizeDisplayPath(entry.path);

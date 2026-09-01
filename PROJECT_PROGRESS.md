@@ -2,6 +2,57 @@
 
 ## 2026-09-02
 
+### 阶段 F：键盘、范围选择和响应式细节（0.3.22 代码候选）
+
+#### 已完成
+
+- 新增主窗口键盘动作模型并接入 `Ctrl+F` 搜索聚焦、`F5` 刷新索引、`Ctrl+O` 选择文件、`Ctrl+Shift+O` 选择文件夹和 `Ctrl+Z` 撤销；快捷键只绑定当前主窗口，输入框、选择框、内容编辑区和已有弹层不会抢占输入，也未引入系统级全局快捷键。
+- 资料库复选框支持鼠标 Shift-click、键盘 Space/Shift+Space 的连续范围选择；范围按当前导航/搜索/类型/标签/分组/目录上下文计算，可跨分页，当前页全选和刷新保留规则不变。
+- 预览 Dialog 支持左右方向键切换当前可见列表中的上一项/下一项；预览输入控件不会触发切换。完善 Dialog 焦点回收、筛选菜单和操作中心 Escape 关闭/触发点焦点返回。
+- 收紧表格、状态文字和控件的对比度，保留 `prefers-reduced-motion`；360px 下保留“更多”入口和可滚动导航，设置、刷新、清除选择和 Dialog 内容仍可到达；等效 125%/150% CSS 视口未出现页面级横向溢出。
+- 新增快捷键模型和范围选择模型测试，更新根 README、原型 README、计划和五个版本入口到 `0.3.22`。
+
+#### 进行中
+
+- 阶段 F 的代码候选、自动验证和安装包构建已完成；当前等待用户安装 `0.3.22` 候选并执行 Windows 11/Tauri/WebView2 原生验收。
+
+#### 阻塞与风险
+
+- 浏览器回退已验证页面布局、键盘状态、范围选择、预览切换和弹层焦点，但不能验证 Tauri 原生文件/文件夹选择器、真实索引刷新/撤销 command、无边框窗口拖动和 Windows Shell 行为。
+- 阶段 F 不引入全局系统快捷键；安装包不签名且不内置 WebView2 Runtime，Windows 11/Tauri/WebView2 原生验收仍需用户安装候选后单独记录。
+
+#### 下一步
+
+- 由用户安装 `0.3.22` 候选，验证 Windows 11 下快捷键、原生选择器、无边框拖动、预览切换和退出边界。
+- 根据具体桌面回归修复，或按计划进入阶段 G 的最近打开和悬浮球连续工作流。
+
+#### 涉及文件
+
+- `prototype/src/App.jsx`
+- `prototype/src/features/library/LibraryPanel.jsx`
+- `prototype/src/features/library/libraryModel.js`
+- `prototype/src/features/library/LibraryActions.jsx`
+- `prototype/src/features/library/LibraryPanelParts.jsx`
+- `prototype/src/features/preview/PreviewPane.jsx`
+- `prototype/src/components/Dialog.jsx`
+- `prototype/src/features/operations/OperationCenter.jsx`
+- `prototype/src/lib/keyboardModel.js`
+- `prototype/tests/keyboard-model.test.mjs`
+- `prototype/tests/library-model.test.mjs`
+- `prototype/src/styles.css`
+- `prototype/package.json`、`package-lock.json`
+- `prototype/src-tauri/Cargo.toml`、`Cargo.lock`、`tauri.conf.json`
+- `PROJECT_PLAN.md`、`README.md`、`prototype/README.md`
+
+#### 验证
+
+- `npm.cmd run test:library`：18 项通过，包含快捷键和连续范围选择模型。
+- `npm.cmd run test:contracts`：12 项通过；`npm.cmd run test:preview`：11 项通过；`npm.cmd run test:sites`：4 项通过。
+- 浏览器回退检查：预览左右键、鼠标 Shift-click、Space/Shift+Space、Ctrl+F、Dialog/菜单 Escape 和 360px 设置入口通过；1280px、960px、680px、360px 及等效 125%/150% CSS 视口的 document/body scroll width 均等于视口宽度。
+- `npm.cmd run build`：通过，生成 Sites 所需的 `dist/client/index.html`、`dist/server/index.js` 和 `dist/.openai/hosting.json`。
+- `npm.cmd run tauri:build`：通过，生成 Windows x64 NSIS 安装包 `prototype/src-tauri/target/release/bundle/nsis/本地资料工作台_0.3.22_x64-setup.exe`，大小 `8714321` bytes，SHA-256 为 `7FBAB2D42CAA79823BCA8DB4B412D0AAB2E70989DD92DBCD542DEAE23F3DBEC9`。
+- `WebView2Loader.dll` 校验通过，大小 `160320` bytes，SHA-256 为 `8427B1FC58EC707813E5C0A51EB5D69397BB333250A7B891BE4D3B123F1E0F1C`，与 release 主程序位于同一目录。
+
 ### 阶段 E：操作结果中心和设置一致性（0.3.21 代码候选）
 
 #### 已完成

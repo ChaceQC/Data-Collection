@@ -30,6 +30,11 @@ import {
 } from "./features/library/libraryModel";
 import { isMainIndexEntry } from "./features/library/libraryControllerModel.js";
 import {
+  KEYBOARD_ACTIONS,
+  getKeyboardAction,
+  isLayerTarget,
+} from "./lib/keyboardModel.js";
+import {
   ArrowClockwise,
   CheckCircle,
   Clock,
@@ -128,6 +133,9 @@ function App() {
   const [tagFilterRequest, setTagFilterRequest] = useState(null);
   const [previewEntries, setPreviewEntries] = useState([]);
   const [previewRetryNonce, setPreviewRetryNonce] = useState(0);
+  const appShellRef = useRef(null);
+  const searchInputRef = useRef(null);
+  const keyboardStateRef = useRef(null);
   const showToast = useCallback((message) => setToast(message), []);
   const filesRef = useRef([]);
   const previewEntriesRef = useRef([]);
@@ -271,6 +279,10 @@ function App() {
     setSelectedIds((current) => current.includes(fileId) ? current.filter((id) => id !== fileId) : [...current, fileId]);
   }, []);
 
+  const selectRange = useCallback((rangeIds) => {
+    setSelectedIds((current) => [...new Set([...current, ...rangeIds])]);
+  }, []);
+
   const selectPage = useCallback((pageIds, selected) => {
     setSelectedIds((current) => {
       const next = new Set(current);
@@ -279,6 +291,75 @@ function App() {
     });
   }, []);
 
+  keyboardStateRef.current = {
+    closePendingAction,
+    detailsEntryId,
+    groupManagerOpen,
+    handlePreviewClose,
+    modalOpen: Boolean(settingsOpen || detailsEntryId || previewEntryId || pendingAction || groupManagerOpen),
+    refreshIndex: index.handleRefreshIndex,
+    settingsOpen,
+    undoStatus,
+    choosePaths,
+    handleUndo,
+  };
+
+  useEffect(() => {
+    function isInsideApp(target, shell) {
+      return target === document.body
+        || target === document.documentElement
+        || Boolean(shell?.contains(target));
+    }
+
+    function closeTopLayer(state) {
+      if (state.pendingAction) {
+        state.closePendingAction();
+        return true;
+      }
+      if (state.groupManagerOpen) {
+        setGroupManagerOpen(false);
+        return true;
+      }
+      if (state.detailsEntryId) {
+        setDetailsEntryId("");
+        return true;
+      }
+      if (navigation.previewEntryId) {
+        state.handlePreviewClose();
+        return true;
+      }
+      if (state.settingsOpen) {
+        setSettingsOpen(false);
+        return true;
+      }
+      return false;
+    }
+
+    function handleKeyDown(event) {
+      const shell = appShellRef.current;
+      if (!isInsideApp(event.target, shell)) return;
+      if (event.key === "Escape") {
+        if (event.defaultPrevented || isLayerTarget(event.target)) return;
+        const state = keyboardStateRef.current;
+        if (state && closeTopLayer(state)) event.preventDefault();
+        return;
+      }
+      const action = getKeyboardAction(event);
+      if (!action || isLayerTarget(event.target)) return;
+      const state = keyboardStateRef.current;
+      if (!state || state.modalOpen) return;
+      event.preventDefault();
+      if (action === KEYBOARD_ACTIONS.FOCUS_SEARCH) searchInputRef.current?.focus();
+      if (action === KEYBOARD_ACTIONS.REFRESH_INDEX) void state.refreshIndex?.();
+      if (action === KEYBOARD_ACTIONS.CHOOSE_FILE) void state.choosePaths?.("file");
+      if (action === KEYBOARD_ACTIONS.CHOOSE_FOLDER) void state.choosePaths?.("folder");
+      if (action === KEYBOARD_ACTIONS.UNDO && state.undoStatus) void state.handleUndo?.();
+    }
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [navigation.previewEntryId, setSettingsOpen]);
+
   useEffect(() => {
     if (!toast) return undefined;
     const timeoutId = window.setTimeout(() => setToast(""), 3600);
@@ -286,7 +367,7 @@ function App() {
   }, [toast]);
 
   return (
-    <div className="app-shell">
+    <div ref={appShellRef} className="app-shell">
       <div className="window-drag-strip" aria-hidden="true" data-tauri-drag-region="deep" />
       <div className="window-controls" aria-label="窗口控制" data-tauri-drag-region="false">
         <button type="button" data-tauri-drag-region="false" aria-label="最小化" title="最小化" onClick={() => void handleWindowAction("minimize")}>
@@ -373,10 +454,10 @@ function App() {
           <div className="drop-zone-icon" aria-hidden="true"><FolderOpen size={42} weight="regular" /></div>
           <h2>{indexing ? "正在建立本地索引..." : dragActive ? "松开鼠标即可登记资料" : files.length ? "继续添加资料或拖放到这里" : "将文件或文件夹拖到这里"}</h2>
           <div className="drop-actions">
-            <button type="button" className="button button-primary" data-testid="import-folder" onClick={() => void choosePaths("folder")} disabled={indexing}>
+            <button type="button" className="button button-primary" data-testid="import-folder" aria-keyshortcuts="Control+Shift+O" onClick={() => void choosePaths("folder")} disabled={indexing}>
               <FolderOpen size={19} weight="regular" aria-hidden="true" /><span>导入文件夹</span>
             </button>
-            <button type="button" className="button button-secondary" data-testid="choose-file" onClick={() => void choosePaths("file")} disabled={indexing}>
+            <button type="button" className="button button-secondary" data-testid="choose-file" aria-keyshortcuts="Control+O" onClick={() => void choosePaths("file")} disabled={indexing}>
               <UploadSimple size={19} weight="regular" aria-hidden="true" /><span>选择文件</span>
             </button>
           </div>
@@ -393,10 +474,12 @@ function App() {
           pageSize={pageSize}
           selectedId={selectedId}
           selectedIds={selectedIds}
+          searchInputRef={searchInputRef}
           onContextChange={handleLibraryContextChange}
           onVisibleEntriesChange={handleVisibleEntriesChange}
           onSelectionChange={navigation.setSelectedId}
           onToggleSelection={toggleSelection}
+          onSelectRange={selectRange}
           onSelectPage={selectPage}
           directoryView={directoryView}
           directoryLoading={directoryLoading}

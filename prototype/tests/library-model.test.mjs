@@ -12,6 +12,7 @@ import {
   getRecentEntries,
   getNavigationCount,
   getSelectedIdsInEntries,
+  getSelectionRangeIds,
   paginateEntries,
   retainExistingSelection,
   sortEntries,
@@ -138,4 +139,14 @@ test("selection is cleared only when the list context changes and refresh keeps 
   assert.deepEqual(clearSelectionOnContextChange("library", "favorites", ["a", "b"]), []);
   assert.deepEqual(retainExistingSelection(["a", "missing", "a"], [{ id: "a" }, { id: "b" }]), ["a"]);
   assert.deepEqual(getSelectedIdsInEntries(["a", "missing"], [{ id: "a" }, { id: "b" }]), ["a"]);
+});
+
+test("selects a continuous range inside the current list context, including across pages", () => {
+  const visibleEntries = Array.from({ length: 25 }, (_, index) => ({ id: `file-${index + 1}` }));
+  assert.deepEqual(
+    getSelectionRangeIds(visibleEntries, "file-3", "file-23"),
+    visibleEntries.slice(2, 23).map((entry) => entry.id),
+  );
+  assert.deepEqual(getSelectionRangeIds(visibleEntries, "missing", "file-4"), ["file-4"]);
+  assert.deepEqual(getSelectionRangeIds(visibleEntries, "file-4", "missing"), []);
 });

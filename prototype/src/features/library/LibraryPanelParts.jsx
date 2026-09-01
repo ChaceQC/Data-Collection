@@ -17,18 +17,26 @@ const MODIFIED_FORMATTER = new Intl.DateTimeFormat("zh-CN", {
 
 export function LibraryFilterMenu({ files, groups, filters, onChange, onManageGroups }) {
   const menuRef = useRef(null);
+  const triggerRef = useRef(null);
   const types = [...new Set((files || []).map(getDisplayType).filter(Boolean))].sort((left, right) => left.localeCompare(right, "zh-CN"));
   const tags = [...new Set((files || []).flatMap((file) => Array.isArray(file.tags) ? file.tags : []))].sort((left, right) => left.localeCompare(right, "zh-CN"));
   const count = Number(Boolean(filters.type)) + filters.tags.length + filters.groupIds.length;
 
+  function closeMenu(restoreFocus = false) {
+    if (!menuRef.current?.open) return;
+    menuRef.current.open = false;
+    if (restoreFocus) window.requestAnimationFrame(() => triggerRef.current?.focus());
+  }
+
   useEffect(() => {
     function closeOnOutsidePointer(event) {
-      if (!menuRef.current?.contains(event.target)) menuRef.current.open = false;
+      if (!menuRef.current?.contains(event.target)) closeMenu();
     }
     function closeOnEscape(event) {
       if (event.key === "Escape" && menuRef.current?.open) {
         event.preventDefault();
-        menuRef.current.open = false;
+        event.stopPropagation();
+        closeMenu(true);
       }
     }
     document.addEventListener("pointerdown", closeOnOutsidePointer, true);
@@ -46,14 +54,14 @@ export function LibraryFilterMenu({ files, groups, filters, onChange, onManageGr
 
   return (
     <details ref={menuRef} className="library-filter-menu">
-      <summary className="filter-menu-trigger"><Funnel size={16} weight="regular" aria-hidden="true" /><span>筛选</span>{count > 0 && <strong>{count}</strong>}</summary>
+      <summary ref={triggerRef} className="filter-menu-trigger"><Funnel size={16} weight="regular" aria-hidden="true" /><span>筛选</span>{count > 0 && <strong>{count}</strong>}</summary>
       <div className="filter-menu-content" role="group" aria-label="组合筛选">
         <label className="filter-type-control"><span>类型</span><select value={filters.type} onChange={(event) => onChange({ ...filters, type: event.target.value })}><option value="">全部类型</option>{types.map((type) => <option value={type} key={type}>{type}</option>)}</select></label>
         <FilterCheckboxes legend="分组" values={groups.map((group) => ({ value: group.id, label: group.name }))} selected={filters.groupIds} onToggle={(value) => toggle("groupIds", value)} emptyLabel="还没有分组" />
         <FilterCheckboxes legend="标签" values={tags.map((tag) => ({ value: tag, label: tag }))} selected={filters.tags} onToggle={(value) => toggle("tags", value)} emptyLabel="还没有标签" />
         <div className="filter-menu-actions">
           <button type="button" className="text-button" disabled={!count} onClick={() => onChange({ type: "", tags: [], groupIds: [] })}>清除筛选</button>
-          <button type="button" className="text-button" onClick={onManageGroups}>管理分组</button>
+          <button type="button" className="text-button" onClick={() => { closeMenu(); onManageGroups?.(); }}>管理分组</button>
         </div>
       </div>
     </details>

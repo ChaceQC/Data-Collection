@@ -36,6 +36,7 @@ export function useDialogFocusTrap({ dialogRef, onClose, busy = false, initialFo
       if (event.key === "Escape") {
         if (!busyRef.current) {
           event.preventDefault();
+          event.stopPropagation();
           onCloseRef.current();
         }
         return;
@@ -58,10 +59,20 @@ export function useDialogFocusTrap({ dialogRef, onClose, busy = false, initialFo
       }
     }
 
+    function handleFocusIn(event) {
+      if (dialog.contains(event.target)) return;
+      event.preventDefault();
+      const preferred = initialFocusRefRef.current?.current;
+      const target = preferred || dialog.querySelector(FOCUSABLE_SELECTOR) || dialog;
+      target.focus();
+    }
+
     document.addEventListener("keydown", handleKeyDown, true);
+    document.addEventListener("focusin", handleFocusIn, true);
     return () => {
       window.cancelAnimationFrame(focusFrame);
       document.removeEventListener("keydown", handleKeyDown, true);
+      document.removeEventListener("focusin", handleFocusIn, true);
       document.body.style.overflow = previousOverflow;
       const fallbackTarget = document.querySelector("[data-dialog-return-focus=\"true\"]");
       const target = restoreTarget?.isConnected ? restoreTarget : fallbackTarget;

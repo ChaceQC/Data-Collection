@@ -43,6 +43,7 @@ import {
   getParentSummary,
   getLibraryContextKey,
   getSelectedIdsInEntries,
+  getSelectionRangeIds,
   paginateEntries,
   sortEntries,
 } from "./libraryModel";
@@ -78,7 +79,9 @@ export function LibraryPanel({
   onVisibleEntriesChange,
   onSelectionChange,
   onToggleSelection,
+  onSelectRange,
   onSelectPage,
+  searchInputRef,
   directoryView,
   directoryLoading,
   indexReady,
@@ -122,6 +125,8 @@ export function LibraryPanel({
   const [filters, setFilters] = useState({ type: "", tags: [], groupIds: [] });
   const headerCheckboxRef = useRef(null);
   const tableScrollRef = useRef(null);
+  const selectionAnchorRef = useRef("");
+  const handledSelectionKeyRef = useRef(new Set());
   const previousContextKeyRef = useRef("");
   const previousRefreshingRef = useRef(false);
   const refreshScrollTopRef = useRef(0);
@@ -154,6 +159,20 @@ export function LibraryPanel({
   useEffect(() => {
     onContextChange?.(contextKey);
   }, [contextKey, onContextChange]);
+
+  useEffect(() => {
+    selectionAnchorRef.current = "";
+  }, [contextKey]);
+
+  useEffect(() => {
+    if (selectionAnchorRef.current && !visibleFiles.some((file) => file.id === selectionAnchorRef.current)) {
+      selectionAnchorRef.current = "";
+    }
+  }, [visibleFiles]);
+
+  useEffect(() => {
+    if (!selectedIds.length) selectionAnchorRef.current = "";
+  }, [selectedIds.length]);
 
   useEffect(() => {
     onVisibleEntriesChange?.(visibleFiles, contextKey);
@@ -213,6 +232,38 @@ export function LibraryPanel({
     });
   }
 
+  function handleToggleSelection(fileId, shiftKey) {
+    const rangeIds = shiftKey
+      ? getSelectionRangeIds(visibleFiles, selectionAnchorRef.current, fileId)
+      : [];
+    if (rangeIds.length && onSelectRange) onSelectRange(rangeIds);
+    else onToggleSelection?.(fileId);
+    selectionAnchorRef.current = fileId;
+  }
+
+  function handleSelectPage(pageIds, selected) {
+    onSelectPage?.(pageIds, selected);
+    selectionAnchorRef.current = selected ? pageIds.at(-1) || "" : "";
+  }
+
+  function handleSelectionKeyDown(fileId, event) {
+    if (event.key !== " " && event.key !== "Spacebar") return;
+    event.preventDefault();
+    event.stopPropagation();
+    handledSelectionKeyRef.current.add(fileId);
+    window.setTimeout(() => handledSelectionKeyRef.current.delete(fileId), 0);
+    handleToggleSelection(fileId, event.shiftKey);
+  }
+
+  function handleSelectionClick(fileId, event) {
+    event.stopPropagation();
+    if (handledSelectionKeyRef.current.has(fileId)) {
+      handledSelectionKeyRef.current.delete(fileId);
+      return;
+    }
+    handleToggleSelection(fileId, event.shiftKey);
+  }
+
   const heading = directoryView ? (
     <nav id="recent-title" className="folder-breadcrumbs" aria-label="文件夹路径">
       <button type="button" className="breadcrumb-button" onClick={() => onOpenBreadcrumb(-1)}><ArrowLeft size={17} weight="regular" /><span>资料库</span></button>
@@ -231,7 +282,7 @@ export function LibraryPanel({
         {heading}
         <div className="section-heading-actions">
           <span className="result-count" aria-live="polite">显示 {visibleFiles.length} 项 / 共 {totalEntryCount} 项</span>
-          {onRefresh && <button type="button" className="icon-button" aria-label="刷新索引" title="刷新索引" aria-busy={refreshing} disabled={refreshing || !indexReady} onClick={onRefresh}><ArrowClockwise size={17} weight="bold" className={refreshing ? "is-spinning" : ""} aria-hidden="true" /></button>}
+          {onRefresh && <button type="button" className="icon-button" aria-label="刷新索引" aria-keyshortcuts="F5" title="刷新索引" aria-busy={refreshing} disabled={refreshing || !indexReady} onClick={onRefresh}><ArrowClockwise size={17} weight="bold" className={refreshing ? "is-spinning" : ""} aria-hidden="true" /></button>}
         </div>
       </div>
       {refreshError && <div className="inline-error" role="alert">{refreshError}</div>}
@@ -239,7 +290,7 @@ export function LibraryPanel({
         <label className="search-field">
           <MagnifyingGlass size={17} weight="regular" aria-hidden="true" />
           <span className="sr-only">搜索资料</span>
-          <input aria-label="搜索资料" value={searchQuery} placeholder="搜索名称、类型、状态、位置或标签" onChange={(event) => onSearchQueryChange(event.target.value)} />
+          <input ref={searchInputRef} aria-label="搜索资料" aria-keyshortcuts="Control+F" value={searchQuery} placeholder="搜索名称、类型、状态、位置或标签" onChange={(event) => onSearchQueryChange(event.target.value)} />
           {searchQuery && <button type="button" className="search-clear-button" aria-label="清空搜索" title="清空搜索" onClick={() => onSearchQueryChange("")}><X size={15} weight="bold" aria-hidden="true" /></button>}
         </label>
         <LibraryFilterMenu files={files} groups={groups} filters={filters} onChange={setFilters} onManageGroups={onManageGroups} />
@@ -269,14 +320,14 @@ export function LibraryPanel({
               <caption className="sr-only">{directoryView ? "当前文件夹内容" : getNavigationLabel(activeNav)}，显示 {visibleFiles.length} 项，共 {totalEntryCount} 项</caption>
               <thead>
                 <tr className="file-row file-row-header">
-                  <th scope="col" className="file-selection-cell">{!directoryView && <input ref={headerCheckboxRef} type="checkbox" aria-label="选择当前页资料" checked={allPageSelected} onChange={() => onSelectPage(selectablePageIds, !allPageSelected)} />}</th>
+                  <th scope="col" className="file-selection-cell">{!directoryView && <input ref={headerCheckboxRef} type="checkbox" aria-label="选择当前页资料" checked={allPageSelected} onChange={() => handleSelectPage(selectablePageIds, !allPageSelected)} />}</th>
                   <th scope="col">名称</th><th scope="col">类型</th><th scope="col">分组</th><th scope="col">大小</th><th scope="col">状态</th><th scope="col">修改时间</th><th scope="col" className="file-actions-header">操作</th>
                 </tr>
               </thead>
               <tbody>
                 {page.entries.map((file) => (
                   <tr className={`file-row ${selectedId === file.id ? "is-selected" : ""}`} key={file.id} tabIndex={0} aria-selected={selectedId === file.id} onClick={() => onRowClick(file)} onKeyDown={(event) => onRowKeyDown(event, file)}>
-                    <td className="file-selection-cell" data-label="选择"><input type="checkbox" aria-label={`选择 ${file.name}`} checked={selectedIdSet.has(file.id)} disabled={batchBusy || Boolean(directoryView)} onClick={(event) => event.stopPropagation()} onChange={(event) => { event.stopPropagation(); onToggleSelection(file.id); }} /></td>
+                    <td className="file-selection-cell" data-label="选择"><input type="checkbox" aria-label={`选择 ${file.name}`} checked={selectedIdSet.has(file.id)} disabled={batchBusy || Boolean(directoryView)} onKeyDown={(event) => handleSelectionKeyDown(file.id, event)} onClick={(event) => handleSelectionClick(file.id, event)} onChange={() => {}} /></td>
                     <th scope="row" data-label="名称">
                       <div className="file-name-cell">
                         <FileTypeIcon kind={file.kind} />
