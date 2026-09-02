@@ -1,6 +1,6 @@
 # 本地资料工作台原型
 
-这是基于 `AGENT.md` 方案 3“收纳入口”实现的本地资料工作台。当前代码候选版本 `0.3.26` 建立在正式发布版本 `0.3.16` 之上，已完成新计划阶段 A-J 的代码、最小自动验证和浏览器回退检查；阶段 A-J 的 Windows 11/Tauri/WebView2 原生验收仍需单独执行，浏览器运行时仍只保留安全的原型回退。
+这是基于 `AGENT.md` 方案 3“收纳入口”实现的本地资料工作台。当前代码候选版本 `0.3.26` 建立在正式发布版本 `0.3.16` 之上，已完成新计划阶段 A-J 的代码、最小自动验证、浏览器回退检查和用户 Windows 11/Tauri/WebView2 原生验收；阶段 A-J 尚未创建新的 Tag 或 GitHub Release，浏览器运行时仍只保留安全的原型回退。
 
 ## 启动
 
@@ -90,7 +90,7 @@ Windows WebView2 使用 `http://preview.localhost/<previewId>` 访问受控资�
 
 PDF 的初始无范围请求返回完整 `200` 响应，客户端明确发起的范围请求仍按 `Content-Range` 分段返回，以兼容 PDF.js 的文件长度探测和分页读取。
 
-预览、资料库核心功能、阶段 F 的设置和显式外部操作，以及悬浮球阶段 A-F 的实现、自动验证、Windows 11 桌面手工验收和 `v0.3.6` GitHub Release 均已完成。新计划阶段 A-I 的代码级实现和 `0.3.16` 发布验收已保留为正式基线；当前 `0.3.26` 候选新增的阶段 A-J 界面、数据、工作流、DOCX 性能、递归导入和正文检索改动只完成了代码级和浏览器回退检查，未替代新的 Windows 原生验收。不把所有格式写成无条件“已支持”，视频编码、LibreOffice 和 WebView2 Runtime 仍按各自外部依赖边界处理。
+预览、资料库核心功能、阶段 F 的设置和显式外部操作，以及悬浮球阶段 A-F 的实现、自动验证、Windows 11 桌面手工验收和 `v0.3.6` GitHub Release 均已完成。新计划阶段 A-J 的代码实现、自动验证、浏览器回退检查和用户 Windows 11/Tauri/WebView2 原生验收均已完成；`0.3.26` 尚未创建新的 Tag 或 GitHub Release。不把所有格式写成无条件“已支持”，视频编码、LibreOffice 和 WebView2 Runtime 仍按各自外部依赖边界处理。
 
 依赖审计注意事项：当前公开 `xlsx@0.18.5` 没有可用的 npm 修复版本，并存在已知 Prototype Pollution/ReDoS 报告。应用不打开宏、外部链接或 HTML，限制工作簿大小和展示范围，并在 Worker 中解析以便超时或异常时终止；在替换为有修复的兼容库前，该风险仍需纳入发布判断。
 
@@ -99,7 +99,7 @@ PDF 的初始无范围请求返回完整 `200` 响应，客户端明确发起的
 - `index.json` 仍只保存路径和元数据；正文检索使用独立的 `content-index.json`，预览正文、资源会话 ID 和临时 PDF 不写入 `index.json`。
 - SVG、MOV、AVI、MKV 等未登记格式返回 `unsupported`；视频不提供隐藏转码。
 - DOC 预览依赖本机 LibreOffice；当前构建未内置或下载 WebView2 Runtime，也未签名。
-- 当前不提供批量物理复制/重命名/删除或跨任意历史的通用撤销栈；阶段 G-I 的位置搜索、标签/分组、批量索引操作、有限撤销和递归导入，以及阶段 J 的纯文本/Markdown 正文检索和正则搜索已完成代码实现。当前 `0.3.26` 候选新增的阶段 A-J 代码尚未完成新的 Windows 11 原生验收。原阶段 F 的设置和显式外部操作决策记录在 `docs/phase-f-settings-and-external-operations.md`，新计划阶段 G-J 的最近打开、连续工作流、DOCX 性能、递归导入和正文检索以 `PROJECT_PLAN.md` 和 `PROJECT_PROGRESS.md` 为准。
+- 当前不提供批量物理复制/重命名/删除或跨任意历史的通用撤销栈；阶段 G-I 的位置搜索、标签/分组、批量索引操作、有限撤销和递归导入，以及阶段 J 的纯文本/Markdown 正文检索和正则搜索已完成代码实现并通过用户 Windows 11/Tauri/WebView2 原生验收。原阶段 F 的设置和显式外部操作决策记录在 `docs/phase-f-settings-and-external-operations.md`，新计划阶段 G-J 的最近打开、连续工作流、DOCX 性能、递归导入和正文检索以 `PROJECT_PLAN.md` 和 `PROJECT_PROGRESS.md` 为准。
 - 悬浮球透明置顶窗口、资源管理器真实拖放、位置恢复以及本轮新增的悬停状态机、四边四角几何、跨 DPI 和组合交互均已由用户在 Windows 11 桌面端验收通过；浏览器回退只展示内存演示状态。
 - 浏览器回退不会执行真实文件剪贴板、重命名、原文件删除或外部打开/定位；桌面端复制到剪贴板、资源管理器粘贴、设置持久化和显式外部操作已由用户在 Windows 环境完成手工验收。
 - 解析失败、缺失、权限不足、过大、转换器缺失、取消、超时和暂不支持均保留索引并在模态对话框显示可执行的下一步。
@@ -132,6 +132,6 @@ cargo test
 cargo clippy --all-targets --all-features -- -D warnings
 ```
 
-`npm.cmd run build` 会生成 Sites 所需的 `dist/client/index.html`、`dist/server/index.js` 和 `dist/.openai/hosting.json`。浏览器/Sites 模式不会调用真实文件预览、托盘、窗口、递归导入或正文索引 command；上一版 Windows 桌面预览、资料库操作、阶段 F、悬浮球基础能力和阶段 H 验收记录在根目录 `PROJECT_PROGRESS.md`，新计划阶段 A-I 的代码级验证和 `0.3.16` 发布验收已完成；`0.3.26` 阶段 A-J 的代码检查、浏览器回退、NSIS 构建结果与待执行的 Windows 原生验收记录在同一进度文档中。
+`npm.cmd run build` 会生成 Sites 所需的 `dist/client/index.html`、`dist/server/index.js` 和 `dist/.openai/hosting.json`。浏览器/Sites 模式不会调用真实文件预览、托盘、窗口、递归导入或正文索引 command；上一版 Windows 桌面预览、资料库操作、阶段 F、悬浮球基础能力和阶段 H 验收记录在根目录 `PROJECT_PROGRESS.md`，新计划阶段 A-J 的代码实现、自动验证、浏览器回退、NSIS 构建结果和用户 Windows 原生验收也记录在同一进度文档中。
 
 悬浮球阶段的自动验证使用 `npm.cmd run test:floating-ball`、`cargo test`、`cargo check` 和 `cargo clippy`；真实 Windows 窗口、文件拖放、多显示器位置和关闭/重启行为的验收记录均保留，本轮悬停面板优化的四边四角、DPI 和组合行为已由用户完成手工确认，代理不以浏览器页面或开发侧命令结果替代该验收。
