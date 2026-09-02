@@ -2,6 +2,51 @@
 
 ## 2026-09-02
 
+### 阶段 B：悬浮球外观和文件库面板骨架（0.3.28 代码候选）
+
+#### 已完成
+
+- 按当前 `AGENT.md` 和 `PROJECT_PLAN.md` 完成阶段 B：悬浮球普通状态改用文件堆语义图标，拖入状态使用下载图标，记录中使用旋转图标，并为普通、靠近、拖入、记录中、成功、部分成功、失败和移动状态分别提供颜色、外环和反馈标记。
+- 新增文件库数量读取：悬浮球和面板分别显示当前总数，加载中显示稳定的旋转状态，读取失败显示错误标记，超过 `999` 项时显示 `999+`，数量展示不改变球体命中区域。
+- 面板标题从“最近记录”改为“文件库”，默认尺寸从 `320 x 322 DIP` 调整为 `360 x 420 DIP`；几何模型继续使用 DIP 计算、物理像素调用 Tauri，并在工作区不足时按安全最小值压缩。
+- 面板建立独立的标题区、查询/筛选占位区、反馈区、列表区、加载骨架、空列表、空搜索结果和查询错误状态；列表行保留稳定最小高度、图标槽位、文本省略和收藏动作。
+- 浏览器回退在 `1280px`、`680px` 和 `360px` 视口下使用响应式面板宽度，窄视口仍保持列表内部滚动；现有悬停状态机、拖动、键盘焦点、左右展开和球体锚点行为未改动。
+- 五个版本入口已统一到 `0.3.28`：前端 package、package-lock 根包、Tauri 配置、Rust crate 和 Cargo.lock 本地 package。
+
+#### 进行中
+
+- 无；阶段 B 代码、定向自动验证、浏览器回退检查和 Windows x64 NSIS 候选构建已完成。
+
+#### 用户验收
+
+- Windows 11/Tauri/WebView2 原生安装、首次启动、透明置顶窗口、真实拖放、混合 DPI、边缘展开/收起、重启恢复和卸载本轮未由代理执行；候选仍需用户安装后单独验收。
+
+#### 阻塞与风险
+
+- 浏览器回退和成功构建不能替代 Windows 原生窗口、真实文件系统 command、系统拖放、托盘和多显示器行为验收。
+- 安装包未签名且不内置 WebView2 Runtime；DOC 预览继续依赖目标机 LibreOffice，其他既有格式依赖边界不变。
+
+#### 下一步
+
+- 用户安装 `0.3.28` 候选后按阶段 B 验收矩阵检查悬浮球状态、数量同步、左右/四角展开、DPI 和窗口生命周期；无具体回归后进入阶段 C `0.3.29` 的完整文件库列表、搜索、筛选、排序和分页。
+
+#### 涉及文件
+
+- `prototype/src/features/floating-ball/FloatingBallWindow.jsx`、`FloatingBallPanel.jsx`、`floatingBallModel.js`、`floatingBallGeometryModel.js`、`useFloatingBallRecords.js`
+- `prototype/src/styles.css`、`prototype/tests/floating-ball-model.test.mjs`
+- `prototype/package.json`、`package-lock.json`、`src-tauri/tauri.conf.json`、`src-tauri/Cargo.toml`、`src-tauri/Cargo.lock`
+- `README.md`、`prototype/README.md`、`PROJECT_PLAN.md`、`PROJECT_PROGRESS.md`
+
+#### 验证
+
+- `npm.cmd run test:floating-ball`：22 项通过，覆盖悬浮状态机、数量徽标状态、默认 `360 x 420` 几何、四角/工作区压缩、DPI 转换和文件库查询模型。
+- `npm.cmd run build`：通过，生成 Sites 所需的 client/server/hosting 产物；构建输出的既有大 chunk 警告未形成阻断。
+- `cargo fmt --all -- --check`：通过；`npm.cmd run tauri:build` 完成 Rust release 编译、Windows x64 NSIS 打包和 loader 校验。
+- Microsoft Edge 浏览器回退检查：`1280px` 和 `680px` 面板为 `360 x 420`，`360px` 面板压缩为 `280 x 420`；三种视口 `body.scrollWidth` 均等于视口宽度，列表 `scrollWidth` 与 `clientWidth` 一致；成功拖放演示进入 `recorded` 状态并显示成功标记，控制台错误为 0。
+- `git diff --check`：通过；临时浏览器服务、会话和截图已关闭/移出仓库。
+- NSIS 安装包：`prototype/src-tauri/target/release/bundle/nsis/本地资料工作台_0.3.28_x64-setup.exe`，`8,814,984` bytes，SHA-256 `4F3661F61906F4473DA8FDEB938F36B7B87194A2AADB253EA2853AB712F55DBE`。
+- release 主程序：`prototype/src-tauri/target/release/local-material-workbench.exe`，`35,655,225` bytes，SHA-256 `CDB35D98B54043B3ADBA47C79174C2463E5D2AB20EA9868530E7FDAB7473D2ED`；`WebView2Loader.dll` 为 `160,320` bytes，SHA-256 `8427B1FC58EC707813E5C0A51EB5D69397BB333250A7B891BE4D3B123F1E0F1C`，与主程序同目录且校验为 Windows x64。
+
 ### 阶段 A：悬浮球文件库数据契约和查询模型（0.3.27 代码候选）
 
 #### 已完成

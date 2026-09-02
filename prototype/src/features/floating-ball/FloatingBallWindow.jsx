@@ -1,14 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import {
-  ArchiveTrayIcon,
   CheckCircle,
+  DownloadSimple,
+  Files,
   SpinnerGap,
   WarningCircle,
 } from "@phosphor-icons/react";
 import {
   canUseFloatingBallRuntime,
   listenFloatingEvent,
-  loadFloatingPlacement,
   openMainFromFloating,
 } from "./floatingBallApi.js";
 import { FloatingBallPanel } from "./FloatingBallPanel.jsx";
@@ -16,15 +16,13 @@ import {
   createFloatingBallHoverController,
   isFloatingPanelVisible,
 } from "./floatingBallHoverController.js";
-import {
-  FLOATING_PANEL_SIZE,
-  useFloatingBallWindowGeometry,
-} from "./useFloatingBallWindowGeometry.js";
+import { useFloatingBallWindowGeometry } from "./useFloatingBallWindowGeometry.js";
 import { useFloatingBallDrag } from "./useFloatingBallDrag.js";
 import { useFloatingBallRecords } from "./useFloatingBallRecords.js";
 import {
   DEFAULT_FLOATING_PLACEMENT,
   FLOATING_BALL_CONSTANTS,
+  getFloatingLibraryCountPresentation,
 } from "./floatingBallModel.js";
 
 const IS_TAURI_RUNTIME = canUseFloatingBallRuntime();
@@ -149,14 +147,14 @@ export function FloatingBallWindow() {
   function handleHoverError({ phase }) {
     if (phase === "open") geometry.resetExpandedLayout();
     showFeedback(
-      phase === "close" ? "悬浮球窗口无法收起，请重试" : "最近记录面板无法展开，请重试",
+      phase === "close" ? "悬浮球窗口无法收起，请重试" : "文件库面板无法展开，请重试",
       "error",
     );
   }
 
   async function handleOpenFile(entry) {
     if (entry.invalid) {
-      showFeedback("该记录的路径已失效，请在主窗口中重新定位", "partial-error");
+      showFeedback("该资料路径已失效，请在主窗口中重新定位", "partial-error");
       return;
     }
     if (!IS_TAURI_RUNTIME) return;
@@ -177,14 +175,24 @@ export function FloatingBallWindow() {
     hoverController.pointerLeave();
   }
 
+  const count = getFloatingLibraryCountPresentation(records.libraryCount, records.libraryCountStatus);
+  const statusMark = status === "recorded" ? (
+    <CheckCircle className="floating-ball-status-mark floating-ball-status-mark-success" size={14} weight="fill" aria-hidden="true" />
+  ) : status === "partial-error" || status === "error" ? (
+    <WarningCircle className="floating-ball-status-mark floating-ball-status-mark-error" size={14} weight="fill" aria-hidden="true" />
+  ) : null;
   const panel = panelOpen ? (
     <FloatingBallPanel
-      recent={records.recent}
+      entries={records.entries}
+      entriesStatus={records.entriesStatus}
+      libraryCount={records.libraryCount}
+      libraryCountStatus={records.libraryCountStatus}
       status={status}
       feedback={feedback}
       favoriteBusyId={records.favoriteBusyId}
       onOpenFile={handleOpenFile}
       onToggleFavorite={records.handleFavorite}
+      onRetry={() => records.refreshRecent()}
       onClose={() => void hoverController.explicitClose()}
       onPointerEnter={handlePointerEnter}
       onPointerLeave={handlePointerLeave}
@@ -193,11 +201,13 @@ export function FloatingBallWindow() {
   const ball = (
     <button
       type="button"
-      className={`floating-ball-trigger ${drag.moving ? "is-moving" : ""} status-${status}`}
-      aria-label={feedback ? `悬浮球：${feedback}` : "悬浮球，打开最近记录"}
-      title={feedback || "打开最近记录"}
+      className={"floating-ball-trigger" + (drag.moving ? " is-moving" : "") + " status-" + status}
+      aria-label={feedback ? "悬浮球：" + feedback : "悬浮球，打开文件库（" + count.label + "）"}
+      title={feedback || "打开文件库"}
       aria-expanded={panelOpen}
       data-testid="floating-ball-trigger"
+      data-status={status}
+      data-library-count-state={count.state}
       onPointerDown={drag.handleBallPointerDown}
       onPointerMove={drag.handleBallPointerMove}
       onPointerUp={drag.handleBallPointerUp}
@@ -205,15 +215,21 @@ export function FloatingBallWindow() {
       onClick={() => drag.handleBallClick(hoverController.toggle)}
       onKeyDown={handleBallKeyDown}
     >
-      {status === "recording" ? <SpinnerGap className="is-spinning" size={27} weight="bold" /> : <ArchiveTrayIcon size={28} weight="regular" />}
+      {status === "recording" ? <SpinnerGap className="is-spinning" size={27} weight="bold" aria-hidden="true" /> : status === "drag-over" ? <DownloadSimple size={28} weight="bold" aria-hidden="true" /> : <Files size={28} weight="regular" aria-hidden="true" />}
+      <span className={"floating-ball-count-badge floating-ball-count-badge-" + count.state} aria-hidden="true" data-testid="floating-ball-count-badge">
+        {count.state === "loading" ? <SpinnerGap className="is-spinning" size={11} weight="bold" /> : count.display}
+      </span>
+      {statusMark}
       <span className="sr-only">{feedback || (status === "drag-over" ? "可放置文件" : "准备记录文件")}</span>
     </button>
   );
 
   return (
     <div
-      className={`floating-ball-window state-${hoverState} ${panelOpen ? "is-panel-open" : ""} ${IS_TAURI_RUNTIME ? "" : "is-browser-demo"} direction-${geometry.direction}`}
+      className={"floating-ball-window state-" + hoverState + (panelOpen ? " is-panel-open" : "") + (IS_TAURI_RUNTIME ? "" : " is-browser-demo") + " direction-" + geometry.direction}
       data-testid="floating-ball-window"
+      data-status={status}
+      data-library-count-state={count.state}
       style={geometry.getLayoutStyle()}
       onPointerEnter={handlePointerEnter}
       onPointerLeave={handlePointerLeave}
@@ -222,9 +238,7 @@ export function FloatingBallWindow() {
     >
       {panel}
       {ball}
-      {status === "error" && <WarningCircle className="floating-ball-error-mark" size={14} weight="fill" aria-hidden="true" />}
       <span className="sr-only" aria-live="polite">{feedback}</span>
-      <CheckCircle className="floating-ball-success-mark" size={14} weight="fill" aria-hidden="true" />
     </div>
   );
 

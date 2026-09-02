@@ -33,6 +33,47 @@ export const FLOATING_STATUSES = Object.freeze([
   "moving",
 ]);
 
+export const FLOATING_LIBRARY_COUNT_DISPLAY_LIMIT = 999;
+
+export function getFloatingLibraryCountPresentation(count, loadState = "ready") {
+  if (loadState === "loading") {
+    return {
+      state: "loading",
+      display: "...",
+      label: "正在读取文件库数量",
+      value: null,
+    };
+  }
+  if (loadState === "error") {
+    return {
+      state: "error",
+      display: "!",
+      label: "文件库数量读取失败",
+      value: null,
+    };
+  }
+
+  const value = Number(count);
+  if (!Number.isSafeInteger(value) || value < 0) {
+    return {
+      state: "error",
+      display: "!",
+      label: "文件库数量读取失败",
+      value: null,
+    };
+  }
+
+  const overflow = value > FLOATING_LIBRARY_COUNT_DISPLAY_LIMIT;
+  return {
+    state: overflow ? "overflow" : "ready",
+    display: overflow ? `${FLOATING_LIBRARY_COUNT_DISPLAY_LIMIT}+` : String(value),
+    label: overflow
+      ? `文件库资料超过 ${FLOATING_LIBRARY_COUNT_DISPLAY_LIMIT} 项，数量已折叠`
+      : `文件库共 ${value} 项资料`,
+    value,
+  };
+}
+
 export function getRecentEntries(entries, limit = FLOATING_BALL_CONSTANTS.recentLimit) {
   const latestById = new Map();
   for (const entry of entries || []) {

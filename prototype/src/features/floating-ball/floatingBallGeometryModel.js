@@ -1,9 +1,9 @@
 export const FLOATING_BALL_CONSTANTS = Object.freeze({
   ballSizeDip: 64,
-  panelWidthDip: 320,
-  panelHeightDip: 322,
-  panelMinWidthDip: 240,
-  panelMinHeightDip: 208,
+  panelWidthDip: 360,
+  panelHeightDip: 420,
+  panelMinWidthDip: 280,
+  panelMinHeightDip: 240,
   panelGapDip: 0,
   recentLimit: 5,
   enterNearDip: 28,

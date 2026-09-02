@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import {
+  getFloatingFiles,
   getFloatingRecent,
   listenFloatingDrop,
   recordFloatingPaths,
@@ -31,28 +32,27 @@ export function useFloatingBallRecords({
   setStatus,
   showFeedback,
 }) {
-  const [recent, setRecent] = useState(isTauriRuntime ? [] : DEMO_RECENT);
+  const [entries, setEntries] = useState(isTauriRuntime ? [] : DEMO_RECENT);
+  const [entriesStatus, setEntriesStatus] = useState(isTauriRuntime ? "loading" : "ready");
+  const [libraryCount, setLibraryCount] = useState(isTauriRuntime ? null : DEMO_RECENT.length);
+  const [libraryCountStatus, setLibraryCountStatus] = useState(isTauriRuntime ? "loading" : "ready");
   const [favoriteBusyId, setFavoriteBusyId] = useState("");
   const showFeedbackRef = useRef(showFeedback);
   const recordingRef = useRef(false);
   const favoriteBusyRef = useRef("");
   const pendingPathsRef = useRef([]);
+  const entriesRequestRef = useRef(0);
+  const countRequestRef = useRef(0);
   showFeedbackRef.current = showFeedback;
 
   useEffect(() => {
     if (!isTauriRuntime) return undefined;
-    let cancelled = false;
-    getFloatingRecent()
-      .then((result) => {
-        if (!cancelled) setRecent(getRecentEntries(result?.recent || result));
-      })
-      .catch(() => {
-        if (!cancelled) setFeedback("悬浮球状态读取失败，请重试");
-      });
+    void refreshRecent({ initial: true });
     return () => {
-      cancelled = true;
+      entriesRequestRef.current += 1;
+      countRequestRef.current += 1;
     };
-  }, [isTauriRuntime, setFeedback]);
+  }, [isTauriRuntime]);
 
   useEffect(() => {
     if (!isTauriRuntime) return undefined;
@@ -70,14 +70,38 @@ export function useFloatingBallRecords({
     };
   }, [isTauriRuntime]);
 
-  async function refreshRecent() {
+  async function refreshRecent({ initial = false } = {}) {
     if (!isTauriRuntime) return;
-    try {
-      const result = await getFloatingRecent();
-      setRecent(getRecentEntries(result?.recent || result));
-    } catch {
-      showFeedbackRef.current("最近记录暂时无法刷新", "error");
-    }
+    const entriesRequestId = ++entriesRequestRef.current;
+    const countRequestId = ++countRequestRef.current;
+    if (initial || !entries.length) setEntriesStatus("loading");
+    setLibraryCountStatus("loading");
+
+    const recentRequest = getFloatingRecent()
+      .then((result) => {
+        if (entriesRequestId !== entriesRequestRef.current) return;
+        setEntries(getRecentEntries(result?.recent || result));
+        setEntriesStatus("ready");
+      })
+      .catch(() => {
+        if (entriesRequestId !== entriesRequestRef.current) return;
+        setEntriesStatus("error");
+        if (initial) showFeedbackRef.current("悬浮球状态读取失败，请重试", "error");
+        else showFeedbackRef.current("文件库暂时无法刷新", "error");
+      });
+    const countRequest = getFloatingFiles({ offset: 0, limit: 1 })
+      .then((result) => {
+        if (countRequestId !== countRequestRef.current) return;
+        setLibraryCount(result.total);
+        setLibraryCountStatus("ready");
+      })
+      .catch(() => {
+        if (countRequestId !== countRequestRef.current) return;
+        setLibraryCountStatus("error");
+        if (initial) showFeedbackRef.current("文件库数量读取失败，请重试", "error");
+        else showFeedbackRef.current("文件库数量暂时无法刷新", "error");
+      });
+    await Promise.allSettled([recentRequest, countRequest]);
   }
 
   async function handleFavorite(entry) {
@@ -89,11 +113,11 @@ export function useFloatingBallRecords({
       if (isTauriRuntime) {
         const result = await setFavorite(entry.id, favorite);
         const updatedEntry = result.entry;
-        setRecent((current) => current.map((item) => (
+        setEntries((current) => current.map((item) => (
           item.id === entry.id ? { ...item, favorite: updatedEntry?.favorite ?? favorite } : item
         )));
       } else {
-        setRecent((current) => current.map((item) => (
+        setEntries((current) => current.map((item) => (
           item.id === entry.id ? { ...item, favorite } : item
         )));
       }
@@ -138,7 +162,9 @@ export function useFloatingBallRecords({
     setFeedback("正在记录资料...");
     try {
       const result = await recordFloatingPaths(paths);
-      setRecent(getRecentEntries(result.recent));
+      setEntries(getRecentEntries(result.recent));
+      setEntriesStatus("ready");
+      void refreshLibraryCount();
       showFeedbackRef.current(getRecordMessage(result), getRecordStatus(result));
     } catch (error) {
       showFeedbackRef.current(getErrorMessage(error, "悬浮球记录失败，请重试"), "error");
@@ -165,16 +191,36 @@ export function useFloatingBallRecords({
       invalid: false,
       recordedAt: timestamp + index,
     }));
-    setRecent((current) => getRecentEntries([...additions, ...current]));
+    setEntries((current) => getRecentEntries([...additions, ...current]));
+    setLibraryCount((current) => (Number.isSafeInteger(current) ? current : 0) + additions.length);
+    setLibraryCountStatus("ready");
     showFeedbackRef.current(`演示记录 ${additions.length} 项`, "recorded");
   }
 
+  async function refreshLibraryCount() {
+    if (!isTauriRuntime) return;
+    const requestId = ++countRequestRef.current;
+    setLibraryCountStatus("loading");
+    try {
+      const result = await getFloatingFiles({ offset: 0, limit: 1 });
+      if (requestId !== countRequestRef.current) return;
+      setLibraryCount(result.total);
+      setLibraryCountStatus("ready");
+    } catch {
+      if (requestId !== countRequestRef.current) return;
+      setLibraryCountStatus("error");
+    }
+  }
+
   return {
+    entries,
+    entriesStatus,
     favoriteBusyId,
     handleBrowserDrop,
     handleDropEvent,
     handleFavorite,
-    recent,
+    libraryCount,
+    libraryCountStatus,
     refreshRecent,
   };
 }
