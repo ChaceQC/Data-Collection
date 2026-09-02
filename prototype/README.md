@@ -1,6 +1,6 @@
 # 本地资料工作台原型
 
-这是基于 `AGENT.md` 方案 3“收纳入口”实现的本地资料工作台。当前代码候选版本 `0.3.26` 建立在正式发布版本 `0.3.16` 之上，已完成新计划阶段 A-J 的代码、最小自动验证、浏览器回退检查和用户 Windows 11/Tauri/WebView2 原生验收；阶段 A-J 尚未创建新的 Tag 或 GitHub Release，浏览器运行时仍只保留安全的原型回退。
+这是基于 `AGENT.md` 方案 3“收纳入口”实现的本地资料工作台。当前发布版本 `v0.3.26` 建立在上一正式发布版本 `v0.3.16` 之上，已完成新计划阶段 A-J 的代码、最小自动验证、浏览器回退检查和用户 Windows 11/Tauri/WebView2 原生验收，并已创建 Tag 和 GitHub Release；浏览器运行时仍只保留安全的原型回退。
 
 ## 启动
 
@@ -90,7 +90,7 @@ Windows WebView2 使用 `http://preview.localhost/<previewId>` 访问受控资�
 
 PDF 的初始无范围请求返回完整 `200` 响应，客户端明确发起的范围请求仍按 `Content-Range` 分段返回，以兼容 PDF.js 的文件长度探测和分页读取。
 
-预览、资料库核心功能、阶段 F 的设置和显式外部操作，以及悬浮球阶段 A-F 的实现、自动验证、Windows 11 桌面手工验收和 `v0.3.6` GitHub Release 均已完成。新计划阶段 A-J 的代码实现、自动验证、浏览器回退检查和用户 Windows 11/Tauri/WebView2 原生验收均已完成；`0.3.26` 尚未创建新的 Tag 或 GitHub Release。不把所有格式写成无条件“已支持”，视频编码、LibreOffice 和 WebView2 Runtime 仍按各自外部依赖边界处理。
+预览、资料库核心功能、阶段 F 的设置和显式外部操作，以及悬浮球阶段 A-F 的实现、自动验证、Windows 11 桌面手工验收和 `v0.3.6` GitHub Release 均已完成。新计划阶段 A-J 的代码实现、自动验证、浏览器回退检查和用户 Windows 11/Tauri/WebView2 原生验收均已完成；`v0.3.26` 已创建 Tag 并发布 GitHub Release。不把所有格式写成无条件“已支持”，视频编码、LibreOffice 和 WebView2 Runtime 仍按各自外部依赖边界处理。
 
 依赖审计注意事项：当前公开 `xlsx@0.18.5` 没有可用的 npm 修复版本，并存在已知 Prototype Pollution/ReDoS 报告。应用不打开宏、外部链接或 HTML，限制工作簿大小和展示范围，并在 Worker 中解析以便超时或异常时终止；在替换为有修复的兼容库前，该风险仍需纳入发布判断。
 
@@ -132,6 +132,6 @@ cargo test
 cargo clippy --all-targets --all-features -- -D warnings
 ```
 
-`npm.cmd run build` 会生成 Sites 所需的 `dist/client/index.html`、`dist/server/index.js` 和 `dist/.openai/hosting.json`。浏览器/Sites 模式不会调用真实文件预览、托盘、窗口、递归导入或正文索引 command；上一版 Windows 桌面预览、资料库操作、阶段 F、悬浮球基础能力和阶段 H 验收记录在根目录 `PROJECT_PROGRESS.md`，新计划阶段 A-J 的代码实现、自动验证、浏览器回退、NSIS 构建结果和用户 Windows 原生验收也记录在同一进度文档中。
+`npm.cmd run build` 会生成 Sites 所需的 `dist/client/index.html`、`dist/server/index.js` 和 `dist/.openai/hosting.json`。浏览器/Sites 模式不会调用真实文件预览、托盘、窗口、递归导入或正文索引 command；上一版 Windows 桌面预览、资料库操作、阶段 F、悬浮球基础能力和阶段 H 验收记录在根目录 `PROJECT_PROGRESS.md`，新计划阶段 A-J 的代码实现、自动验证、浏览器回退、NSIS 构建结果、用户 Windows 原生验收和 `v0.3.26` 发布记录也记录在同一进度文档中。
 
 悬浮球阶段的自动验证使用 `npm.cmd run test:floating-ball`、`cargo test`、`cargo check` 和 `cargo clippy`；真实 Windows 窗口、文件拖放、多显示器位置和关闭/重启行为的验收记录均保留，本轮悬停面板优化的四边四角、DPI 和组合行为已由用户完成手工确认，代理不以浏览器页面或开发侧命令结果替代该验收。
