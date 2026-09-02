@@ -285,6 +285,12 @@
           "markdownDescription": "Enables the get_index_recovery command without any pre-configured scope."
         },
         {
+          "description": "Enables the import_folders_recursive command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-import-folders-recursive",
+          "markdownDescription": "Enables the import_folders_recursive command without any pre-configured scope."
+        },
+        {
           "description": "Enables the index_paths command without any pre-configured scope.",
           "type": "string",
           "const": "allow-index-paths",
@@ -565,6 +571,12 @@
           "type": "string",
           "const": "deny-get-index-recovery",
           "markdownDescription": "Denies the get_index_recovery command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the import_folders_recursive command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-import-folders-recursive",
+          "markdownDescription": "Denies the import_folders_recursive command without any pre-configured scope."
         },
         {
           "description": "Denies the index_paths command without any pre-configured scope.",

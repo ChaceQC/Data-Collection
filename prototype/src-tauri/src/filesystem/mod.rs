@@ -13,6 +13,7 @@ use thiserror::Error;
 pub(crate) mod clipboard;
 pub(crate) mod external;
 pub(crate) mod operations;
+pub(crate) mod recursive_import;
 
 pub const MAX_INDEX_ENTRIES: usize = 20_000;
 

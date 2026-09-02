@@ -13,6 +13,7 @@ import {
   EditTagsDialog,
   EntryDetailsDialog,
 } from "./features/library/LibraryEntryDialogs.jsx";
+import { ImportFolderDialog } from "./features/library/ImportFolderDialog.jsx";
 import { LibraryPanel } from "./features/library/LibraryPanel";
 import { useIndexController } from "./features/library/useIndexController";
 import { useLibraryActions } from "./features/library/useLibraryActions";
@@ -227,7 +228,7 @@ function App() {
   });
   const { files, groups, indexReady, indexRecovery, indexing, refreshing, refreshError, diagnosticExporting, undoStatus } = index;
   const { activeNav, directoryLoading, directoryView, handleRowClick, handleRowKeyDown, openBreadcrumb, previewEntryId, searchQuery, selectNav, selectedId, setSearchQuery } = navigation;
-  const { addTag, batchBusy, busyFileId, choosePaths, closePendingAction, confirmBatchRemove, confirmDelete, confirmGroup, confirmRemove, confirmRename, confirmTags, createGroup, deleteGroup, dragActive, fileInputRef, folderInputRef, groupBusy, groupDraft, handleBatchFavorite, handleBatchGroup, handleBatchTags, handleCancelBatch, handleCopy, handleCopyLocation, handleDragLeave, handleDragOver, handleDrop, handleFavorite, handleOpenDefault, handleReveal, handleRetryBatch, handleUndo, openRepositionPicker, pendingAction, repositionInputRef, repositionInvalidPath, removeTag, renameName, renameGroup, renameValidation, requestBatchRemove, requestDelete, requestEditTags, requestRemove, requestRename, requestSetGroup, retryBatch, retryOperation, setGroupDraft, setRenameName, setTagInput, tagDraft, tagInput } = actions;
+  const { addTag, batchBusy, busyFileId, canRetryOperation, choosePaths, closePendingAction, confirmBatchRemove, confirmDelete, confirmFolderImport, confirmGroup, confirmRemove, confirmRename, confirmTags, createGroup, deleteGroup, dragActive, fileInputRef, folderInputRef, groupBusy, groupDraft, handleBatchFavorite, handleBatchGroup, handleBatchTags, handleCancelBatch, handleCancelImport, handleCopy, handleCopyLocation, handleDragLeave, handleDragOver, handleDrop, handleFavorite, handleOpenDefault, handleReveal, handleRetryBatch, handleUndo, openRepositionPicker, pendingAction, recursiveImportProgress, repositionInputRef, repositionInvalidPath, removeTag, renameName, renameGroup, renameValidation, requestBatchRemove, requestDelete, requestEditTags, requestRemove, requestRename, requestSetGroup, retryBatch, retryOperation, setGroupDraft, setRenameName, setTagInput, tagDraft, tagInput } = actions;
   const { floatingWindowError, floatingWindowRetrying, handleWindowAction, retryFloatingBall } = windowController;
 
   const handlePreviewNavigate = useCallback((nextEntry) => {
@@ -421,7 +422,7 @@ function App() {
         <header className="page-header" data-tauri-drag-region="deep">
           <div className="page-header-row" data-tauri-drag-region="deep">
             <h1>把资料放进一个可检索的本地库</h1>
-            <OperationCenter records={operations.records} files={files} loading={operations.historyLoading} warning={operations.historyWarning} onClear={operations.clearHistory} onRetry={retryOperation} />
+            <OperationCenter records={operations.records} files={files} loading={operations.historyLoading} warning={operations.historyWarning} onClear={operations.clearHistory} onRetry={retryOperation} canRetry={canRetryOperation} />
           </div>
         </header>
 
@@ -456,7 +457,14 @@ function App() {
 
         <section className={`drop-zone ${files.length ? "has-library-files" : ""} ${dragActive ? "is-dragging" : ""}`} data-tauri-drag-region="false" data-testid="drop-zone" onDrop={handleDrop} onDragOver={handleDragOver} onDragLeave={handleDragLeave}>
           <div className="drop-zone-icon" aria-hidden="true"><FolderOpen size={42} weight="regular" /></div>
-          <h2>{indexing ? "正在建立本地索引..." : dragActive ? "松开鼠标即可登记资料" : files.length ? "继续添加资料或拖放到这里" : "将文件或文件夹拖到这里"}</h2>
+          <h2>{recursiveImportProgress ? "正在扫描文件夹..." : indexing ? "正在建立本地索引..." : dragActive ? "松开鼠标即可登记资料" : files.length ? "继续添加资料或拖放到这里" : "将文件或文件夹拖到这里"}</h2>
+          {recursiveImportProgress && (
+            <div className="recursive-import-progress" role="status" aria-live="polite">
+              <progress aria-label="递归导入进度" />
+              <span>已检查 {recursiveImportProgress.scannedCount} 项，发现 {recursiveImportProgress.candidateCount} 个文件，已准备 {recursiveImportProgress.acceptedCount} 项，跳过 {recursiveImportProgress.skippedCount} 项{recursiveImportProgress.currentName ? `：${recursiveImportProgress.currentName}` : ""}</span>
+              <button type="button" className="text-button" onClick={() => void handleCancelImport()}>取消扫描</button>
+            </div>
+          )}
           <div className="drop-actions">
             <button type="button" className="button button-primary" data-testid="import-folder" aria-keyshortcuts="Control+Shift+O" onClick={() => void choosePaths("folder")} disabled={indexing}>
               <FolderOpen size={19} weight="regular" aria-hidden="true" /><span>导入文件夹</span>
@@ -552,6 +560,7 @@ function App() {
       {settingsOpen && <SettingsPanel settings={settings} saving={settingsSaving} onCancel={() => setSettingsOpen(false)} onSave={handleSettingsSave} />}
       {pendingAction?.type === "remove" && <RemoveIndexDialog file={pendingAction.file} busy={busyFileId === pendingAction.file.id} onCancel={closePendingAction} onConfirm={() => void confirmRemove()} />}
       {pendingAction?.type === "batch-remove" && <BatchRemoveDialog files={pendingAction.files} busy={batchBusy} onCancel={closePendingAction} onConfirm={() => void confirmBatchRemove()} />}
+      {pendingAction?.type === "folder-import" && <ImportFolderDialog folderName={pendingAction.folderName} onCancel={closePendingAction} onConfirm={(mode, policy) => void confirmFolderImport(mode, policy)} />}
       {pendingAction?.type === "rename" && <RenameDialog file={pendingAction.file} value={renameName} validation={renameValidation} busy={busyFileId === pendingAction.file.id} onChange={setRenameName} onCancel={closePendingAction} onConfirm={() => void confirmRename()} />}
       {pendingAction?.type === "edit-tags" && <EditTagsDialog file={pendingAction.file} tags={tagDraft} tagInput={tagInput} busy={busyFileId === pendingAction.file.id} onInputChange={setTagInput} onAdd={addTag} onRemove={removeTag} onCancel={closePendingAction} onConfirm={() => void confirmTags()} />}
       {pendingAction?.type === "set-group" && <EditGroupDialog file={pendingAction.file} groups={groups} value={groupDraft} busy={busyFileId === pendingAction.file.id} onChange={setGroupDraft} onCancel={closePendingAction} onConfirm={() => void confirmGroup()} />}

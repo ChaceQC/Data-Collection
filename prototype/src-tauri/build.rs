@@ -7,6 +7,7 @@ fn main() {
         "list_directory",
         "reveal_directory_child",
         "index_paths",
+        "import_folders_recursive",
         "refresh_index",
         "get_index_recovery",
         "reset_index_recovery",

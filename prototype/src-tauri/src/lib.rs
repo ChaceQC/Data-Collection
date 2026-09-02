@@ -95,6 +95,7 @@ pub fn run() {
             commands::list_directory,
             commands::reveal_directory_child,
             commands::index_paths,
+            commands::import_folders_recursive,
             commands::refresh_index,
             commands::get_index_recovery,
             commands::reset_index_recovery,

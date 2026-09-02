@@ -11,6 +11,7 @@ export const OPERATION_STATUSES = Object.freeze([
 
 export const OPERATION_LABELS = Object.freeze({
   import: "导入资料",
+  "recursive-import": "递归导入资料",
   refresh: "刷新索引",
   favorite: "更新收藏",
   tags: "更新标签",
@@ -151,7 +152,7 @@ export function getOperationStatusLabel(status) {
 export function getOperationSummary(record) {
   if (!record) return "";
   if (record.status === "in-progress") return record.totalCount ? `正在处理 ${record.totalCount} 项` : "正在处理";
-  if (record.operation === "import") {
+  if (record.operation === "import" || record.operation === "recursive-import") {
     const details = [`新增 ${record.addedCount} 项`, `更新 ${record.updatedCount} 项`];
     if (record.skippedCount) details.push(`跳过 ${record.skippedCount} 项`);
     if (record.truncated) details.push("达到本次上限");

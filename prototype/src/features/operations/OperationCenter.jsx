@@ -23,7 +23,7 @@ const TIME_FORMATTER = new Intl.DateTimeFormat("zh-CN", {
   minute: "2-digit",
 });
 
-export function OperationCenter({ records = [], files = [], loading = false, warning = "", onClear, onRetry }) {
+export function OperationCenter({ records = [], files = [], loading = false, warning = "", onClear, onRetry, canRetry }) {
   const [open, setOpen] = useState(false);
   const [expandedId, setExpandedId] = useState("");
   const triggerRef = useRef(null);
@@ -109,10 +109,10 @@ export function OperationCenter({ records = [], files = [], loading = false, war
                             ))}
                           </ul>
                         )}
-                        {record.retryableIds.length > 0 && onRetry && (
+                        {record.retryableIds.length > 0 && onRetry && (record.operation !== "recursive-import" || canRetry?.(record)) && (
                           <button type="button" className="operation-retry-button" disabled={record.status === "in-progress"} onClick={() => void onRetry(record)}>
                             <ArrowClockwise size={15} weight="bold" aria-hidden="true" />
-                            <span>重试失败项（{record.retryableIds.length}）</span>
+                            <span>{record.operation === "recursive-import" ? "重试本次扫描" : `重试失败项（${record.retryableIds.length}）`}</span>
                           </button>
                         )}
                       </div>

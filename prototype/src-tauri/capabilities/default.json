@@ -15,6 +15,7 @@
     "allow-list-directory",
     "allow-reveal-directory-child",
     "allow-index-paths",
+    "allow-import-folders-recursive",
     "allow-refresh-index",
     "allow-reset-index-recovery",
     "allow-export-index-diagnostic",

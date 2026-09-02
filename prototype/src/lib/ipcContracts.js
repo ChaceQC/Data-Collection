@@ -1,7 +1,7 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
 
 export const IPC_COMMANDS = Object.freeze([
-  "load_file_index", "list_directory", "reveal_directory_child", "index_paths", "refresh_index", "get_index_recovery",
+  "load_file_index", "list_directory", "reveal_directory_child", "index_paths", "import_folders_recursive", "refresh_index", "get_index_recovery",
   "reset_index_recovery", "export_index_diagnostic", "reposition_file", "set_favorite",
   "remove_index_entry", "copy_indexed_file", "open_indexed_file", "reveal_indexed_file",
   "rename_indexed_file", "delete_original_file", "set_entry_tags", "set_entry_group",
@@ -46,6 +46,10 @@ const OPERATION_MESSAGES = Object.freeze({
   "settings-unavailable": "本地设置暂时不可用，请重试",
   "folder-not-supported": "此操作暂时只支持普通文件",
   "task-failed": "操作任务未完成，请重试",
+  "recursive-root-invalid": "只能扫描可访问的普通文件夹，请重新选择",
+  "recursive-root-missing": "选择的文件夹已不存在，请重新选择",
+  "recursive-root-permission-denied": "没有访问所选文件夹的权限",
+  "recursive-root-too-many": "一次最多扫描 8 个文件夹",
 });
 
 export class IpcContractError extends Error {
@@ -117,6 +121,46 @@ export function parseIndexImportResult(value, command = "index_paths") {
     skippedReasons: stringArray(source.skippedReasons, command, "skippedReasons"),
     truncated: boolean(source.truncated, command, "truncated"),
     addedIds: opaqueIdArray(source.addedIds, command, "addedIds"),
+  };
+}
+
+export function parseRecursiveImportResult(value, command = "import_folders_recursive") {
+  const source = record(value, command);
+  return {
+    ...source,
+    operationId: assertOpaqueId(source.operationId, "operationId"),
+    revision: nonNegativeInteger(source.revision, command, "revision"),
+    scannedCount: nonNegativeInteger(source.scannedCount, command, "scannedCount"),
+    candidateCount: nonNegativeInteger(source.candidateCount, command, "candidateCount"),
+    indexedCount: nonNegativeInteger(source.indexedCount, command, "indexedCount"),
+    refreshedCount: nonNegativeInteger(source.refreshedCount, command, "refreshedCount"),
+    skippedCount: nonNegativeInteger(source.skippedCount, command, "skippedCount"),
+    skippedReasons: stringArray(source.skippedReasons, command, "skippedReasons"),
+    truncated: boolean(source.truncated, command, "truncated"),
+    cancelled: boolean(source.cancelled, command, "cancelled"),
+    timedOut: boolean(source.timedOut, command, "timedOut"),
+    addedIds: opaqueIdArray(source.addedIds, command, "addedIds"),
+  };
+}
+
+export function parseRecursiveImportProgress(value, command = "recursive-import-progress") {
+  const source = record(value, command);
+  const phase = string(source.phase, command, "phase");
+  if (!["scanning", "merging", "completed", "failed"].includes(phase)) throw contractError(command, "递归导入进度阶段无效");
+  const currentName = source.currentName == null ? null : string(source.currentName, command, "currentName");
+  if (currentName && (currentName.length > 255 || /[\\/\u0000-\u001f\u007f-\u009f]/.test(currentName))) throw contractError(command, "递归导入当前名称无效");
+  return {
+    ...source,
+    operationId: assertOpaqueId(source.operationId, "operationId"),
+    phase,
+    scannedCount: nonNegativeInteger(source.scannedCount, command, "scannedCount"),
+    candidateCount: nonNegativeInteger(source.candidateCount, command, "candidateCount"),
+    acceptedCount: nonNegativeInteger(source.acceptedCount, command, "acceptedCount"),
+    skippedCount: nonNegativeInteger(source.skippedCount, command, "skippedCount"),
+    currentName,
+    truncated: boolean(source.truncated, command, "truncated"),
+    cancelled: boolean(source.cancelled, command, "cancelled"),
+    timedOut: boolean(source.timedOut, command, "timedOut"),
   };
 }
 

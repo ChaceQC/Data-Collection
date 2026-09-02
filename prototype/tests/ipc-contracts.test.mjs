@@ -8,6 +8,8 @@ import {
   parseIndexChangedEvent,
   parseOperationHistory,
   parseOperationRecord,
+  parseRecursiveImportProgress,
+  parseRecursiveImportResult,
   parseMutationResult,
   parseIndexSnapshot,
   parsePreviewResult,
@@ -83,6 +85,40 @@ test("validates single-entry mutation responses used by tag and group editors", 
   assert.equal(result.entry.tags[0], "重点");
   assert.equal(result.entry.groupId, "group-a");
   assert.throws(() => parseMutationResult({ revision: 7, changedIds: ["C:\\secret"], entry: null }, "set_entry_group"), IpcContractError);
+});
+
+test("validates recursive import results and progress without accepting paths", () => {
+  const result = parseRecursiveImportResult({
+    operationId: "recursive-import-a",
+    revision: 8,
+    scannedCount: 12,
+    candidateCount: 6,
+    indexedCount: 4,
+    refreshedCount: 1,
+    skippedCount: 1,
+    skippedReasons: ["文件类型不在导入范围"],
+    truncated: false,
+    cancelled: false,
+    timedOut: false,
+    addedIds: ["file-2"],
+  });
+  assert.equal(result.candidateCount, 6);
+  const progress = parseRecursiveImportProgress({
+    operationId: "recursive-import-a",
+    phase: "scanning",
+    scannedCount: 3,
+    candidateCount: 1,
+    acceptedCount: 1,
+    skippedCount: 0,
+    currentName: "研究 计划.md",
+    truncated: false,
+    cancelled: false,
+    timedOut: false,
+  });
+  assert.equal(progress.currentName, "研究 计划.md");
+  assert.throws(() => parseRecursiveImportResult({ ...result, operationId: "C:\\secret" }), TypeError);
+  assert.throws(() => parseRecursiveImportProgress({ ...progress, currentName: "C:\\secret" }), IpcContractError);
+  assert.throws(() => parseRecursiveImportProgress({ ...progress, phase: "unknown" }), IpcContractError);
 });
 
 test("validates operation history details without accepting file paths", () => {

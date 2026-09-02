@@ -5,6 +5,7 @@ import {
   parseBatchMutationResult,
   parseGroupMutationResult,
   parseIndexImportResult,
+  parseRecursiveImportResult,
   parseIndexRefreshResult,
   parseIndexSnapshot,
   parseMutationResult,
@@ -22,6 +23,9 @@ export const libraryRepository = Object.freeze({
   },
   indexPaths(paths) {
     return invokeCommand("index_paths", { paths }, parseIndexImportResult);
+  },
+  importFoldersRecursive(paths, operationId, policy) {
+    return invokeCommand("import_folders_recursive", { paths, operationId, policy }, parseRecursiveImportResult);
   },
   refreshIndex() {
     return invokeCommand("refresh_index", undefined, parseIndexRefreshResult);

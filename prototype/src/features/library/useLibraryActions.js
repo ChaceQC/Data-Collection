@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
-import { getOperationError } from "../../lib/ipcContracts.js";
+import { getOperationError, parseRecursiveImportProgress } from "../../lib/ipcContracts.js";
 import { getFileKind, getFileType } from "../../lib/fileTypes.js";
 import { createOperationId } from "../operations/operationModel.js";
 import { libraryRepository } from "./libraryRepository.js";
@@ -19,6 +19,12 @@ import {
   validateTagInput,
 } from "./libraryControllerModel.js";
 import { getEntryLocation } from "./libraryModel.js";
+import {
+  DEFAULT_RECURSIVE_IMPORT_POLICY,
+  describeRecursiveImportPolicy,
+  getRecursiveImportFolderName,
+  normalizeRecursiveImportPolicy,
+} from "./recursiveImportModel.js";
 
 export function useLibraryActions({
   isTauriRuntime,
@@ -46,6 +52,7 @@ export function useLibraryActions({
   const [groupDraft, setGroupDraft] = useState("");
   const [batchBusy, setBatchBusy] = useState(false);
   const [retryBatch, setRetryBatch] = useState(null);
+  const [recursiveImportProgress, setRecursiveImportProgress] = useState(null);
   const [groupBusy, setGroupBusy] = useState(false);
   const folderInputRef = useRef(null);
   const fileInputRef = useRef(null);
@@ -54,6 +61,8 @@ export function useLibraryActions({
   const busyFileIdRef = useRef("");
   const batchBusyRef = useRef(false);
   const activeBatchOperationIdRef = useRef("");
+  const activeImportOperationIdRef = useRef("");
+  const retryImportRef = useRef(null);
   const groupBusyRef = useRef(false);
   const indexingRef = useRef(false);
   const indexRealPathsRef = useRef(null);
@@ -72,6 +81,27 @@ export function useLibraryActions({
           setDragActive(false);
           void indexRealPathsRef.current(event.payload.paths);
         }
+      })
+      .then((stopListening) => {
+        if (disposed) stopListening();
+        else unlisten = stopListening;
+      })
+      .catch(() => undefined);
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, [isTauriRuntime]);
+
+  useEffect(() => {
+    if (!isTauriRuntime) return undefined;
+    let disposed = false;
+    let unlisten;
+    getCurrentWebview()
+      .listen("recursive-import-progress", (event) => {
+        const payload = safeParse(parseRecursiveImportProgress, event.payload, "recursive-import-progress");
+        if (!payload || payload.operationId !== activeImportOperationIdRef.current) return;
+        setRecursiveImportProgress((current) => ({ ...current, ...payload }));
       })
       .then((stopListening) => {
         if (disposed) stopListening();
@@ -158,7 +188,7 @@ export function useLibraryActions({
   }
 
   function closePendingAction() {
-    if (!busyFileIdRef.current && !batchBusyRef.current) setPendingAction(null);
+    if (!busyFileIdRef.current && !batchBusyRef.current && !indexingRef.current) setPendingAction(null);
   }
 
   async function removeIndexRecord(file) {
@@ -438,6 +468,10 @@ export function useLibraryActions({
       showToast("批量操作请在桌面应用中执行");
       return;
     }
+    if (indexingRef.current) {
+      showToast("递归导入进行中，请先等待扫描完成");
+      return;
+    }
     const stableIds = [...new Set(fileIds || [])].filter(Boolean);
     if (!stableIds.length || batchBusyRef.current) return;
     const operationId = createOperationId("batch");
@@ -487,6 +521,15 @@ export function useLibraryActions({
 
   async function handleRetryOperation(record) {
     if (!record?.retryableIds?.length || batchBusyRef.current) return;
+    if (record.operation === "recursive-import") {
+      const retry = retryImportRef.current;
+      if (!retry || retry.operationId !== record.id) {
+        showToast("该导入任务只保留了摘要，请重新选择文件夹");
+        return;
+      }
+      await importFoldersRecursive(retry.paths, retry.policy, retry.operationId);
+      return;
+    }
     if (retryBatch?.operationId === record.id) {
       await handleRetryBatch();
       return;
@@ -665,7 +708,7 @@ export function useLibraryActions({
   }
 
   async function indexRealPaths(paths) {
-    if (!isTauriRuntime || !paths?.length || indexingRef.current) return;
+    if (!isTauriRuntime || !paths?.length || indexingRef.current || batchBusyRef.current) return;
     const operationId = createOperationId("import");
     operationReporter?.startOperation({ id: operationId, operation: "import", totalCount: paths.length });
     indexingRef.current = true;
@@ -704,6 +747,111 @@ export function useLibraryActions({
     }
   }
 
+  async function handleCancelImport() {
+    const operationId = activeImportOperationIdRef.current;
+    if (!isTauriRuntime || !operationId) return;
+    try {
+      await libraryRepository.cancelBatchOperation(operationId);
+      showToast("已请求取消扫描，正在整理已完成项");
+    } catch (error) {
+      showActionError(error, "无法取消扫描，请稍候查看操作中心");
+    }
+  }
+
+  function canRetryOperation(record) {
+    if (record?.operation !== "recursive-import") return true;
+    return Boolean(record.retryableIds?.length && retryImportRef.current?.operationId === record.id);
+  }
+
+  function requestFolderImport(paths) {
+    if (!paths?.length || indexingRef.current || batchBusyRef.current) return;
+    setPendingAction({
+      type: "folder-import",
+      paths: [...paths],
+      folderName: paths.length === 1
+        ? getRecursiveImportFolderName(paths[0])
+        : `已选择 ${paths.length} 个文件夹`,
+    });
+  }
+
+  async function importFoldersRecursive(paths, policy, retryOperationId = "") {
+    if (!isTauriRuntime || !paths?.length || indexingRef.current || batchBusyRef.current) return;
+    const normalizedPolicy = normalizeRecursiveImportPolicy(policy || DEFAULT_RECURSIVE_IMPORT_POLICY);
+    const operationId = retryOperationId || createOperationId("recursive-import");
+    const policyDescription = describeRecursiveImportPolicy(normalizedPolicy);
+    operationReporter?.startOperation({ id: operationId, operation: "recursive-import" });
+    activeImportOperationIdRef.current = operationId;
+    retryImportRef.current = { operationId, paths: [...paths], policy: normalizedPolicy };
+    setRecursiveImportProgress({
+      operationId,
+      phase: "scanning",
+      scannedCount: 0,
+      candidateCount: 0,
+      acceptedCount: 0,
+      skippedCount: 0,
+      currentName: null,
+      truncated: false,
+      cancelled: false,
+      timedOut: false,
+    });
+    indexingRef.current = true;
+    setIndexing(true);
+    try {
+      const result = await libraryRepository.importFoldersRecursive(paths, operationId, normalizedPolicy);
+      const snapshot = await libraryRepository.loadIndex();
+      applyIndexSnapshot(snapshot);
+      setDirectoryView(null);
+      setPreviewEntryId(null);
+      setActiveNav("library");
+      setSelectedId(result.addedIds[0] || snapshot.entries[0]?.id || "");
+
+      const acceptedCount = result.indexedCount + result.refreshedCount;
+      const retryable = result.cancelled || result.timedOut || result.truncated || result.skippedCount > 0;
+      if (!retryable) retryImportRef.current = null;
+      const messages = [`扫描 ${result.scannedCount} 项，发现 ${result.candidateCount} 个普通文件`];
+      if (result.indexedCount) messages.push(`新增 ${result.indexedCount} 项`);
+      if (result.refreshedCount) messages.push(`更新 ${result.refreshedCount} 项`);
+      if (result.skippedCount) messages.push(`跳过 ${result.skippedCount} 项（${result.skippedReasons.join("、") || "原因未提供"}）`);
+      if (result.truncated) messages.push("已达到扫描或导入上限");
+      if (result.cancelled) messages.push("已取消，已保留完成部分");
+      if (result.timedOut) messages.push("扫描超时，已保留完成部分");
+      const operationSkippedCount = Math.min(result.skippedCount, Math.max(0, 20_000 - acceptedCount));
+      const totalCount = acceptedCount + operationSkippedCount;
+      operationReporter?.finishOperation(operationId, {
+        status: result.timedOut ? "timed-out" : result.cancelled ? "cancelled" : retryable ? "partial-success" : acceptedCount ? "success" : "failed",
+        totalCount,
+        addedCount: result.indexedCount,
+        updatedCount: result.refreshedCount,
+        successCount: acceptedCount,
+        skippedCount: operationSkippedCount,
+        skippedReasons: result.skippedReasons,
+        truncated: result.truncated,
+        cancelled: result.cancelled,
+        timedOut: result.timedOut,
+        retryableIds: retryable ? [operationId] : [],
+        message: `策略：${policyDescription}；扫描 ${result.scannedCount} 项，发现 ${result.candidateCount} 个普通文件。`,
+      });
+      showToast(messages.join("，") || "没有找到可导入的文件");
+    } catch (error) {
+      retryImportRef.current = null;
+      operationReporter?.failOperation(operationId, "递归导入失败，请检查文件夹和访问权限");
+      showActionError(error, "递归导入失败，请检查文件夹和访问权限");
+    } finally {
+      activeImportOperationIdRef.current = "";
+      setRecursiveImportProgress(null);
+      indexingRef.current = false;
+      setIndexing(false);
+    }
+  }
+
+  async function confirmFolderImport(mode, policy) {
+    if (pendingAction?.type !== "folder-import") return;
+    const { paths } = pendingAction;
+    setPendingAction(null);
+    if (mode === "recursive") await importFoldersRecursive(paths, policy);
+    else await indexRealPaths(paths);
+  }
+
   function addBrowserFiles(fileList) {
     const additions = createBrowserEntries(fileList);
     if (!additions.length) return;
@@ -723,6 +871,10 @@ export function useLibraryActions({
   }
 
   async function choosePaths(mode) {
+    if (indexingRef.current || batchBusyRef.current) {
+      showToast("已有导入或批量操作进行中，请先等待完成");
+      return;
+    }
     if (!isTauriRuntime) {
       if (mode === "folder") folderInputRef.current?.click();
       if (mode === "file") fileInputRef.current?.click();
@@ -733,6 +885,7 @@ export function useLibraryActions({
       const paths = selected ? (Array.isArray(selected) ? selected : [selected]) : [];
       if (!paths.length) return;
       if (mode === "reposition") await repositionRealPath(paths[0]);
+      else if (mode === "folder") requestFolderImport(paths);
       else await indexRealPaths(paths);
     } catch (error) {
       showActionError(error, "无法打开文件选择器，请重试");
@@ -822,6 +975,7 @@ export function useLibraryActions({
     confirmTags,
     confirmGroup,
     confirmBatchRemove,
+    confirmFolderImport,
     batchBusy,
     dragActive,
     fileInputRef,
@@ -837,9 +991,12 @@ export function useLibraryActions({
     handleBatchGroup,
     handleBatchTags,
     handleCancelBatch,
+    handleCancelImport,
     handleCopyLocation,
     handleRetryBatch,
     retryOperation: handleRetryOperation,
+    canRetryOperation,
+    recursiveImportProgress,
     handleUndo,
     indexRealPaths,
     openFromFloating,
@@ -869,6 +1026,14 @@ export function useLibraryActions({
     renameGroup,
     retryBatch,
   };
+}
+
+function safeParse(parser, value, command) {
+  try {
+    return parser(value, command);
+  } catch {
+    return null;
+  }
 }
 
 function validateGroupName(value) {

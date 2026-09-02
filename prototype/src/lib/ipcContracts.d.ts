@@ -1,7 +1,7 @@
 export type EntryKind = "folder" | "other" | "markdown" | "text" | "doc" | "docx" | "xlsx" | "pdf" | "image" | "video";
 export type PreviewStatus = "idle" | "loading" | "ready" | "unsupported" | "missing" | "permission-denied" | "too-large" | "converter-missing" | "parse-error" | "cancelled" | "timed-out";
 export type IpcCommand =
-  | "load_file_index" | "list_directory" | "reveal_directory_child" | "index_paths" | "refresh_index" | "get_index_recovery"
+  | "load_file_index" | "list_directory" | "reveal_directory_child" | "index_paths" | "import_folders_recursive" | "refresh_index" | "get_index_recovery"
   | "reset_index_recovery" | "export_index_diagnostic" | "reposition_file" | "set_favorite"
   | "remove_index_entry" | "copy_indexed_file" | "open_indexed_file" | "reveal_indexed_file"
   | "rename_indexed_file" | "delete_original_file" | "set_entry_tags" | "set_entry_group"
@@ -66,6 +66,41 @@ export interface IndexMutationResult {
   revision: number;
   changedIds: string[];
   entry: IndexEntry | null;
+}
+
+export interface RecursiveImportResult {
+  operationId: string;
+  revision: number;
+  scannedCount: number;
+  candidateCount: number;
+  indexedCount: number;
+  refreshedCount: number;
+  skippedCount: number;
+  skippedReasons: string[];
+  truncated: boolean;
+  cancelled: boolean;
+  timedOut: boolean;
+  addedIds: string[];
+}
+
+export interface RecursiveImportPolicy {
+  maxDepth: number;
+  maxEntries: number;
+  skipHidden: boolean;
+  includeUnsupported: boolean;
+}
+
+export interface RecursiveImportProgress {
+  operationId: string;
+  phase: "scanning" | "merging" | "completed" | "failed";
+  scannedCount: number;
+  candidateCount: number;
+  acceptedCount: number;
+  skippedCount: number;
+  currentName: string | null;
+  truncated: boolean;
+  cancelled: boolean;
+  timedOut: boolean;
 }
 
 export interface GroupMutationResult {

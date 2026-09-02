@@ -738,6 +738,43 @@ summary:focus-visible,
   margin-top: 14px;
 }
 
+.recursive-import-progress {
+  display: grid;
+  width: min(760px, 100%);
+  gap: 7px;
+  margin-top: 14px;
+  color: var(--muted-strong);
+  font-size: 13px;
+  line-height: 1.5;
+  text-align: center;
+}
+
+.recursive-import-progress progress {
+  width: 100%;
+  height: 8px;
+  accent-color: var(--green);
+}
+
+.recursive-import-progress > span {
+  overflow-wrap: anywhere;
+}
+
+.recursive-import-progress .text-button {
+  justify-self: center;
+}
+
+.drop-zone.has-library-files .recursive-import-progress {
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 0;
+  margin: 0 12px;
+  text-align: left;
+}
+
+.drop-zone.has-library-files .recursive-import-progress .text-button {
+  justify-self: start;
+}
+
 .button {
   display: inline-flex;
   align-items: center;
@@ -2094,6 +2131,129 @@ summary:focus-visible,
 
 .library-dialog-body {
   padding: 20px;
+}
+
+.folder-import-dialog {
+  width: min(580px, 100%);
+}
+
+.folder-import-modes {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.folder-import-modes legend {
+  margin-bottom: 2px;
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.folder-import-mode {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 11px 12px;
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-subtle);
+  cursor: pointer;
+}
+
+.folder-import-mode:has(input:checked) {
+  border-color: #8db8d7;
+  background: #f2f7fc;
+}
+
+.folder-import-mode input,
+.dialog-checkbox input {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+  margin: 2px 0 0;
+  accent-color: var(--green);
+}
+
+.folder-import-mode span {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.folder-import-mode strong {
+  font-size: 14px;
+}
+
+.folder-import-mode small {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 1.5;
+}
+
+.recursive-import-options {
+  display: grid;
+  gap: 12px;
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+
+.recursive-import-scope {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  color: var(--blue);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.recursive-import-scope > svg {
+  flex: 0 0 auto;
+  margin-top: 2px;
+}
+
+.recursive-import-scope > div {
+  display: grid;
+  gap: 2px;
+}
+
+.recursive-import-scope span {
+  color: var(--muted);
+}
+
+.recursive-import-options .dialog-field {
+  grid-template-columns: minmax(0, 1fr) minmax(150px, 220px);
+  align-items: center;
+  margin-top: 0;
+}
+
+.recursive-import-options .dialog-field select {
+  width: 100%;
+  min-height: var(--control-height);
+  padding: 0 9px;
+  color: var(--ink);
+  border: 1px solid #cdd8dc;
+  border-radius: 5px;
+  background: var(--surface-control);
+}
+
+.dialog-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.folder-import-register-hint {
+  margin-top: 16px;
 }
 
 .library-dialog-description,
@@ -3962,6 +4122,8 @@ summary:focus-visible,
   .operation-center-panel,
   .operation-retry-button,
   .operation-center-close,
+  .folder-import-mode,
+  .recursive-import-options .dialog-field select,
   .file-location-expanded,
   .group-create-row input,
   .group-list input,
@@ -4041,6 +4203,7 @@ summary:focus-visible,
   }
 
   .drop-zone.is-dragging,
+  .folder-import-mode:has(input:checked),
   .floating-window-alert,
   .index-recovery-alert,
   .settings-conflict,
