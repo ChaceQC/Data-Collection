@@ -1857,12 +1857,13 @@ checksum = "47d9d19d1d6efa0109d2f65ff4c85cddd50bd572e5a00127ab10987290bcefae"
 
 [[package]]
 name = "local-material-workbench"
-version = "0.3.25"
+version = "0.3.26"
 dependencies = [
  "atomic-write-file",
  "encoding_rs",
  "http",
  "image",
+ "regex",
  "serde",
  "serde_json",
  "tauri",

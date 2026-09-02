@@ -5,7 +5,12 @@ import {
   Funnel,
   X,
 } from "@phosphor-icons/react";
-import { getDisplayType, getEntryLocation } from "./libraryModel";
+import {
+  getDisplayType,
+  getEntryLocation,
+  getMetadataSearchHit,
+  getSearchTextRanges,
+} from "./libraryModel";
 
 const MODIFIED_FORMATTER = new Intl.DateTimeFormat("zh-CN", {
   year: "numeric",
@@ -130,6 +135,47 @@ export function getModifiedLabel(file) {
 
 export function getNavigationLabel(activeNav) {
   return { recent: "最近添加", "recent-opened": "最近打开", favorites: "收藏", invalid: "失效路径" }[activeNav] || "资料库";
+}
+
+export function SearchHitSummary({ entry, searchMode, searchResult, searchQuery, useRegex, directoryView, groups = [] }) {
+  if (!searchQuery) return null;
+  if (searchMode === "content") {
+    if (!searchResult) return null;
+    const snippet = searchResult.snippets?.[0];
+    return (
+      <div className="search-hit-summary" aria-label="正文搜索命中">
+        <span className="search-hit-field">命中正文 · {searchResult.matchCount}{searchResult.matchesTruncated ? "+" : ""} 处</span>
+        {snippet && <HighlightedText text={snippet.text} ranges={snippet.ranges} characterRanges />}
+      </div>
+    );
+  }
+  const hit = getMetadataSearchHit(entry, searchQuery, { useRegex, directoryView, groups });
+  if (!hit) return null;
+  const ranges = hit.key === "name" ? getSearchTextRanges(hit.value, searchQuery, useRegex) : [];
+  return (
+    <div className="search-hit-summary" aria-label={`命中${hit.label}`}>
+      <span className="search-hit-field">命中{hit.label}</span>
+      {ranges.length > 0 && <HighlightedText text={hit.value} ranges={ranges} />}
+    </div>
+  );
+}
+
+function HighlightedText({ text, ranges, characterRanges = false }) {
+  const value = String(text ?? "");
+  const segments = [];
+  let cursor = 0;
+  for (const range of ranges || []) {
+    const start = Math.max(cursor, Number(range.start) || 0);
+    const end = Math.max(start, Number(range.end) || 0);
+    const before = characterRanges ? Array.from(value).slice(cursor, start).join("") : value.slice(cursor, start);
+    const matched = characterRanges ? Array.from(value).slice(start, end).join("") : value.slice(start, end);
+    if (before) segments.push(<span key={`before-${cursor}`}>{before}</span>);
+    if (matched) segments.push(<mark key={`match-${start}-${end}`}>{matched}</mark>);
+    cursor = end;
+  }
+  const tail = characterRanges ? Array.from(value).slice(cursor).join("") : value.slice(cursor);
+  if (tail) segments.push(<span key={`tail-${cursor}`}>{tail}</span>);
+  return <span className="search-hit-snippet">{segments.length ? segments : value}</span>;
 }
 
 export function getEmptyTitle({ activeNav, directoryView, searchQuery, filters }) {

@@ -9,7 +9,7 @@ use std::{
 };
 
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Emitter, Runtime, State};
+use tauri::{AppHandle, Emitter, Manager, Runtime, State};
 
 use crate::storage::repository::IndexRepository;
 use crate::{
@@ -26,6 +26,7 @@ pub(crate) mod window;
 
 const BATCH_TIMEOUT: Duration = Duration::from_secs(10);
 const RECURSIVE_IMPORT_TIMEOUT: Duration = Duration::from_secs(30);
+const CONTENT_INDEX_TIMEOUT: Duration = Duration::from_secs(60);
 
 #[derive(Debug, Default)]
 pub struct BatchState {
@@ -50,6 +51,13 @@ impl BatchState {
         operation_id: &str,
     ) -> Result<Arc<BatchControl>, CommandError> {
         self.begin_with_timeout(operation_id, RECURSIVE_IMPORT_TIMEOUT, "递归导入扫描超时")
+    }
+
+    pub(crate) fn begin_content_index(
+        &self,
+        operation_id: &str,
+    ) -> Result<Arc<BatchControl>, CommandError> {
+        self.begin_with_timeout(operation_id, CONTENT_INDEX_TIMEOUT, "正文索引重建超时")
     }
 
     fn begin_with_timeout(
@@ -335,6 +343,28 @@ pub struct IndexRefreshResult {
     pub changed_count: usize,
     pub invalid_count: usize,
     pub recovered_count: usize,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ContentIndexRebuildResult {
+    pub operation_id: String,
+    pub revision: u64,
+    pub indexed_count: usize,
+    pub updated_count: usize,
+    pub removed_count: usize,
+    pub skipped_count: usize,
+    pub skipped_reasons: Vec<String>,
+    pub cancelled: bool,
+    pub timed_out: bool,
+    pub status: storage::content_index::ContentIndexStatus,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ContentSearchResponse {
+    pub status: storage::content_index::ContentIndexStatus,
+    pub results: Vec<storage::content_search::ContentSearchResult>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -804,6 +834,131 @@ pub async fn refresh_index(
     apply_refresh_result(&repository, &app, checked)
 }
 
+#[tauri::command]
+pub fn content_index_status(
+    state: State<'_, storage::content_index::ContentIndexState>,
+) -> Result<storage::content_index::ContentIndexStatus, CommandError> {
+    state.inner().status().map_err(content_index_error)
+}
+
+#[tauri::command]
+pub fn search_content(
+    query: String,
+    use_regex: bool,
+    state: State<'_, storage::content_index::ContentIndexState>,
+) -> Result<ContentSearchResponse, CommandError> {
+    let results = state
+        .inner()
+        .search(&query, use_regex)
+        .map_err(content_index_error)?;
+    let status = state.inner().status().map_err(content_index_error)?;
+    Ok(ContentSearchResponse { status, results })
+}
+
+#[tauri::command]
+pub async fn rebuild_content_index(
+    operation_id: String,
+    state: State<'_, AppState>,
+    content_state: State<'_, storage::content_index::ContentIndexState>,
+    batch_state: State<'_, BatchState>,
+    app: AppHandle,
+) -> Result<ContentIndexRebuildResult, CommandError> {
+    let control = batch_state.begin_content_index(&operation_id)?;
+    let entries = match state.snapshot() {
+        Ok(entries) => entries,
+        Err(error) => {
+            batch_state.finish(&operation_id);
+            return Err(storage_command_error(error));
+        }
+    };
+    let revision = state.revision();
+    if let Err(error) = content_state.inner().mark_indexing() {
+        batch_state.finish(&operation_id);
+        return Err(content_index_error(error));
+    }
+    emit_content_index_status(&app, content_state.inner());
+    let content_for_task = content_state.inner().clone();
+    let control_for_task = control.clone();
+    let joined = tauri::async_runtime::spawn_blocking(move || {
+        content_for_task.rebuild(&entries, revision, &|| {
+            control_for_task.stop_reason().is_some()
+        })
+    })
+    .await;
+    let cancelled = control.cancelled();
+    let timed_out = control.timed_out();
+    batch_state.finish(&operation_id);
+    let result = match joined {
+        Ok(Ok(result)) => result,
+        Ok(Err(error)) => {
+            if !matches!(
+                &error,
+                storage::content_index::ContentIndexError::RecoveryRequired
+            ) {
+                content_state.inner().mark_unavailable(&error.to_string());
+            }
+            emit_content_index_status(&app, content_state.inner());
+            return Err(content_index_error(error));
+        }
+        Err(_) => {
+            content_state
+                .inner()
+                .mark_unavailable("正文索引任务未完成，请重试");
+            emit_content_index_status(&app, content_state.inner());
+            return Err(command_error(
+                "task-failed",
+                "正文索引任务未完成，请重试",
+                true,
+                "unknown",
+            ));
+        }
+    };
+    let status = content_state.status().map_err(content_index_error)?;
+    emit_content_index_status(&app, content_state.inner());
+    Ok(ContentIndexRebuildResult {
+        operation_id,
+        revision,
+        indexed_count: result.indexed_count,
+        updated_count: result.updated_count,
+        removed_count: result.removed_count,
+        skipped_count: result.skipped_count,
+        skipped_reasons: result.skipped_reasons,
+        cancelled: cancelled || result.cancelled,
+        timed_out,
+        status,
+    })
+}
+
+#[tauri::command]
+pub fn clear_content_index(
+    state: State<'_, AppState>,
+    content_state: State<'_, storage::content_index::ContentIndexState>,
+    app: AppHandle,
+) -> Result<storage::content_index::ContentIndexStatus, CommandError> {
+    let status = content_state
+        .inner()
+        .clear(state.revision())
+        .map_err(content_index_error)?;
+    emit_content_index_status(&app, content_state.inner());
+    Ok(status)
+}
+
+#[tauri::command]
+pub fn cancel_content_index(
+    operation_id: String,
+    state: State<'_, BatchState>,
+) -> Result<(), CommandError> {
+    if !is_valid_operation_id(&operation_id) {
+        return Err(command_error(
+            "invalid-operation-id",
+            "正文索引操作标识无效",
+            false,
+            "unchanged",
+        ));
+    }
+    state.cancel(&operation_id)
+}
+
 pub(crate) fn refresh_index_sync<R: Runtime>(
     state: &AppState,
     app: &AppHandle<R>,
@@ -869,6 +1024,33 @@ fn apply_refresh_result_without_reconcile(
 
 pub(super) fn storage_message(error: StorageError) -> String {
     error.to_string()
+}
+
+fn storage_command_error(error: StorageError) -> CommandError {
+    structured_storage_error(error)
+}
+
+fn content_index_error(error: storage::content_index::ContentIndexError) -> CommandError {
+    let message = error.to_string();
+    let (code, retryable, state) = match &error {
+        storage::content_index::ContentIndexError::InvalidQuery => {
+            ("invalid-content-query", false, "unchanged")
+        }
+        storage::content_index::ContentIndexError::RecoveryRequired
+        | storage::content_index::ContentIndexError::Corrupt
+        | storage::content_index::ContentIndexError::UnsupportedVersion => {
+            ("content-index-recovery-required", true, "unknown")
+        }
+        storage::content_index::ContentIndexError::Unavailable
+        | storage::content_index::ContentIndexError::Read
+        | storage::content_index::ContentIndexError::Write => {
+            ("content-index-unavailable", true, "unknown")
+        }
+        storage::content_index::ContentIndexError::Stale => {
+            ("content-index-stale", true, "unknown")
+        }
+    };
+    command_error(code, message, retryable, state)
 }
 
 fn resolve_directory_target(
@@ -984,7 +1166,44 @@ pub(crate) fn emit_index_changed<R: Runtime>(
     };
     let _ = app.emit_to("floating-ball", "index-changed", event.clone());
     let _ = app.emit_to("main", "index-changed", event);
+    if let Ok(entries) = app.state::<AppState>().snapshot() {
+        schedule_content_index_sync(app, revision, entries);
+    }
     crate::windows::tray::refresh_menu(app);
+}
+
+pub(crate) fn schedule_content_index_sync<R: Runtime>(
+    app: &AppHandle<R>,
+    revision: u64,
+    entries: Vec<IndexEntry>,
+) {
+    let content_state = app
+        .state::<storage::content_index::ContentIndexState>()
+        .inner()
+        .clone();
+    let app_for_task = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        match content_state.sync_entries(&entries, revision) {
+            Ok(_) => emit_content_index_status(&app_for_task, &content_state),
+            Err(
+                storage::content_index::ContentIndexError::RecoveryRequired
+                | storage::content_index::ContentIndexError::Stale,
+            ) => {}
+            Err(error) => {
+                content_state.mark_unavailable(&error.to_string());
+                emit_content_index_status(&app_for_task, &content_state);
+            }
+        }
+    });
+}
+
+pub(crate) fn emit_content_index_status<R: Runtime>(
+    app: &AppHandle<R>,
+    state: &storage::content_index::ContentIndexState,
+) {
+    if let Ok(status) = state.status() {
+        let _ = app.emit_to("main", "content-index-changed", status);
+    }
 }
 
 pub(crate) fn record_entry_opened<R: Runtime>(

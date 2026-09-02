@@ -21,13 +21,37 @@ export const SORT_OPTIONS = Object.freeze([
 export const DEFAULT_SORT = Object.freeze({ key: "addedAt", direction: "desc" });
 export const RECENT_ENTRY_LIMIT = 50;
 export const RECENT_OPENED_ENTRY_LIMIT = 50;
+export const SEARCH_MODES = Object.freeze({ metadata: "metadata", content: "content" });
+export const MAX_SEARCH_QUERY_CHARS = 256;
 
 export function normalizeSearchQuery(value) {
-  return String(value || "")
+  return String(value ?? "")
     .normalize("NFKC")
     .trim()
     .replace(/\s+/g, " ")
     .toLocaleLowerCase("zh-CN");
+}
+
+export function normalizeRawSearchQuery(value) {
+  return String(value ?? "").normalize("NFKC").trim();
+}
+
+export function validateSearchQuery(value, useRegex = false) {
+  const query = normalizeRawSearchQuery(value);
+  if ([...query].length > MAX_SEARCH_QUERY_CHARS) {
+    return { valid: false, query, message: `搜索内容不能超过 ${MAX_SEARCH_QUERY_CHARS} 个字符` };
+  }
+  if (/[\u0000-\u001f\u007f-\u009f]/.test(query)) {
+    return { valid: false, query, message: "搜索内容不能包含控制字符" };
+  }
+  if (useRegex && query) {
+    try {
+      new RegExp(query, "iu");
+    } catch {
+      return { valid: false, query, message: "正则表达式无效，请检查语法" };
+    }
+  }
+  return { valid: true, query, message: "" };
 }
 
 export { getExtension, getFileKind, getFileType };
@@ -39,6 +63,8 @@ export function getDisplayType(entry) {
 export function getLibraryContextKey({
   activeNav = "library",
   searchQuery = "",
+  searchMode = SEARCH_MODES.metadata,
+  useRegex = false,
   filters = {},
   directoryView = null,
 } = {}) {
@@ -50,7 +76,11 @@ export function getLibraryContextKey({
   }));
   return JSON.stringify({
     activeNav: String(activeNav || "library"),
-    searchQuery: normalizeSearchQuery(searchQuery),
+    searchQuery: useRegex || searchMode === SEARCH_MODES.content
+      ? normalizeRawSearchQuery(searchQuery)
+      : normalizeSearchQuery(searchQuery),
+    searchMode: String(searchMode || SEARCH_MODES.metadata),
+    useRegex: Boolean(useRegex),
     type: normalizeSearchQuery(filters.type),
     tags: normalizedTags,
     groupIds: normalizedGroups,
@@ -159,9 +189,14 @@ export function filterEntries(
     groupIds = [],
     groups = [],
     directoryView,
+    searchMode = SEARCH_MODES.metadata,
+    useRegex = false,
+    contentMatchIds = new Set(),
   } = {},
 ) {
-  const normalizedQuery = normalizeSearchQuery(query);
+  const normalizedQuery = searchMode === SEARCH_MODES.content || useRegex
+    ? normalizeRawSearchQuery(query)
+    : normalizeSearchQuery(query);
   const normalizedTags = tags.map(normalizeSearchQuery).filter(Boolean);
   const selectedTypes = types.map(normalizeSearchQuery).filter(Boolean);
   const selectedGroups = new Set(groupIds.filter(Boolean));
@@ -179,22 +214,95 @@ export function filterEntries(
     const entryTags = Array.isArray(entry.tags) ? entry.tags.map(normalizeSearchQuery) : [];
     if (normalizedTags.length && !normalizedTags.every((tag) => entryTags.includes(tag))) return false;
     if (!normalizedQuery) return true;
-    const searchable = [
-      entry.name,
-      getDisplayType(entry),
-      entry.status,
-      entry.invalid ? "路径失效" : "已登记",
-      entry.path,
-      getEntryLocation(entry, directoryView).fullPath,
-      getEntryLocation(entry, directoryView).parentPath,
-      ...(Array.isArray(entry.relativePath) ? entry.relativePath : []),
-      ...entryTags,
-      entry.groupId ? groupNameById.get(entry.groupId) : "",
-    ]
-      .map(normalizeSearchQuery)
-      .join(" ");
+    if (searchMode === SEARCH_MODES.content) {
+      return contentMatchIds instanceof Set
+        ? contentMatchIds.has(entry.id)
+        : contentMatchIds.includes(entry.id);
+    }
+    const fields = getSearchableEntryFields(entry, { directoryView, entryTags, groupNameById });
+    if (useRegex) {
+      let expression;
+      try {
+        expression = new RegExp(normalizedQuery, "iu");
+      } catch {
+        return false;
+      }
+      return fields.some((field) => expression.test(field.value));
+    }
+    const searchable = fields.map((field) => normalizeSearchQuery(field.value)).join(" ");
     return normalizedQuery.split(" ").every((token) => token && searchable.includes(token));
   });
+}
+
+export function getSearchableEntryFields(entry, { directoryView, entryTags, groupNameById } = {}) {
+  const location = getEntryLocation(entry, directoryView);
+  const tags = entryTags || (Array.isArray(entry.tags) ? entry.tags : []);
+  const groupName = entry.groupId ? groupNameById?.get(entry.groupId) : "";
+  return [
+    { key: "name", label: "名称", value: entry.name },
+    { key: "type", label: "类型", value: getDisplayType(entry) },
+    { key: "status", label: "状态", value: entry.status },
+    { key: "location", label: "位置", value: entry.path },
+    { key: "location", label: "位置", value: location.fullPath },
+    { key: "location", label: "位置", value: location.parentPath },
+    ...(Array.isArray(entry.relativePath) ? entry.relativePath.map((value) => ({ key: "location", label: "位置", value })) : []),
+    ...tags.map((value) => ({ key: "tag", label: "标签", value })),
+    { key: "group", label: "分组", value: groupName },
+  ].filter((field) => typeof field.value === "string" && field.value.length > 0);
+}
+
+export function getMetadataSearchHit(entry, query, { useRegex = false, directoryView, groups = [] } = {}) {
+  const validation = validateSearchQuery(query, useRegex);
+  if (!validation.valid || !validation.query) return null;
+  const groupNameById = new Map(groups.map((group) => [group.id, group.name]));
+  const fields = getSearchableEntryFields(entry, { directoryView, groupNameById });
+  if (useRegex) {
+    let expression;
+    try {
+      expression = new RegExp(validation.query, "iu");
+    } catch {
+      return null;
+    }
+    return fields.find((field) => expression.test(field.value)) || null;
+  }
+  const tokens = normalizeSearchQuery(validation.query).split(" ").filter(Boolean);
+  return fields.find((field) => {
+    const value = normalizeSearchQuery(field.value);
+    return tokens.every((token) => value.includes(token));
+  }) || null;
+}
+
+export function getSearchTextRanges(value, query, useRegex = false) {
+  const validation = validateSearchQuery(query, useRegex);
+  if (!validation.valid || !validation.query || typeof value !== "string") return [];
+  const expressions = useRegex
+    ? [validation.query]
+    : normalizeSearchQuery(validation.query).split(" ").filter(Boolean).map(escapeRegExp);
+  const ranges = [];
+  for (const expression of expressions) {
+    let matcher;
+    try {
+      matcher = new RegExp(expression, "giu");
+    } catch {
+      return [];
+    }
+    for (const match of value.matchAll(matcher)) {
+      const start = match.index ?? 0;
+      const end = start + match[0].length;
+      if (start < end) ranges.push({ start, end });
+    }
+  }
+  ranges.sort((left, right) => left.start - right.start || left.end - right.end);
+  return ranges.reduce((merged, range) => {
+    const previous = merged.at(-1);
+    if (previous && range.start <= previous.end) previous.end = Math.max(previous.end, range.end);
+    else merged.push(range);
+    return merged;
+  }, []);
+}
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 export function getRecentEntries(entries) {

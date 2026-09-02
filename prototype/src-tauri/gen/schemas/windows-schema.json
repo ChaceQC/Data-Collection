@@ -213,16 +213,34 @@
           "markdownDescription": "Enables the cancel_batch_operation command without any pre-configured scope."
         },
         {
+          "description": "Enables the cancel_content_index command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-cancel-content-index",
+          "markdownDescription": "Enables the cancel_content_index command without any pre-configured scope."
+        },
+        {
           "description": "Enables the cancel_preview_task command without any pre-configured scope.",
           "type": "string",
           "const": "allow-cancel-preview-task",
           "markdownDescription": "Enables the cancel_preview_task command without any pre-configured scope."
         },
         {
+          "description": "Enables the clear_content_index command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-clear-content-index",
+          "markdownDescription": "Enables the clear_content_index command without any pre-configured scope."
+        },
+        {
           "description": "Enables the clear_operation_history command without any pre-configured scope.",
           "type": "string",
           "const": "allow-clear-operation-history",
           "markdownDescription": "Enables the clear_operation_history command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the content_index_status command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-content-index-status",
+          "markdownDescription": "Enables the content_index_status command without any pre-configured scope."
         },
         {
           "description": "Enables the copy_indexed_file command without any pre-configured scope.",
@@ -345,6 +363,12 @@
           "markdownDescription": "Enables the open_main_from_floating command without any pre-configured scope."
         },
         {
+          "description": "Enables the rebuild_content_index command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-rebuild-content-index",
+          "markdownDescription": "Enables the rebuild_content_index command without any pre-configured scope."
+        },
+        {
           "description": "Enables the record_floating_paths command without any pre-configured scope.",
           "type": "string",
           "const": "allow-record-floating-paths",
@@ -415,6 +439,12 @@
           "type": "string",
           "const": "allow-save-operation-record",
           "markdownDescription": "Enables the save_operation_record command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the search_content command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-search-content",
+          "markdownDescription": "Enables the search_content command without any pre-configured scope."
         },
         {
           "description": "Enables the set_entry_group command without any pre-configured scope.",
@@ -501,16 +531,34 @@
           "markdownDescription": "Denies the cancel_batch_operation command without any pre-configured scope."
         },
         {
+          "description": "Denies the cancel_content_index command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-cancel-content-index",
+          "markdownDescription": "Denies the cancel_content_index command without any pre-configured scope."
+        },
+        {
           "description": "Denies the cancel_preview_task command without any pre-configured scope.",
           "type": "string",
           "const": "deny-cancel-preview-task",
           "markdownDescription": "Denies the cancel_preview_task command without any pre-configured scope."
         },
         {
+          "description": "Denies the clear_content_index command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-clear-content-index",
+          "markdownDescription": "Denies the clear_content_index command without any pre-configured scope."
+        },
+        {
           "description": "Denies the clear_operation_history command without any pre-configured scope.",
           "type": "string",
           "const": "deny-clear-operation-history",
           "markdownDescription": "Denies the clear_operation_history command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the content_index_status command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-content-index-status",
+          "markdownDescription": "Denies the content_index_status command without any pre-configured scope."
         },
         {
           "description": "Denies the copy_indexed_file command without any pre-configured scope.",
@@ -633,6 +681,12 @@
           "markdownDescription": "Denies the open_main_from_floating command without any pre-configured scope."
         },
         {
+          "description": "Denies the rebuild_content_index command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-rebuild-content-index",
+          "markdownDescription": "Denies the rebuild_content_index command without any pre-configured scope."
+        },
+        {
           "description": "Denies the record_floating_paths command without any pre-configured scope.",
           "type": "string",
           "const": "deny-record-floating-paths",
@@ -703,6 +757,12 @@
           "type": "string",
           "const": "deny-save-operation-record",
           "markdownDescription": "Denies the save_operation_record command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the search_content command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-search-content",
+          "markdownDescription": "Denies the search_content command without any pre-configured scope."
         },
         {
           "description": "Denies the set_entry_group command without any pre-configured scope.",

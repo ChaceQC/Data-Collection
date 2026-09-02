@@ -33,6 +33,7 @@ pub fn run() {
             state.resource_response(&request)
         })
         .manage(storage::AppState::default())
+        .manage(storage::content_index::ContentIndexState::default())
         .manage(commands::BatchState::default())
         .manage(storage::operation_history::OperationHistoryState::default())
         .manage(storage::settings::SettingsState::default())
@@ -52,6 +53,17 @@ pub fn run() {
             app.state::<storage::AppState>()
                 .initialize(data_dir.join("index.json"))
                 .map_err(|error| Error::other(error.to_string()))?;
+            let content_state = app.state::<storage::content_index::ContentIndexState>();
+            content_state.initialize(data_dir.join("content-index.json"));
+            let entries = app
+                .state::<storage::AppState>()
+                .snapshot()
+                .map_err(|error| Error::other(error.to_string()))?;
+            commands::schedule_content_index_sync(
+                app.handle(),
+                app.state::<storage::AppState>().revision(),
+                entries,
+            );
             app.state::<storage::settings::SettingsState>()
                 .initialize(data_dir.join("settings.json"))
                 .map_err(|error| Error::other(error.to_string()))?;
@@ -97,6 +109,11 @@ pub fn run() {
             commands::index_paths,
             commands::import_folders_recursive,
             commands::refresh_index,
+            commands::content_index_status,
+            commands::search_content,
+            commands::rebuild_content_index,
+            commands::clear_content_index,
+            commands::cancel_content_index,
             commands::get_index_recovery,
             commands::reset_index_recovery,
             commands::export_index_diagnostic,

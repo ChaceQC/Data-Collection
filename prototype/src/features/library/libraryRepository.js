@@ -3,6 +3,9 @@ import {
   makeDirectoryTarget,
   parseDirectoryEntries,
   parseBatchMutationResult,
+  parseContentIndexRebuildResult,
+  parseContentIndexStatus,
+  parseContentSearchResponse,
   parseGroupMutationResult,
   parseIndexImportResult,
   parseRecursiveImportResult,
@@ -29,6 +32,21 @@ export const libraryRepository = Object.freeze({
   },
   refreshIndex() {
     return invokeCommand("refresh_index", undefined, parseIndexRefreshResult);
+  },
+  contentIndexStatus() {
+    return invokeCommand("content_index_status", undefined, parseContentIndexStatus);
+  },
+  searchContent(query, useRegex = false) {
+    return invokeCommand("search_content", { query, useRegex }, parseContentSearchResponse);
+  },
+  rebuildContentIndex(operationId) {
+    return invokeCommand("rebuild_content_index", { operationId }, parseContentIndexRebuildResult);
+  },
+  clearContentIndex() {
+    return invokeCommand("clear_content_index", undefined, parseContentIndexStatus);
+  },
+  cancelContentIndex(operationId) {
+    return invokeCommand("cancel_content_index", { operationId });
   },
   resetIndexRecovery() {
     return invokeCommand("reset_index_recovery", undefined, parseIndexSnapshot);

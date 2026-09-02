@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-clear-content-index"
+description = "Enables the clear_content_index command without any pre-configured scope."
+commands.allow = ["clear_content_index"]
+
+[[permission]]
+identifier = "deny-clear-content-index"
+description = "Denies the clear_content_index command without any pre-configured scope."
+commands.deny = ["clear_content_index"]

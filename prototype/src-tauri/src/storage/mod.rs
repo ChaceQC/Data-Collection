@@ -16,6 +16,8 @@ use uuid::Uuid;
 
 use crate::filesystem::IndexEntry;
 
+pub(crate) mod content_index;
+pub(crate) mod content_search;
 pub(crate) mod floating_ball;
 pub(crate) mod operation_history;
 #[cfg(not(test))]

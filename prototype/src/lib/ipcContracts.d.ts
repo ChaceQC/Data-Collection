@@ -1,7 +1,8 @@
 export type EntryKind = "folder" | "other" | "markdown" | "text" | "doc" | "docx" | "xlsx" | "pdf" | "image" | "video";
 export type PreviewStatus = "idle" | "loading" | "ready" | "unsupported" | "missing" | "permission-denied" | "too-large" | "converter-missing" | "parse-error" | "cancelled" | "timed-out";
 export type IpcCommand =
-  | "load_file_index" | "list_directory" | "reveal_directory_child" | "index_paths" | "import_folders_recursive" | "refresh_index" | "get_index_recovery"
+  | "load_file_index" | "list_directory" | "reveal_directory_child" | "index_paths" | "import_folders_recursive" | "refresh_index"
+  | "content_index_status" | "search_content" | "rebuild_content_index" | "clear_content_index" | "cancel_content_index" | "get_index_recovery"
   | "reset_index_recovery" | "export_index_diagnostic" | "reposition_file" | "set_favorite"
   | "remove_index_entry" | "copy_indexed_file" | "open_indexed_file" | "reveal_indexed_file"
   | "rename_indexed_file" | "delete_original_file" | "set_entry_tags" | "set_entry_group"
@@ -66,6 +67,52 @@ export interface IndexMutationResult {
   revision: number;
   changedIds: string[];
   entry: IndexEntry | null;
+}
+
+export type ContentIndexState = "ready" | "indexing" | "recovery" | "unavailable";
+
+export interface ContentIndexStatus {
+  state: ContentIndexState;
+  indexedCount: number;
+  totalBytes: number;
+  failedCount: number;
+  sourceRevision: number;
+  lastError: string | null;
+}
+
+export interface ContentTextRange {
+  start: number;
+  end: number;
+}
+
+export interface ContentSnippet {
+  text: string;
+  ranges: ContentTextRange[];
+}
+
+export interface ContentSearchResult {
+  fileId: string;
+  matchCount: number;
+  matchesTruncated: boolean;
+  snippets: ContentSnippet[];
+}
+
+export interface ContentSearchResponse {
+  status: ContentIndexStatus;
+  results: ContentSearchResult[];
+}
+
+export interface ContentIndexRebuildResult {
+  operationId: string;
+  revision: number;
+  indexedCount: number;
+  updatedCount: number;
+  removedCount: number;
+  skippedCount: number;
+  skippedReasons: string[];
+  cancelled: boolean;
+  timedOut: boolean;
+  status: ContentIndexStatus;
 }
 
 export interface RecursiveImportResult {

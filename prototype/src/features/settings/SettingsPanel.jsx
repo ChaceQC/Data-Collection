@@ -1,10 +1,21 @@
 import { useEffect, useRef, useState } from "react";
-import { Check, GearSix } from "@phosphor-icons/react";
+import { ArrowClockwise, Check, GearSix, TrashSimple, X } from "@phosphor-icons/react";
 import { Dialog, DialogCloseButton } from "../../components/Dialog.jsx";
 import { SORT_OPTIONS } from "../library/libraryModel";
 import { DEFAULT_SETTINGS, PAGE_SIZE_OPTIONS, formatByteLimit, normalizeSettings } from "./settingsModel";
 
-export function SettingsPanel({ settings = DEFAULT_SETTINGS, saving = false, onCancel, onSave }) {
+export function SettingsPanel({
+  settings = DEFAULT_SETTINGS,
+  saving = false,
+  onCancel,
+  onSave,
+  contentIndexStatus,
+  contentIndexRebuilding = false,
+  contentIndexClearing = false,
+  onRebuildContentIndex,
+  onClearContentIndex,
+  onCancelContentIndex,
+}) {
   const initialSettings = normalizeSettings(settings);
   const [draft, setDraft] = useState(() => initialSettings);
   const baseRef = useRef(initialSettings);
@@ -62,7 +73,7 @@ export function SettingsPanel({ settings = DEFAULT_SETTINGS, saving = false, onC
   return (
     <Dialog
       title="设置"
-      description={<span className="sr-only">设置本地资料库的排序、窗口和预览限制。</span>}
+      description={<span className="sr-only">设置本地资料库的排序、窗口、预览限制和正文索引。</span>}
       className="settings-dialog"
       busy={saving}
       onClose={onCancel}
@@ -104,8 +115,36 @@ export function SettingsPanel({ settings = DEFAULT_SETTINGS, saving = false, onC
         <ul className="settings-limit-list">{draft.previewLimits.map((limit) => <li key={limit.label}><span>{limit.label}</span><span>{formatByteLimit(limit.maxBytes)}{limit.maxPixels ? `，${limit.maxPixels / 1_000_000} 百万像素` : ""}</span></li>)}</ul>
         <p className="settings-hint">限制由应用安全策略固定，设置只提供查看，不会放宽读取上限。</p>
       </section>
+
+      <section className="settings-section" aria-labelledby="settings-content-index-title">
+        <h3 id="settings-content-index-title">正文索引</h3>
+        <div className="content-index-settings-status" role="status" aria-live="polite">
+          <strong>{getContentIndexStateLabel(contentIndexStatus?.state)}</strong>
+          <span>{contentIndexStatus ? `${contentIndexStatus.indexedCount} 项 · ${formatByteLimit(contentIndexStatus.totalBytes)}` : "正在读取状态"}</span>
+          {contentIndexStatus?.failedCount > 0 && <span>跳过 {contentIndexStatus.failedCount} 项</span>}
+          {contentIndexStatus?.lastError && <span className="settings-error-text">{contentIndexStatus.lastError}</span>}
+        </div>
+        <div className="content-index-settings-actions">
+          {contentIndexRebuilding ? (
+            <button type="button" className="dialog-button dialog-button-secondary" disabled={contentIndexClearing} onClick={onCancelContentIndex}><X size={16} weight="bold" aria-hidden="true" /><span>取消重建</span></button>
+          ) : (
+            <button type="button" className="dialog-button dialog-button-secondary" disabled={!onRebuildContentIndex || contentIndexClearing} onClick={onRebuildContentIndex}><ArrowClockwise size={16} weight="bold" aria-hidden="true" /><span>重建正文索引</span></button>
+          )}
+          <button type="button" className="dialog-button dialog-button-secondary" disabled={!onClearContentIndex || contentIndexRebuilding || contentIndexClearing} onClick={onClearContentIndex}><TrashSimple size={16} weight="regular" aria-hidden="true" /><span>{contentIndexClearing ? "清除中..." : "清除正文索引"}</span></button>
+        </div>
+        <p className="settings-hint">只索引已登记的纯文本和 Markdown，内容保存在本机；单文件和总大小受安全上限限制。</p>
+      </section>
     </Dialog>
   );
+}
+
+function getContentIndexStateLabel(state) {
+  return {
+    ready: "已就绪",
+    indexing: "更新中",
+    recovery: "需要重建",
+    unavailable: "暂不可用",
+  }[state] || "未读取";
 }
 
 function getChangedFields(previous, next) {

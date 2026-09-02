@@ -18,6 +18,7 @@ import { LibraryPanel } from "./features/library/LibraryPanel";
 import { useIndexController } from "./features/library/useIndexController";
 import { useLibraryActions } from "./features/library/useLibraryActions";
 import { useLibraryNavigation } from "./features/library/useLibraryNavigation";
+import { useContentIndexController } from "./features/library/useContentIndexController.js";
 import { SettingsPanel } from "./features/settings/SettingsPanel";
 import { DEFAULT_SETTINGS } from "./features/settings/settingsModel";
 import { useSettingsController } from "./features/settings/useSettingsController";
@@ -28,6 +29,7 @@ import {
   clearSelectionOnContextChange,
   getNavigationCount,
   retainExistingSelection,
+  SEARCH_MODES,
 } from "./features/library/libraryModel";
 import { isMainIndexEntry } from "./features/library/libraryControllerModel.js";
 import {
@@ -133,6 +135,8 @@ function App() {
   const [sort, setSort] = useState({ key: "addedAt", direction: "desc" });
   const [pageSize, setPageSize] = useState(DEFAULT_SETTINGS.pageSize);
   const [selectedIds, setSelectedIds] = useState([]);
+  const [searchMode, setSearchMode] = useState(SEARCH_MODES.metadata);
+  const [useRegex, setUseRegex] = useState(false);
   const [groupManagerOpen, setGroupManagerOpen] = useState(false);
   const [detailsEntryId, setDetailsEntryId] = useState("");
   const [tagFilterRequest, setTagFilterRequest] = useState(null);
@@ -154,6 +158,14 @@ function App() {
     clearSelection: clearBatchSelection,
   });
   const operations = useOperationController({ isTauriRuntime: IS_TAURI_RUNTIME, showToast });
+  const contentIndex = useContentIndexController({
+    isTauriRuntime: IS_TAURI_RUNTIME,
+    searchMode,
+    searchQuery: navigation.searchQuery,
+    useRegex,
+    showToast,
+    operationReporter: operations,
+  });
   const handleLibraryContextChange = useCallback((nextContextKey) => {
     const previousContextKey = libraryContextKeyRef.current;
     libraryContextKeyRef.current = nextContextKey;
@@ -481,6 +493,14 @@ function App() {
           activeNav={activeNav}
           searchQuery={searchQuery}
           onSearchQueryChange={setSearchQuery}
+          searchMode={searchMode}
+          onSearchModeChange={setSearchMode}
+          useRegex={useRegex}
+          onUseRegexChange={setUseRegex}
+          contentSearchResults={contentIndex.searchResults}
+          contentSearchLoading={contentIndex.searchLoading}
+          contentSearchError={contentIndex.searchError}
+          contentIndexStatus={contentIndex.status}
           sort={sort}
           onSortChange={setSort}
           pageSize={pageSize}
@@ -557,7 +577,7 @@ function App() {
 
       {detailsEntry && <EntryDetailsDialog file={detailsEntry} groups={groups} busy={busyFileId === detailsEntry.id} onClose={() => setDetailsEntryId("")} onFavorite={handleFavorite} onPreview={handleDetailsPreview} onCopyLocation={handleCopyLocation} onReveal={handleReveal} onOpenDefault={handleOpenDefault} onEditTags={handleOpenEditTags} onSetGroup={handleOpenSetGroup} onTagClick={handleTagFilter} />}
 
-      {settingsOpen && <SettingsPanel settings={settings} saving={settingsSaving} onCancel={() => setSettingsOpen(false)} onSave={handleSettingsSave} />}
+      {settingsOpen && <SettingsPanel settings={settings} saving={settingsSaving} onCancel={() => setSettingsOpen(false)} onSave={handleSettingsSave} contentIndexStatus={contentIndex.status} contentIndexRebuilding={contentIndex.rebuilding} contentIndexClearing={contentIndex.clearing} onRebuildContentIndex={contentIndex.rebuild} onClearContentIndex={contentIndex.clear} onCancelContentIndex={contentIndex.cancelRebuild} />}
       {pendingAction?.type === "remove" && <RemoveIndexDialog file={pendingAction.file} busy={busyFileId === pendingAction.file.id} onCancel={closePendingAction} onConfirm={() => void confirmRemove()} />}
       {pendingAction?.type === "batch-remove" && <BatchRemoveDialog files={pendingAction.files} busy={batchBusy} onCancel={closePendingAction} onConfirm={() => void confirmBatchRemove()} />}
       {pendingAction?.type === "folder-import" && <ImportFolderDialog folderName={pendingAction.folderName} onCancel={closePendingAction} onConfirm={(mode, policy) => void confirmFolderImport(mode, policy)} />}

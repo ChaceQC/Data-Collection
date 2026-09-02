@@ -2,6 +2,51 @@
 
 ## 2026-09-02
 
+### 阶段 J：本地全文检索与正则（0.3.26 代码候选）
+
+#### 已完成
+
+- 按 `AGENT.md` 和 `PROJECT_PLAN.md` 完成阶段 J：新增独立的 `content-index.json` 正文索引，不改变 `index.json` 元数据格式；启动、导入、刷新和索引 revision 变化后由后台任务按文件路径、大小和修改时间增量同步。
+- 正文范围按共享 `file-types.json` 的 `kind` 判断，覆盖 `text` 和 `markdown` 纯文本内容，包括代码、JSON、配置和 Markdown，不把能力限定为 `.txt`；DOCX、PDF、XLSX、图片和视频不抽取正文。
+- 新增 Rust `content_index`/`content_search` 存储模块和 `regex` 依赖：采用原子 JSON 写入、2 MiB 单文件、64 MiB 总正文、1,000,000 字符、20,000 条记录和 60 秒重建限制；损坏索引独立进入恢复状态并保留备份，不阻塞元数据索引启动。
+- 新增元数据/正文搜索范围切换和正则开关；正文搜索由 Rust `regex` 线性时间引擎执行，限制表达式长度、正则程序大小、单文件命中数和摘要长度，结果只返回不透明资料 ID、命中数、短摘要和高亮范围。
+- 搜索结果继续叠加现有导航、收藏、失效路径、类型、标签、分组和目录上下文；正文命中显示命中字段、摘要和安全 React 文本高亮，不写入日志、toast、URL、操作历史或诊断导出。
+- 设置面板新增正文索引状态、条目数、占用大小、失败数、重建、取消和清除入口；重建使用现有批量取消机制，失败后可再次重建。
+- 新增正文 IPC command、前端契约、Tauri capability 和自动生成权限/schema，版本入口已统一到 `0.3.26`；未创建 Tag、Release 或修改远程仓库。
+
+#### 进行中
+
+- 代码实现、自动测试、前端构建和 Windows x64 NSIS 候选构建已完成；等待用户在 Windows 11/Tauri/WebView2 环境验证真实纯文本样本、正则、重启恢复、清除/重建、取消和大规模使用场景。
+
+#### 阻塞与风险
+
+- 浏览器回退模式不调用正文索引 command，只能验证元数据搜索控件和前端空状态；不能替代桌面端真实文件读取、app data 持久化和 WebView2 验收。
+- 正文索引会为已登记的纯文本和 Markdown 生成本地内容缓存，仍受单文件/总大小限制；解析失败、编码无法识别、权限拒绝和超限文件会计入失败状态并从可搜索正文中排除。
+- 当前未对 DOCX、PDF、XLSX 做正文抽取；安装包仍未签名、不内置 WebView2 Runtime，DOC 预览仍依赖目标机 LibreOffice，`xlsx@0.18.5` 既有依赖风险不变。
+
+#### 下一步
+
+- 用户安装 `0.3.26` NSIS 候选，使用 `tests/fixtures/preview/` 和无敏感代码/配置样本验证非 `.txt` 纯文本索引、中文/英文/数字/标点/代码块/Markdown 表格搜索、正则错误提示、索引重启恢复、重建/清除/取消和失败恢复。
+- 根据具体 Windows 原生阻断项做窄范围修复；在获得明确授权前不创建新的 Tag、Release 或推送远程。
+
+#### 涉及文件
+
+- `prototype/src-tauri/src/storage/content_index.rs`、`content_search.rs`、`commands/mod.rs`、`lib.rs`、`build.rs`、`capabilities/default.json`
+- `prototype/src/features/library/useContentIndexController.js`、`LibraryPanel.jsx`、`LibraryPanelParts.jsx`、`libraryModel.js`、`libraryRepository.js`
+- `prototype/src/features/settings/SettingsPanel.jsx`、`prototype/src/styles.css`
+- `prototype/src/lib/ipcContracts.js`、`ipcContracts.d.ts`、`prototype/tests/content-search-model.test.mjs`、`content-index-contracts.test.mjs`
+- `prototype/package.json`、`package-lock.json`、`src-tauri/Cargo.toml`、`Cargo.lock`、`PROJECT_PLAN.md`、`README.md`、`prototype/README.md`
+
+#### 验证
+
+- `npm.cmd run test:content`：5 项通过；`npm.cmd run test:library`：21 项通过；`npm.cmd run test:contracts`：14 项通过。
+- `cargo test content`：5 项正文索引/正则测试通过；完整 `cargo test --locked --lib`：75 项通过；`cargo fmt --check` 和 `cargo clippy --locked --all-targets --all-features -- -D warnings` 通过。
+- `npm.cmd run build` 通过并生成 Sites 产物；Tauri 自定义 command 权限/schema 已由 `cargo check` 重新生成，`npm.cmd run tauri:build` 和内置 loader 核验通过。
+- 已生成安装包 [`本地资料工作台_0.3.26_x64-setup.exe`](E:/Project/test/prototype/src-tauri/target/release/bundle/nsis/本地资料工作台_0.3.26_x64-setup.exe)，大小 `8790936` bytes，SHA-256 `B6C4E602B64FD46FCF8E960ACC214D2158E76DBB5E641EFAE40877B93380FA1B`；release 主程序大小 `35541231` bytes，SHA-256 `B1CA0A2C039621640DA56FDEE4585BDC8D307DD56B9FAB62503513656F6D167E`。
+- `WebView2Loader.dll` 与主程序同目录，大小 `160320` bytes，SHA-256 `8427B1FC58EC707813E5C0A51EB5D69397BB333250A7B891BE4D3B123F1E0F1C`；loader 目标架构为 Windows x64。
+
+## 2026-09-02
+
 ### 文件夹子项预览解析修复（0.3.25 修订候选）
 
 #### 已完成

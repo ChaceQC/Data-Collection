@@ -3,6 +3,7 @@ import { invoke, isTauri } from "@tauri-apps/api/core";
 export const IPC_COMMANDS = Object.freeze([
   "load_file_index", "list_directory", "reveal_directory_child", "index_paths", "import_folders_recursive", "refresh_index", "get_index_recovery",
   "reset_index_recovery", "export_index_diagnostic", "reposition_file", "set_favorite",
+  "content_index_status", "search_content", "rebuild_content_index", "clear_content_index", "cancel_content_index",
   "remove_index_entry", "copy_indexed_file", "open_indexed_file", "reveal_indexed_file",
   "rename_indexed_file", "delete_original_file", "set_entry_tags", "set_entry_group",
   "create_group", "rename_group", "delete_group", "batch_set_favorite",
@@ -41,6 +42,10 @@ const OPERATION_MESSAGES = Object.freeze({
   "invalid-batch": "请先选择资料",
   "undo-unavailable": "撤销不可用，索引已经发生变化",
   "undo-conflict": "撤销目标已经发生变化，请先刷新索引",
+  "invalid-content-query": "搜索表达式无效，请检查正则语法或缩短搜索内容",
+  "content-index-recovery-required": "正文索引损坏，请重建正文索引",
+  "content-index-unavailable": "正文索引暂不可用，请重试或重建正文索引",
+  "content-index-stale": "正文索引任务已过期，请重建后重试",
   "settings-conflict": "设置已在其他窗口更新，请检查后重新保存",
   "settings-invalid": "设置值无效，请恢复后重试",
   "settings-unavailable": "本地设置暂时不可用，请重试",
@@ -220,6 +225,57 @@ export function parseIndexRefreshResult(value, command = "refresh_index") {
   };
 }
 
+export function parseContentIndexStatus(value, command = "content_index_status") {
+  const source = record(value, command);
+  if (!["ready", "indexing", "recovery", "unavailable"].includes(source.state)) {
+    throw contractError(command, "正文索引状态无效");
+  }
+  return {
+    ...source,
+    state: string(source.state, command, "state"),
+    indexedCount: nonNegativeInteger(source.indexedCount, command, "indexedCount"),
+    totalBytes: nonNegativeInteger(source.totalBytes, command, "totalBytes"),
+    failedCount: nonNegativeInteger(source.failedCount, command, "failedCount"),
+    sourceRevision: nonNegativeInteger(source.sourceRevision, command, "sourceRevision"),
+    lastError: source.lastError == null ? null : string(source.lastError, command, "lastError"),
+  };
+}
+
+export function parseContentSearchResponse(value, command = "search_content") {
+  const source = record(value, command);
+  return {
+    ...source,
+    status: parseContentIndexStatus(source.status, command),
+    results: array(source.results, command).map((item) => {
+      const result = record(item, command);
+      return {
+        ...result,
+        fileId: assertOpaqueId(result.fileId, "fileId"),
+        matchCount: nonNegativeInteger(result.matchCount, command, "matchCount"),
+        matchesTruncated: boolean(result.matchesTruncated, command, "matchesTruncated"),
+        snippets: array(result.snippets, command).map((snippet) => parseContentSnippet(snippet, command)),
+      };
+    }),
+  };
+}
+
+export function parseContentIndexRebuildResult(value, command = "rebuild_content_index") {
+  const source = record(value, command);
+  return {
+    ...source,
+    operationId: assertOpaqueId(source.operationId, "operationId"),
+    revision: nonNegativeInteger(source.revision, command, "revision"),
+    indexedCount: nonNegativeInteger(source.indexedCount, command, "indexedCount"),
+    updatedCount: nonNegativeInteger(source.updatedCount, command, "updatedCount"),
+    removedCount: nonNegativeInteger(source.removedCount, command, "removedCount"),
+    skippedCount: nonNegativeInteger(source.skippedCount, command, "skippedCount"),
+    skippedReasons: stringArray(source.skippedReasons, command, "skippedReasons"),
+    cancelled: boolean(source.cancelled, command, "cancelled"),
+    timedOut: boolean(source.timedOut, command, "timedOut"),
+    status: parseContentIndexStatus(source.status, command),
+  };
+}
+
 export function parsePreviewSupport(value, command = "can_preview") {
   const source = record(value, command);
   return { ...source, supported: boolean(source.supported, command, "supported"), kind: string(source.kind, command, "kind"), status: previewStatus(source.status, command), reason: source.reason == null ? null : string(source.reason, command, "reason") };
@@ -385,6 +441,20 @@ function normalizeRelativePath(value) {
 function parseRecovery(value, command) {
   const source = record(value, command);
   return { ...source, required: boolean(source.required, command, "required"), issue: string(source.issue, command, "issue"), backupCreated: boolean(source.backupCreated, command, "backupCreated"), pendingOperations: nonNegativeInteger(source.pendingOperations, command, "pendingOperations") };
+}
+
+function parseContentSnippet(value, command) {
+  const source = record(value, command);
+  const textValue = string(source.text, command, "text");
+  if (textValue.length > 1024) throw contractError(command, "正文摘要过长");
+  const ranges = array(source.ranges, command).map((range) => {
+    const item = record(range, command);
+    const start = nonNegativeInteger(item.start, command, "start");
+    const end = nonNegativeInteger(item.end, command, "end");
+    if (start >= end || end > textValue.length) throw contractError(command, "正文高亮范围无效");
+    return { start, end };
+  });
+  return { ...source, text: textValue, ranges };
 }
 
 function record(value, command) {

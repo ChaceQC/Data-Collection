@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-rebuild-content-index"
+description = "Enables the rebuild_content_index command without any pre-configured scope."
+commands.allow = ["rebuild_content_index"]
+
+[[permission]]
+identifier = "deny-rebuild-content-index"
+description = "Denies the rebuild_content_index command without any pre-configured scope."
+commands.deny = ["rebuild_content_index"]

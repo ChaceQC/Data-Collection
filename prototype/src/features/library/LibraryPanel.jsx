@@ -24,6 +24,7 @@ import {
   EntryLocation,
   EntryMetadata,
   LibraryFilterMenu,
+  SearchHitSummary,
   getActiveFilterChips,
   getEmptyActions,
   getEmptyDescription,
@@ -46,6 +47,8 @@ import {
   getLibraryContextKey,
   getSelectedIdsInEntries,
   getSelectionRangeIds,
+  SEARCH_MODES,
+  validateSearchQuery,
   paginateEntries,
   sortEntries,
 } from "./libraryModel";
@@ -72,6 +75,14 @@ export function LibraryPanel({
   activeNav,
   searchQuery,
   onSearchQueryChange,
+  searchMode = SEARCH_MODES.metadata,
+  onSearchModeChange,
+  useRegex = false,
+  onUseRegexChange,
+  contentSearchResults = [],
+  contentSearchLoading = false,
+  contentSearchError = "",
+  contentIndexStatus,
   sort = DEFAULT_SORT,
   onSortChange,
   pageSize = PAGE_SIZE,
@@ -133,7 +144,11 @@ export function LibraryPanel({
   const previousRefreshingRef = useRef(false);
   const refreshScrollTopRef = useRef(0);
   const sourceEntries = directoryView?.entries || files;
-  const contextKey = useMemo(() => getLibraryContextKey({ activeNav, searchQuery, filters, directoryView }), [activeNav, directoryView, filters, searchQuery]);
+  const contextKey = useMemo(() => getLibraryContextKey({ activeNav, searchQuery, searchMode, useRegex, filters, directoryView }), [activeNav, directoryView, filters, searchMode, searchQuery, useRegex]);
+  const contentMatchIds = useMemo(() => new Set(contentSearchResults.map((result) => result.fileId).filter(Boolean)), [contentSearchResults]);
+  const contentResultById = useMemo(() => new Map(contentSearchResults.map((result) => [result.fileId, result])), [contentSearchResults]);
+  const searchValidation = validateSearchQuery(searchQuery, useRegex);
+  const metadataSearchError = searchMode === SEARCH_MODES.metadata && !searchValidation.valid ? searchValidation.message : "";
   const visibleFiles = useMemo(() => {
     const filtered = filterEntries(sourceEntries, {
       activeNav,
@@ -144,11 +159,14 @@ export function LibraryPanel({
       groupIds: filters.groupIds,
       groups,
       directoryView,
+      searchMode,
+      useRegex,
+      contentMatchIds,
     });
     const directorySort = sort.key === "addedAt" ? { key: "name", direction: "asc" } : sort;
     if (!directoryView && activeNav === "recent-opened") return filtered;
     return sortEntries(filtered, directoryView ? directorySort : sort);
-  }, [activeNav, directoryView, filters, groups, searchQuery, sort, sourceEntries]);
+  }, [activeNav, contentMatchIds, directoryView, filters, groups, searchMode, searchQuery, sort, sourceEntries, useRegex]);
   const page = useMemo(() => paginateEntries(visibleFiles, currentPage, pageSize), [currentPage, pageSize, visibleFiles]);
   const duplicateIds = useMemo(() => getDuplicateNameIds(sourceEntries), [sourceEntries]);
   const selectedIdSet = useMemo(() => new Set(selectedIds), [selectedIds]);
@@ -296,18 +314,36 @@ export function LibraryPanel({
       </div>
       {refreshError && <div className="inline-error" role="alert">{refreshError}</div>}
       <div className="library-toolbar">
-        <label className="search-field">
-          <MagnifyingGlass size={17} weight="regular" aria-hidden="true" />
-          <span className="sr-only">搜索资料</span>
-          <input ref={searchInputRef} aria-label="搜索资料" aria-keyshortcuts="Control+F" value={searchQuery} placeholder="搜索名称、类型、状态、位置或标签" onChange={(event) => onSearchQueryChange(event.target.value)} />
-          {searchQuery && <button type="button" className="search-clear-button" aria-label="清空搜索" title="清空搜索" onClick={() => onSearchQueryChange("")}><X size={15} weight="bold" aria-hidden="true" /></button>}
-        </label>
+        <div className="search-controls">
+          <label className="search-field">
+            <MagnifyingGlass size={17} weight="regular" aria-hidden="true" />
+            <span className="sr-only">搜索资料</span>
+            <input ref={searchInputRef} maxLength={256} aria-label="搜索资料" aria-keyshortcuts="Control+F" value={searchQuery} placeholder={searchMode === SEARCH_MODES.content ? "搜索正文" : "搜索名称、类型、状态、位置或标签"} onChange={(event) => onSearchQueryChange(event.target.value)} />
+            {searchQuery && <button type="button" className="search-clear-button" aria-label="清空搜索" title="清空搜索" onClick={() => onSearchQueryChange("")}><X size={15} weight="bold" aria-hidden="true" /></button>}
+          </label>
+          <div className="search-options" role="group" aria-label="搜索范围和方式">
+            <div className="search-mode-toggle" role="group" aria-label="搜索范围">
+              <button type="button" className={searchMode === SEARCH_MODES.metadata ? "is-active" : ""} aria-pressed={searchMode === SEARCH_MODES.metadata} onClick={() => onSearchModeChange?.(SEARCH_MODES.metadata)}>文件名和元数据</button>
+              <button type="button" className={searchMode === SEARCH_MODES.content ? "is-active" : ""} aria-pressed={searchMode === SEARCH_MODES.content} onClick={() => onSearchModeChange?.(SEARCH_MODES.content)}>正文</button>
+            </div>
+            <label className="regex-toggle"><input type="checkbox" checked={useRegex} onChange={(event) => onUseRegexChange?.(event.target.checked)} /><span>正则</span></label>
+          </div>
+        </div>
         <LibraryFilterMenu files={files} groups={groups} filters={filters} onChange={setFilters} onManageGroups={onManageGroups} />
         <div className="sort-controls">
           <label className="sort-control"><span>排序</span><select aria-label="排序字段" value={sort.key} onChange={(event) => onSortChange({ ...sort, key: event.target.value })}>{SORT_OPTIONS.map((option) => <option value={option.key} key={option.key}>{option.label}</option>)}</select></label>
           <button type="button" className="sort-direction-button" aria-label={sort.direction === "asc" ? "升序" : "降序"} title={sort.direction === "asc" ? "升序" : "降序"} onClick={() => onSortChange({ ...sort, direction: sort.direction === "asc" ? "desc" : "asc" })}>{sort.direction === "asc" ? <CaretUp size={17} weight="bold" aria-hidden="true" /> : <CaretDown size={17} weight="bold" aria-hidden="true" />}</button>
         </div>
       </div>
+      {metadataSearchError && <div className="inline-error" role="alert">{metadataSearchError}</div>}
+      {searchMode === SEARCH_MODES.content && searchQuery && contentSearchError && <div className="inline-error" role="alert">{contentSearchError}</div>}
+      {searchMode === SEARCH_MODES.content && contentIndexStatus && (
+        <div className={`content-search-status content-search-status-${contentIndexStatus.state}`} role="status" aria-live="polite">
+          <span>{contentIndexStatus.state === "indexing" ? "正文索引更新中" : contentIndexStatus.state === "recovery" ? "正文索引需要重建" : contentIndexStatus.state === "unavailable" ? "正文索引暂不可用" : "正文索引已就绪"}</span>
+          <span>{contentIndexStatus.indexedCount} 项 · {formatFileSize(contentIndexStatus.totalBytes)}</span>
+          {contentIndexStatus.failedCount > 0 && <span>跳过 {contentIndexStatus.failedCount} 项</span>}
+        </div>
+      )}
       {activeFilterChips.length > 0 && (
         <div className="active-filter-summary" role="group" aria-label="当前筛选条件">
           <span className="active-filter-label">当前筛选</span>
@@ -322,7 +358,7 @@ export function LibraryPanel({
 
       {!directoryView && selectedIds.length > 0 && <BulkLibraryToolbar selectedIds={selectedIds} visibleSelectedCount={visibleSelectedCount} groups={groups} busy={batchBusy} retryBatch={retryBatch} undoStatus={undoStatus} onBatchFavorite={onBatchFavorite} onBatchGroup={onBatchGroup} onBatchTags={onBatchTags} onBatchRemove={onBatchRemove} onUndo={onUndo} onRetry={onRetryBatch} onCancelBatch={onCancelBatch} onClear={onClearSelection} />}
 
-      {!indexReady ? <EmptyState icon={<Clock size={28} weight="regular" />} title="正在读取本地索引" description="请稍候。" /> : directoryLoading ? <EmptyState icon={<Clock size={28} weight="regular" />} title="正在读取文件夹" description="请稍候。" /> : visibleFiles.length ? (
+      {!indexReady ? <EmptyState icon={<Clock size={28} weight="regular" />} title="正在读取本地索引" description="请稍候。" /> : directoryLoading ? <EmptyState icon={<Clock size={28} weight="regular" />} title="正在读取文件夹" description="请稍候。" /> : contentSearchLoading && searchMode === SEARCH_MODES.content && searchQuery ? <EmptyState icon={<Clock size={28} weight="regular" />} title="正在搜索正文" description="请稍候。" /> : visibleFiles.length ? (
         <div className="file-table">
           <div ref={tableScrollRef} className="file-table-scroll" data-testid="recent-list">
             <table className="file-table-grid">
@@ -345,6 +381,7 @@ export function LibraryPanel({
                           {duplicateIds.has(file.id) && <span className="file-parent-summary" title={getParentSummary(file, directoryView)}>位于 {getParentSummary(file, directoryView)}</span>}
                           <EntryLocation entry={file} directoryView={directoryView} onCopy={onCopyLocation} onReveal={onReveal} />
                            <EntryMetadata entry={file} onTagClick={onTagFilter} />
+                           <SearchHitSummary entry={file} searchMode={searchMode} searchResult={contentResultById.get(file.id)} searchQuery={searchQuery} useRegex={useRegex} directoryView={directoryView} groups={groups} />
                         </div>
                       </div>
                     </th>

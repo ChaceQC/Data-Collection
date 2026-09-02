@@ -6,7 +6,7 @@ mod resource_protocol;
 mod resources;
 mod result;
 mod spreadsheet;
-mod text;
+pub(crate) mod text;
 mod video;
 
 use std::{

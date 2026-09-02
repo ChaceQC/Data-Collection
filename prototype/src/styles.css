@@ -969,6 +969,14 @@ summary:focus-visible,
   color: var(--muted);
 }
 
+.search-controls {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 9px;
+}
+
 .library-toolbar {
   display: flex;
   flex: 0 0 auto;
@@ -983,6 +991,95 @@ summary:focus-visible,
   min-width: 0;
   flex: 1 1 auto;
   margin-top: 0;
+}
+
+.search-options {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.search-mode-toggle {
+  display: inline-flex;
+  min-height: 36px;
+  align-items: stretch;
+  overflow: hidden;
+  border: 1px solid #d9e0e3;
+  border-radius: 6px;
+  background: #ffffff;
+}
+
+.search-mode-toggle button {
+  min-width: 0;
+  padding: 0 10px;
+  color: #68767c;
+  font-size: 12px;
+  white-space: nowrap;
+  background: transparent;
+  cursor: pointer;
+}
+
+.search-mode-toggle button + button {
+  border-left: 1px solid #d9e0e3;
+}
+
+.search-mode-toggle button:hover,
+.search-mode-toggle button:focus-visible {
+  color: var(--blue);
+  background: #f2f7fb;
+}
+
+.search-mode-toggle button.is-active {
+  color: #1d5f91;
+  font-weight: 700;
+  background: #edf5fb;
+}
+
+.regex-toggle {
+  display: inline-flex;
+  min-height: 36px;
+  align-items: center;
+  gap: 5px;
+  padding: 0 7px;
+  color: #68767c;
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.regex-toggle input {
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  accent-color: var(--green);
+}
+
+.content-search-status {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 9px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.content-search-status-ready span:first-child {
+  color: var(--green-dark);
+  font-weight: 700;
+}
+
+.content-search-status-recovery span:first-child,
+.content-search-status-unavailable span:first-child {
+  color: var(--danger);
+  font-weight: 700;
+}
+
+.content-search-status-indexing span:first-child {
+  color: var(--blue);
+  font-weight: 700;
 }
 
 .active-filter-summary {
@@ -1499,6 +1596,36 @@ summary:focus-visible,
   font-weight: 400;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.search-hit-summary {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: 6px;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.search-hit-field {
+  flex: 0 0 auto;
+  color: var(--blue);
+  font-weight: 700;
+}
+
+.search-hit-snippet {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.search-hit-snippet mark {
+  color: #6a3f00;
+  border-radius: 2px;
+  background: #ffe2a8;
 }
 
 .file-location {
@@ -2055,6 +2182,34 @@ summary:focus-visible,
   color: #879398;
   font-size: 13px;
   line-height: 1.6;
+}
+
+.content-index-settings-status {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 10px 12px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+  border: 1px solid var(--line);
+  background: var(--surface-subtle);
+}
+
+.content-index-settings-status strong {
+  color: var(--ink);
+}
+
+.settings-error-text {
+  overflow-wrap: anywhere;
+  color: var(--danger);
+}
+
+.content-index-settings-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 12px;
 }
 
 .settings-limit-list {
@@ -3805,6 +3960,24 @@ summary:focus-visible,
     width: 100%;
   }
 
+  .search-controls {
+    width: 100%;
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .search-options {
+    justify-content: space-between;
+  }
+
+  .search-mode-toggle {
+    flex: 1 1 auto;
+  }
+
+  .search-mode-toggle button {
+    flex: 1 1 0;
+  }
+
   .file-table {
     overflow: hidden;
   }
@@ -4110,6 +4283,8 @@ summary:focus-visible,
   .preview-dialog,
   .preview-dialog-header,
   .search-field,
+  .search-mode-toggle,
+  .content-index-settings-status,
   .sort-control select,
   .sort-direction-button,
   .filter-menu-trigger,
@@ -4200,6 +4375,31 @@ summary:focus-visible,
     color: var(--blue);
     border-color: var(--line-strong);
     background: var(--surface-subtle);
+  }
+
+  .search-mode-toggle button {
+    color: var(--muted);
+  }
+
+  .search-mode-toggle button + button {
+    border-color: var(--line);
+  }
+
+  .search-mode-toggle button:hover,
+  .search-mode-toggle button:focus-visible,
+  .search-mode-toggle button.is-active {
+    color: var(--blue);
+    background: var(--surface-subtle);
+  }
+
+  .search-mode-toggle,
+  .content-index-settings-status {
+    border-color: var(--line-strong);
+  }
+
+  .search-hit-snippet mark {
+    color: #2b210d;
+    background: #e6b95c;
   }
 
   .drop-zone.is-dragging,
