@@ -1,6 +1,6 @@
 # 本地资料工作台原型
 
-这是基于 `AGENT.md` 方案 3“收纳入口”实现的本地资料工作台。当前发布版本仍为 `v0.3.26`，建立在上一正式发布版本 `v0.3.16` 之上；此前计划阶段 A-J 的代码、最小自动验证、浏览器回退检查和用户 Windows 11/Tauri/WebView2 原生验收均已完成并发布。新的悬浮球“文件库”计划当前处于阶段 D `0.3.30` 代码候选，阶段 A-C 的查询契约、面板骨架和文件库列表交互已作为基础，尚未创建发布 Tag 或 Release；浏览器运行时仍只保留安全的原型回退。
+这是基于 `AGENT.md` 方案 3“收纳入口”实现的本地资料工作台。当前发布版本仍为 `v0.3.26`，建立在上一正式发布版本 `v0.3.16` 之上；此前计划阶段 A-J 的代码、最小自动验证、浏览器回退检查和用户 Windows 11/Tauri/WebView2 原生验收均已完成并发布。新的悬浮球“文件库”计划当前处于阶段 E `0.3.31` 代码候选，阶段 A-D 的查询契约、面板骨架、文件库列表交互和主窗口快捷工作流已作为基础，尚未创建发布 Tag 或 Release；浏览器运行时仍只保留安全的原型回退。
 
 ## 启动
 
@@ -57,6 +57,7 @@ npm.cmd run tauri:build
 - `0.3.26` 候选增加独立的 `content-index.json` 正文索引；索引共享 manifest 中 `kind=text` 或 `kind=markdown` 的纯文本内容，不限于 `.txt`，启动、导入、刷新和索引变更后后台增量同步。资料库支持元数据/正文范围切换和受控正则搜索，结果显示命中字段、短摘要和高亮；设置可查看占用统计并执行重建、取消和清除。
 - `0.3.27` 阶段 A 代码候选新增 `get_floating_files` 文件库查询 command，返回全部登记条目的安全元数据投影，支持名称/类型/标签/分组搜索、白名单筛选、稳定排序和分页，并使用 revision 绑定查询结果；返回不包含完整路径、正文、缩略图或命令行。`0.3.28` 阶段 B 完成文件库标题、总数徽标、固定面板骨架和窄视口压缩，`0.3.29` 阶段 C 已接入完整列表交互、搜索、筛选、排序、分页、空/错误状态和行元数据。
 - `0.3.30` 阶段 D 代码候选增加文件行主窗口定位、文件夹目录进入、资源管理器显示和直接预览；主窗口清除阻塞目标的查询条件，按当前列表快照计算目标页并滚动到目标行，预览入口复用既有预览会话和资源协议。
+- `0.3.31` 阶段 E 代码候选增加悬浮窗的索引 revision 同步、查询序号防旧响应、Windows 路径去重拖放队列、分项记录反馈、分页搜索性能和窗口任务/拖动生命周期清理；`get_floating_files` 查询只读取已校验快照，不会因搜索输入重复扫描整个索引。
 - 分组支持创建、重命名和删除；删除分组只解除资料归属，不删除索引记录或原文件。收藏、标签、分组和索引移除写入最多 50 条本地元数据撤销记录，只有当前 revision 和目标状态均匹配时才允许撤销。
 - `shared/file-types.json` 是前端和 Rust 共用的类型/预览限制 manifest；`src/lib/ipcContracts.js` 和 `ipcContracts.d.ts` 负责 IPC 结构校验，`features/library` 下的 repository/controller 负责 command 与页面状态协调。
 - 预览、设置、重命名、索引移除和原文件删除共用 Dialog 焦点陷阱；窄窗口将资料表切换为保留名称、类型、状态和高频操作的紧凑卡片，样式提供 reduced-motion 和深色模式策略。
@@ -93,7 +94,7 @@ Windows WebView2 使用 `http://preview.localhost/<previewId>` 访问受控资�
 
 PDF 的初始无范围请求返回完整 `200` 响应，客户端明确发起的范围请求仍按 `Content-Range` 分段返回，以兼容 PDF.js 的文件长度探测和分页读取。
 
-预览、资料库核心功能、阶段 F 的设置和显式外部操作，以及此前悬浮球阶段 A-F 的实现、自动验证、Windows 11 桌面手工验收和 `v0.3.6` GitHub Release 均已完成。此前计划阶段 A-J 的代码实现、自动验证、浏览器回退检查和用户 Windows 11/Tauri/WebView2 原生验收均已完成，`v0.3.26` 已创建 Tag 并发布 GitHub Release；新的悬浮球阶段 D `0.3.30` 已完成代码候选、自动验证、浏览器回退检查，Windows 原生安装、资源管理器、文件预览和悬浮球验收仍待完成。不把所有格式写成无条件“已支持”，视频编码、LibreOffice 和 WebView2 Runtime 仍按各自外部依赖边界处理。
+预览、资料库核心功能、阶段 F 的设置和显式外部操作，以及此前悬浮球阶段 A-F 的实现、自动验证、Windows 11 桌面手工验收和 `v0.3.6` GitHub Release 均已完成。此前计划阶段 A-J 的代码实现、自动验证、浏览器回退检查和用户 Windows 11/Tauri/WebView2 原生验收均已完成，`v0.3.26` 已创建 Tag 并发布 GitHub Release；新的悬浮球阶段 E `0.3.31` 已完成代码候选、自动验证、浏览器回退检查和 NSIS 候选构建，Windows 原生安装、真实拖放、混合 DPI、多显示器、资源管理器、文件预览和悬浮球生命周期验收仍待完成。不把所有格式写成无条件“已支持”，视频编码、LibreOffice 和 WebView2 Runtime 仍按各自外部依赖边界处理。
 
 依赖审计注意事项：当前公开 `xlsx@0.18.5` 没有可用的 npm 修复版本，并存在已知 Prototype Pollution/ReDoS 报告。应用不打开宏、外部链接或 HTML，限制工作簿大小和展示范围，并在 Worker 中解析以便超时或异常时终止；在替换为有修复的兼容库前，该风险仍需纳入发布判断。
 
@@ -135,6 +136,6 @@ cargo test
 cargo clippy --all-targets --all-features -- -D warnings
 ```
 
-`npm.cmd run build` 会生成 Sites 所需的 `dist/client/index.html`、`dist/server/index.js` 和 `dist/.openai/hosting.json`。浏览器/Sites 模式不会调用真实文件预览、托盘、窗口、递归导入或正文索引 command；此前 Windows 桌面预览、资料库操作、阶段 F、悬浮球基础能力和阶段 H-J 验收记录在根目录 `PROJECT_PROGRESS.md`，新的阶段 A `0.3.27`、阶段 B `0.3.28`、阶段 C `0.3.29` 和阶段 D `0.3.30` 代码候选、自动验证、NSIS 构建结果和用户原生验收边界也记录在同一进度文档中。
+`npm.cmd run build` 会生成 Sites 所需的 `dist/client/index.html`、`dist/server/index.js` 和 `dist/.openai/hosting.json`。浏览器/Sites 模式不会调用真实文件预览、托盘、窗口、递归导入或正文索引 command；此前 Windows 桌面预览、资料库操作、阶段 F、悬浮球基础能力和阶段 H-J 验收记录在根目录 `PROJECT_PROGRESS.md`，新的阶段 A `0.3.27`、阶段 B `0.3.28`、阶段 C `0.3.29`、阶段 D `0.3.30` 和阶段 E `0.3.31` 代码候选、自动验证、NSIS 构建结果和用户原生验收边界也记录在同一进度文档中。
 
 悬浮球阶段的自动验证使用 `npm.cmd run test:floating-ball`、`cargo test`、`cargo check` 和 `cargo clippy`；真实 Windows 窗口、文件拖放、多显示器位置和关闭/重启行为的验收记录均保留，本轮悬停面板优化的四边四角、DPI 和组合行为已由用户完成手工确认，代理不以浏览器页面或开发侧命令结果替代该验收。

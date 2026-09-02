@@ -8,6 +8,7 @@ import {
   CaretLeft,
   CaretRight,
   Clock,
+  DownloadSimple,
   DotsThree,
   Eye,
   FileText,
@@ -47,6 +48,7 @@ export function FloatingBallPanel({
   files = [],
   filesStatus = "ready",
   filesRefreshing = false,
+  revision = 0,
   query,
   searchInput = "",
   total = 0,
@@ -86,11 +88,12 @@ export function FloatingBallPanel({
 
   return (
     <section
-      className="floating-ball-panel"
+      className={"floating-ball-panel" + (status === "drag-over" ? " is-drop-target" : "")}
       aria-label="悬浮球文件库"
       data-testid="floating-panel"
       data-library-count-state={count.state}
       data-panel-state={filesStatus}
+      data-revision={revision}
       data-filter={activeFilter}
       data-sort-key={activeSortKey}
       data-sort-direction={direction}
@@ -185,7 +188,14 @@ export function FloatingBallPanel({
         </div>
       </div>
 
-      {feedback && (
+      {status === "drag-over" && (
+        <div className="floating-ball-drop-state" role="status" aria-live="polite">
+          <DownloadSimple size={17} weight="bold" aria-hidden="true" />
+          <span>松开以登记文件或文件夹</span>
+        </div>
+      )}
+
+      {feedback && status !== "drag-over" && (
         <div className={"floating-ball-feedback floating-ball-feedback-" + status} role="status" aria-live="polite">
           {status === "partial-error" || status === "error" ? (
             <WarningCircle size={16} weight="fill" aria-hidden="true" />

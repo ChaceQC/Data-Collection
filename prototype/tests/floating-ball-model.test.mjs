@@ -5,6 +5,7 @@ import {
   dipToPhysicalPosition,
   dipToPhysicalSize,
   getExpandedWindowGeometry,
+  getFloatingQueryResultDecision,
   getFloatingLibraryCountPresentation,
   getNearState,
   getPanelDirection,
@@ -15,6 +16,7 @@ import {
   getSnapPlacement,
   mergePendingPaths,
   monitorToWorkArea,
+  normalizeFloatingPathKey,
   physicalToDipPosition,
 } from "../src/features/floating-ball/floatingBallModel.js";
 
@@ -213,6 +215,37 @@ test("maps successful, partial, and failed records to explicit feedback states",
 
 test("queues rapid drop paths without duplicating already queued values", () => {
   assert.deepEqual(mergePendingPaths(["a", "b"], ["b", "c", "a", "d"]), ["a", "b", "c", "d"]);
+  assert.deepEqual(mergePendingPaths(["C:/资料/报告.txt"], ["c:\\资料\\报告.txt", "D:\\资料\\新.txt"], ["d:\\资料\\新.txt"]), ["C:/资料/报告.txt"]);
+  assert.equal(normalizeFloatingPathKey(" C:/资料/报告.txt "), "c:\\资料\\报告.txt");
+});
+
+test("accepts only the latest active request and revision", () => {
+  assert.equal(getFloatingQueryResultDecision({
+    requestId: 3,
+    activeRequestId: 3,
+    resultRevision: 8,
+    currentRevision: 7,
+    requiredRevision: 8,
+  }), "accept");
+  assert.equal(getFloatingQueryResultDecision({
+    requestId: 2,
+    activeRequestId: 3,
+    resultRevision: 9,
+    currentRevision: 7,
+  }), "superseded");
+  assert.equal(getFloatingQueryResultDecision({
+    requestId: 3,
+    activeRequestId: 3,
+    resultRevision: 7,
+    currentRevision: 8,
+  }), "stale");
+});
+
+test("distinguishes partial, limited, and path-failed drop feedback", () => {
+  assert.equal(getRecordStatus({ recordedCount: 1, skippedCount: 0, truncated: true }), "partial-error");
+  assert.equal(getRecordStatus({ recordedCount: 0, skippedCount: 0, truncated: true }), "partial-error");
+  assert.equal(getRecordMessage({ recordedCount: 0, skippedCount: 1, skippedReasons: ["路径不存在"] }), "全部失败 1 项，路径失效或不可访问（路径不存在）");
+  assert.equal(getRecordMessage({ recordedCount: 1, skippedCount: 0, truncated: true }), "已达到索引上限");
 });
 
 function assertRectWithin(rect, area) {

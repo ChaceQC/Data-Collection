@@ -13,7 +13,7 @@ import {
   openMainFromFloating,
   showMainWindow,
 } from "./floatingBallApi.js";
-import { getOperationError } from "../../lib/ipcContracts.js";
+import { getOperationError, parseIndexChangedEvent, parseRevisionEvent } from "../../lib/ipcContracts.js";
 import { FloatingBallPanel } from "./FloatingBallPanel.jsx";
 import {
   createFloatingBallHoverController,
@@ -45,8 +45,8 @@ export function FloatingBallWindow() {
   const openWindowRef = useRef(null);
   const closeWindowRef = useRef(null);
   const hoverErrorRef = useRef(null);
-  const latestRevisionRef = useRef(0);
   const actionBusyRef = useRef("");
+  const indexChangedHandlerRef = useRef(null);
 
   if (!controllerRef.current) {
     controllerRef.current = createFloatingBallHoverController({
@@ -55,7 +55,7 @@ export function FloatingBallWindow() {
       onStateChange: (nextState) => {
         panelOpenRef.current = isFloatingPanelVisible(nextState);
         setHoverState(nextState);
-        setStatus((current) => current === "recording" || current === "moving"
+        setStatus((current) => current === "recording" || current === "moving" || current === "drag-over"
           ? current
           : isFloatingPanelVisible(nextState) ? "near" : "idle");
       },
@@ -80,10 +80,10 @@ export function FloatingBallWindow() {
   const records = useFloatingBallRecords({
     isTauriRuntime: IS_TAURI_RUNTIME,
     panelOpenRef,
-    setFeedback,
     setStatus,
     showFeedback,
   });
+  indexChangedHandlerRef.current = records.handleIndexChanged;
   const drag = useFloatingBallDrag({
     endControllerDrag: hoverController.endDrag,
     isTauriRuntime: IS_TAURI_RUNTIME,
@@ -113,10 +113,12 @@ export function FloatingBallWindow() {
       hoverController.nearChanged(nearRef.current);
     }));
     register(listenFloatingEvent("index-changed", (event) => {
-      const revision = Number(event.payload?.revision || 0);
-      if (revision <= latestRevisionRef.current) return;
-      latestRevisionRef.current = revision;
-      void records.refreshFiles({ background: true });
+      const payload = safeParse(parseIndexChangedEvent, event.payload, "index-changed");
+      if (payload) indexChangedHandlerRef.current?.(payload);
+    }));
+    register(listenFloatingEvent("floating-recorded", (event) => {
+      const payload = safeParse(parseRevisionEvent, event.payload, "floating-recorded");
+      if (payload) indexChangedHandlerRef.current?.(payload);
     }));
     return () => {
       disposed = true;
@@ -234,11 +236,12 @@ export function FloatingBallWindow() {
   ) : status === "partial-error" || status === "error" ? (
     <WarningCircle className="floating-ball-status-mark floating-ball-status-mark-error" size={14} weight="fill" aria-hidden="true" />
   ) : null;
-  const panel = panelOpen ? (
+  const panel = panelOpen && (!IS_TAURI_RUNTIME || geometry.layoutReady) ? (
     <FloatingBallPanel
       files={records.files}
       filesStatus={records.filesStatus}
       filesRefreshing={records.filesRefreshing}
+      revision={records.revision}
       query={records.query}
       searchInput={records.searchInput}
       total={records.total}
@@ -304,7 +307,8 @@ export function FloatingBallWindow() {
       style={geometry.getLayoutStyle()}
       onPointerEnter={handlePointerEnter}
       onPointerLeave={handlePointerLeave}
-      onDragOver={IS_TAURI_RUNTIME ? undefined : (event) => event.preventDefault()}
+      onDragOver={IS_TAURI_RUNTIME ? undefined : handleBrowserDragOver}
+      onDragLeave={IS_TAURI_RUNTIME ? undefined : handleBrowserDragLeave}
       onDrop={records.handleBrowserDrop}
     >
       {panel}
@@ -323,5 +327,24 @@ export function FloatingBallWindow() {
       event.preventDefault();
       void hoverController.toggle();
     }
+  }
+
+  function handleBrowserDragOver(event) {
+    event.preventDefault();
+    if (status !== "recording") setStatus("drag-over");
+  }
+
+  function handleBrowserDragLeave(event) {
+    if (event.currentTarget === event.target && status !== "recording") {
+      setStatus(panelOpenRef.current ? "near" : "idle");
+    }
+  }
+}
+
+function safeParse(parser, value, command) {
+  try {
+    return parser(value, command);
+  } catch {
+    return null;
   }
 }

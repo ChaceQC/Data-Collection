@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   getFloatingCurrentMonitor,
   getFloatingScaleFactor,
@@ -32,20 +32,31 @@ const FALLBACK_WORK_AREA = Object.freeze({
 export function useFloatingBallWindowGeometry({ isTauriRuntime, placementRef, hoverController }) {
   const [direction, setDirection] = useState("left");
   const [layout, setLayout] = useState(null);
+  const [layoutReady, setLayoutReady] = useState(!isTauriRuntime);
   const anchorPositionRef = useRef(null);
   const anchorScaleFactorRef = useRef(null);
   const windowTaskRef = useRef(Promise.resolve());
+  const disposedRef = useRef(false);
+
+  useEffect(() => {
+    disposedRef.current = false;
+    return () => {
+      disposedRef.current = true;
+    };
+  }, []);
 
   async function openPanelWindow({ operationId }) {
+    if (disposedRef.current) return { stale: true };
     if (!isTauriRuntime) return true;
+    setLayoutReady(false);
     return enqueueWindowTask(async () => {
-      if (!hoverController.isOperationCurrent(operationId)) return { stale: true };
+      if (disposedRef.current || !hoverController.isOperationCurrent(operationId)) return { stale: true };
       const [position, monitor, scaleFactor] = await Promise.all([
         getFloatingWindowPosition(),
         getFloatingCurrentMonitor(),
         getFloatingScaleFactor(),
       ]);
-      if (!hoverController.isOperationCurrent(operationId)) return { stale: true };
+      if (disposedRef.current || !hoverController.isOperationCurrent(operationId)) return { stale: true };
       const factor = resolveScaleFactor(monitor, scaleFactor);
       const workArea = resolveWorkArea(monitor, factor);
       const ballPosition = physicalToDipPosition(position, factor);
@@ -61,7 +72,7 @@ export function useFloatingBallWindowGeometry({ isTauriRuntime, placementRef, ho
         FLOATING_PANEL_SIZE,
         workArea,
       );
-      if (!hoverController.isOperationCurrent(operationId)) return { stale: true };
+      if (disposedRef.current || !hoverController.isOperationCurrent(operationId)) return { stale: true };
       anchorPositionRef.current = geometry.ballRect;
       anchorScaleFactorRef.current = factor;
       setDirection(nextDirection);
@@ -72,26 +83,29 @@ export function useFloatingBallWindowGeometry({ isTauriRuntime, placementRef, ho
       // Resizing first can make a near-edge window span another monitor and
       // trigger a DPI change before the final position is applied.
       await moveFloatingWindow(physicalPosition.x, physicalPosition.y);
-      if (!hoverController.isOperationCurrent(operationId)) return { stale: true };
+      if (disposedRef.current || !hoverController.isOperationCurrent(operationId)) return { stale: true };
       await resizeFloatingWindow(physicalSize.width, physicalSize.height);
-      if (!hoverController.isOperationCurrent(operationId)) return { stale: true };
+      if (disposedRef.current || !hoverController.isOperationCurrent(operationId)) return { stale: true };
+      setLayoutReady(true);
       return true;
     });
   }
 
   async function closePanelWindow({ operationId }) {
+    if (disposedRef.current) return { stale: true };
     if (!isTauriRuntime) {
       resetExpandedLayout();
       return true;
     }
+    setLayoutReady(false);
     return enqueueWindowTask(async () => {
-      if (!hoverController.isOperationCurrent(operationId)) return { stale: true };
+      if (disposedRef.current || !hoverController.isOperationCurrent(operationId)) return { stale: true };
       const [position, monitor, scaleFactor] = await Promise.all([
         getFloatingWindowPosition(),
         getFloatingCurrentMonitor(),
         getFloatingScaleFactor(),
       ]);
-      if (!hoverController.isOperationCurrent(operationId)) return { stale: true };
+      if (disposedRef.current || !hoverController.isOperationCurrent(operationId)) return { stale: true };
       const factor = anchorScaleFactorRef.current || resolveScaleFactor(monitor, scaleFactor);
       const currentPosition = physicalToDipPosition(position, factor);
       const collapsedPosition = anchorPositionRef.current || currentPosition;
@@ -101,9 +115,9 @@ export function useFloatingBallWindowGeometry({ isTauriRuntime, placementRef, ho
         height: FLOATING_BALL_CONSTANTS.ballSizeDip,
       }, factor);
       await moveFloatingWindow(physicalPosition.x, physicalPosition.y);
-      if (!hoverController.isOperationCurrent(operationId)) return { stale: true };
+      if (disposedRef.current || !hoverController.isOperationCurrent(operationId)) return { stale: true };
       await resizeFloatingWindow(physicalSize.width, physicalSize.height);
-      if (!hoverController.isOperationCurrent(operationId)) return { stale: true };
+      if (disposedRef.current || !hoverController.isOperationCurrent(operationId)) return { stale: true };
       resetExpandedLayout();
       return true;
     });
@@ -119,12 +133,14 @@ export function useFloatingBallWindowGeometry({ isTauriRuntime, placementRef, ho
     anchorPositionRef.current = null;
     anchorScaleFactorRef.current = null;
     setLayout(null);
+    setLayoutReady(!isTauriRuntime);
   }
 
   return {
     closePanelWindow,
     direction,
     getLayoutStyle: () => getLayoutStyle(layout),
+    layoutReady,
     openPanelWindow,
     resetExpandedLayout,
     updateDirection: setDirection,

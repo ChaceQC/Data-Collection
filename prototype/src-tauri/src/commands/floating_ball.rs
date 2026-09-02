@@ -32,12 +32,12 @@ pub struct FloatingRecentResult {
 pub fn get_floating_files(
     query: storage::floating_files::FloatingFilesQuery,
     state: State<'_, AppState>,
-    app: AppHandle,
 ) -> Result<storage::floating_files::FloatingFilesResult, CommandError> {
     storage::floating_files::validate_floating_files_query(&query)
         .map_err(|error| command_error(error.code(), error.to_string(), false, "unchanged"))?;
-    super::refresh_index_sync(&state, &app)
-        .map_err(|message| command_error("floating-files-unavailable", message, true, "unknown"))?;
+    // Search and pagination must stay read-only. Startup/index refresh and
+    // mutations reconcile filesystem metadata and notify this window through
+    // index-changed, so typing a query never rescans the whole index.
     let repository = crate::storage::repository::IndexRepository::new(state.inner());
     let snapshot = repository
         .snapshot_with_revision()
@@ -115,20 +115,18 @@ pub async fn record_floating_paths(
         skipped_reasons: skipped_reasons.clone(),
         truncated,
     };
-    let _ = app.emit_to(
-        "main",
-        "floating-recorded",
-        FloatingRecordedEvent {
-            revision: result.revision,
-            ids: merge_stats.affected_ids.clone(),
-            indexed_count: result.indexed_count,
-            refreshed_count: result.refreshed_count,
-            recorded_count: result.recorded_count,
-            skipped_count: result.skipped_count,
-            skipped_reasons: result.skipped_reasons.clone(),
-            truncated: result.truncated,
-        },
-    );
+    let recorded_event = FloatingRecordedEvent {
+        revision: result.revision,
+        ids: merge_stats.affected_ids.clone(),
+        indexed_count: result.indexed_count,
+        refreshed_count: result.refreshed_count,
+        recorded_count: result.recorded_count,
+        skipped_count: result.skipped_count,
+        skipped_reasons: result.skipped_reasons.clone(),
+        truncated: result.truncated,
+    };
+    let _ = app.emit_to("main", "floating-recorded", recorded_event.clone());
+    let _ = app.emit_to("floating-ball", "floating-recorded", recorded_event);
     if !merge_stats.affected_ids.is_empty() {
         super::emit_index_changed(
             &app,

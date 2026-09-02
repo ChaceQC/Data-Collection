@@ -8,18 +8,29 @@ import {
   getRecordMessage,
   getRecordStatus,
   mergePendingPaths,
+  normalizeFloatingPathKey,
 } from "./floatingBallModel.js";
 
 export function useFloatingBallRecords({
   isTauriRuntime,
   panelOpenRef,
-  setFeedback,
   setStatus,
   showFeedback,
 }) {
   const fileLibrary = useFloatingBallFiles({ isTauriRuntime, showFeedback });
   const recordingRef = useRef(false);
   const pendingPathsRef = useRef([]);
+  const activePathKeysRef = useRef(new Set());
+  const disposedRef = useRef(false);
+
+  useEffect(() => {
+    disposedRef.current = false;
+    return () => {
+      disposedRef.current = true;
+      pendingPathsRef.current = [];
+      activePathKeysRef.current.clear();
+    };
+  }, []);
 
   useEffect(() => {
     if (!isTauriRuntime) return undefined;
@@ -38,8 +49,11 @@ export function useFloatingBallRecords({
   }, [isTauriRuntime]);
 
   function handleDropEvent(event) {
+    if (disposedRef.current) return;
     const type = event.payload?.type;
     if (type === "enter" || type === "over") {
+      if (recordingRef.current) return;
+      showFeedback("", "drag-over", 0);
       setStatus("drag-over");
       return;
     }
@@ -51,13 +65,13 @@ export function useFloatingBallRecords({
   }
 
   function recordPaths(paths) {
-    const nextPaths = mergePendingPaths([], paths);
+    const nextPaths = mergePendingPaths([], paths, activePathKeysRef.current);
     if (!nextPaths.length) {
-      showFeedback("没有找到可记录的路径", "error");
+      if (!recordingRef.current) showFeedback("没有找到可记录的路径", "error");
       return;
     }
     if (recordingRef.current) {
-      pendingPathsRef.current = mergePendingPaths(pendingPathsRef.current, nextPaths);
+      pendingPathsRef.current = mergePendingPaths(pendingPathsRef.current, nextPaths, activePathKeysRef.current);
       return;
     }
     void processRecordPaths(nextPaths);
@@ -65,25 +79,27 @@ export function useFloatingBallRecords({
 
   async function processRecordPaths(paths) {
     recordingRef.current = true;
-    setStatus("recording");
-    setFeedback("正在记录资料...");
+    activePathKeysRef.current = new Set(paths.map(normalizeFloatingPathKey).filter(Boolean));
+    showFeedback("正在记录资料...", "recording", 0);
     try {
       const result = await recordFloatingPaths(paths);
+      if (disposedRef.current) return;
       const refreshed = await fileLibrary.refreshFiles({ background: true });
       await fileLibrary.refreshLibraryCount();
-      if (refreshed) showFeedback(getRecordMessage(result), getRecordStatus(result));
+      if (!disposedRef.current && refreshed) showFeedback(getRecordMessage(result), getRecordStatus(result));
     } catch (error) {
-      showFeedback(getErrorMessage(error, "悬浮球记录失败，请重试"), "error");
+      if (!disposedRef.current) showFeedback(getErrorMessage(error, "悬浮球记录失败，请重试"), "error");
     } finally {
       recordingRef.current = false;
+      activePathKeysRef.current.clear();
       const pendingPaths = pendingPathsRef.current;
       pendingPathsRef.current = [];
-      if (pendingPaths.length) void processRecordPaths(pendingPaths);
+      if (!disposedRef.current && pendingPaths.length) void processRecordPaths(pendingPaths);
     }
   }
 
   function handleBrowserDrop(event) {
-    if (isTauriRuntime) return;
+    if (isTauriRuntime || disposedRef.current) return;
     event.preventDefault();
     const droppedFiles = [...(event.dataTransfer?.files || [])].slice(0, 8);
     if (!droppedFiles.length) return;

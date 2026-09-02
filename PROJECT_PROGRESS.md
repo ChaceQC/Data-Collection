@@ -1,5 +1,63 @@
 # 项目进度
 
+## 2026-09-03
+
+### 阶段 E：同步、拖放反馈、性能和窗口稳定性（0.3.31 代码候选）
+
+#### 已完成
+
+- 按当前 `AGENT.md` 和 `PROJECT_PLAN.md` 完成阶段 E：悬浮窗通过经过契约校验的 `index-changed` 事件接收索引变更；收藏、重命名、重新定位、索引移除和包含 `floating-recorded` 写入在内的导入变化都会刷新当前文件库上下文。
+- 文件库 Hook 现在同时使用请求序号和索引 `revision` 接受结果；快速搜索、筛选切换、收藏刷新和拖放期间的旧响应会被丢弃，多个连续 revision 事件会短暂合并后再刷新文件库和数量徽标。
+- 刷新保留当前搜索词、筛选、排序、页码和列表滚动容器；页码超出新总数时回退到最后有效页，当前条目消失时以空状态替代旧列表。搜索输入继续使用 180ms 防抖和每页 20 条分页。
+- `get_floating_files` 改为只读取当前已校验索引快照；启动加载、显式索引刷新和实际索引 mutation 仍负责文件系统 metadata reconciliation，并通过 revision 事件通知悬浮窗，避免每次搜索都重新遍历整个索引。
+- 拖放路径队列增加 Windows 分隔符/大小写归一化去重，当前正在记录的路径不会再次提交；球体和面板显示明确的放置态，记录反馈区分新增、刷新、跳过、全部失败、路径失效/权限问题和达到索引上限。
+- 悬浮球查询、拖放、原生移动和几何任务增加销毁保护；面板物理窗口调整完成后才显示，避免打开/收起时先绘制错误尺寸；滚动条占位、内部 overscroll 和 reduced-motion 样式保持窄窗口布局稳定。
+- 新增模型测试覆盖旧请求/旧 revision、Windows 路径去重、失败/路径问题/上限反馈；五个版本入口已同步到 `0.3.31`，`PROJECT_PLAN.md`、根 README 和 `prototype/README.md` 已更新。
+
+#### 进行中
+
+- 无；阶段 E 代码、自动验证、浏览器回退检查和 Windows x64 NSIS 候选构建已完成，尚未创建 Tag、Release 或推送远程。
+
+#### 用户验收
+
+- Windows 11/Tauri/WebView2 原生安装、资源管理器真实拖放、相同/不同路径连续拖入、主窗口操作后的跨窗口最终一致性、混合 DPI、多显示器切换、四边四角贴边、托盘隐藏/退出、重启恢复和卸载仍需用户安装候选后单独确认；本轮没有以浏览器演示或构建成功代替这些验收。
+
+#### 阻塞与风险
+
+- 安装包未签名且不内置 WebView2 Runtime；目标 Windows 11 机器需要已有 WebView2。DOC 预览仍依赖目标机 LibreOffice。
+- 浏览器回退使用内存演示数据，合成拖放事件只验证前端状态和队列入口，不验证 Tauri 原生路径传递、文件系统写入或真实窗口 DPI 行为。
+- `xlsx@0.18.5` 的既有 Prototype Pollution/ReDoS 风险仍按发布边界保留；本阶段没有扩大依赖或改变原文件操作权限。
+
+#### 下一步
+
+- 安装 `0.3.31` x64 NSIS 候选，使用 `tests/fixtures/desktop-acceptance/` 记录目标 Windows/WebView2 版本和上述原生验收结果；确认无回归后进入阶段 F `0.3.32` 的文档收口和候选发布准备。
+
+#### 涉及文件
+
+- `prototype/src/features/floating-ball/FloatingBallWindow.jsx`
+- `prototype/src/features/floating-ball/FloatingBallPanel.jsx`
+- `prototype/src/features/floating-ball/useFloatingBallFiles.js`
+- `prototype/src/features/floating-ball/useFloatingBallRecords.js`
+- `prototype/src/features/floating-ball/floatingBallModel.js`
+- `prototype/src/features/floating-ball/useFloatingBallDrag.js`
+- `prototype/src/features/floating-ball/useFloatingBallWindowGeometry.js`
+- `prototype/src/styles.css`
+- `prototype/src-tauri/src/commands/floating_ball.rs`
+- `prototype/tests/floating-ball-model.test.mjs`
+- `AGENT.md`、`PROJECT_PLAN.md`、`PROJECT_PROGRESS.md`、`README.md`、`prototype/README.md`
+- `prototype/package.json`、`prototype/package-lock.json`、`prototype/src-tauri/tauri.conf.json`、`prototype/src-tauri/Cargo.toml`、`prototype/src-tauri/Cargo.lock`
+
+#### 验证
+
+- `npm.cmd run test:floating-ball`：28 项通过；覆盖状态机、几何/DPI 模型、文件库分页、Windows 路径去重、旧请求/旧 revision 和拖放反馈。
+- `npm.cmd run test:library`：23 项通过；`npm.cmd run test:contracts`：16 项通过。
+- `npm.cmd run build`：通过，生成 Sites 所需的 `dist/client/index.html`、`dist/server/index.js` 和 `dist/.openai/hosting.json`；Vite 既有大 chunk 警告未阻断构建。
+- 浏览器回退：默认演示列表 11 项；快速搜索后最终为 5 项并可恢复为 11 项；收藏筛选为 2 项；360px 视口面板压缩为 280px，`body`、面板和列表无横向溢出；合成拖放显示“松开以登记文件或文件夹”；reduced-motion 下 `transition-duration`/`animation-duration` 为近零；截图保存在 `prototype/output/playwright/phase-e-floating-ball-1280.png` 和 `prototype/output/playwright/phase-e-floating-ball-360.png`，只使用演示数据。
+- `cargo fmt --all -- --check`、`cargo check --locked`、`cargo test --locked`：77 项通过；`cargo clippy --all-targets --all-features --locked -- -D warnings`：通过。
+- `npm.cmd run tauri:build`：通过，生成 `prototype/src-tauri/target/release/bundle/nsis/本地资料工作台_0.3.31_x64-setup.exe`；安装器 `8,809,529` bytes，SHA-256 `0C04FF446E34FE0989004F1AB7C8A9CA0832AA49A09F7AFF73C58578FA31B7BE`。
+- release 主程序 `prototype/src-tauri/target/release/local-material-workbench.exe`：`35,638,426` bytes，FileVersion/ProductVersion `0.3.31`，SHA-256 `07BE128FF76A1AF006E81F89CFFC37E749571508274287E68924D4A21A5E642D`。
+- `WebView2Loader.dll`：`160,320` bytes，SHA-256 `8427B1FC58EC707813E5C0A51EB5D69397BB333250A7B891BE4D3B123F1E0F1C`；`verify-webview2-loader.mjs` 确认 loader 与 release 主程序同目录，目标架构为 Windows x64。临时 Vite 服务、Playwright 浏览器会话已关闭，49217 端口已释放。
+
 ## 2026-09-02
 
 ### 阶段 D：主窗口连续工作流和四项快捷操作（0.3.30 代码候选）

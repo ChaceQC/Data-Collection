@@ -40,14 +40,16 @@ export function useFloatingBallDrag({
   const dragEndedRef = useRef(false);
   const nativeDragStartedRef = useRef(false);
   const placementTimerRef = useRef(null);
+  const disposedRef = useRef(false);
   showFeedbackRef.current = showFeedback;
 
   useEffect(() => {
+    disposedRef.current = false;
     if (!isTauriRuntime) return undefined;
     let disposed = false;
     let unlisten;
     listenFloatingMoved((event) => {
-      if (!nativeDragStartedRef.current) return;
+      if (disposed || disposedRef.current || !nativeDragStartedRef.current) return;
       dragMovedRef.current = true;
       schedulePlacementSave(event.payload);
     })
@@ -59,15 +61,14 @@ export function useFloatingBallDrag({
     return () => {
       disposed = true;
       unlisten?.();
+      disposedRef.current = true;
+      clearTimeout(placementTimerRef.current);
+      endControllerDrag({ reopen: false });
     };
-  }, [isTauriRuntime]);
-
-  useEffect(() => () => {
-    clearTimeout(placementTimerRef.current);
-  }, []);
+  }, [endControllerDrag, isTauriRuntime]);
 
   function handleBallPointerDown(event) {
-    if (!isTauriRuntime || event.button !== 0) return;
+    if (disposedRef.current || !isTauriRuntime || event.button !== 0) return;
     pointerStartRef.current = { id: event.pointerId, x: event.clientX, y: event.clientY };
     dragMovedRef.current = false;
     dragStartedRef.current = false;
@@ -78,7 +79,7 @@ export function useFloatingBallDrag({
 
   function handleBallPointerMove(event) {
     const start = pointerStartRef.current;
-    if (!isTauriRuntime || !start || start.id !== event.pointerId || dragStartedRef.current) return;
+    if (disposedRef.current || !isTauriRuntime || !start || start.id !== event.pointerId || dragStartedRef.current) return;
     if (Math.hypot(event.clientX - start.x, event.clientY - start.y) < 6) return;
     dragStartedRef.current = true;
     dragMovedRef.current = true;
@@ -87,7 +88,7 @@ export function useFloatingBallDrag({
     setStatus("moving");
     void startControllerDrag()
       .then(async (prepared) => {
-        if (!prepared || dragEndedRef.current || !movingRef.current) {
+        if (disposedRef.current || !prepared || dragEndedRef.current || !movingRef.current) {
           if (!prepared || dragEndedRef.current) {
             movingRef.current = false;
             setMoving(false);
@@ -101,6 +102,7 @@ export function useFloatingBallDrag({
         if (dragEndedRef.current || !movingRef.current) return;
       })
       .catch(() => {
+        if (disposedRef.current) return;
         endControllerDrag({ reopen: false });
         nativeDragStartedRef.current = false;
         movingRef.current = false;
@@ -110,6 +112,7 @@ export function useFloatingBallDrag({
   }
 
   function handleBallPointerUp(event) {
+    if (disposedRef.current) return;
     if (event.currentTarget.hasPointerCapture?.(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
     }
@@ -132,17 +135,18 @@ export function useFloatingBallDrag({
   }
 
   function handleBallClick(toggle) {
-    if (dragMovedRef.current || movingRef.current) return;
+    if (disposedRef.current || dragMovedRef.current || movingRef.current) return;
     void toggle();
   }
 
   function schedulePlacementSave(position) {
-    if (!isTauriRuntime || !nativeDragStartedRef.current) return;
+    if (disposedRef.current || !isTauriRuntime || !nativeDragStartedRef.current) return;
     clearTimeout(placementTimerRef.current);
     placementTimerRef.current = window.setTimeout(() => void finishMove(position), FLOATING_BALL_CONSTANTS.placementSaveDebounceMs);
   }
 
   async function finishMove(lastPosition) {
+    if (disposedRef.current) return;
     let saveFailed = false;
     try {
       const [currentPosition, monitor, scaleFactor] = await Promise.all([
@@ -159,14 +163,17 @@ export function useFloatingBallDrag({
         monitor?.name || "primary",
       );
       const savedPlacement = await saveFloatingPlacement(nextPlacement);
+      if (disposedRef.current) return;
       placementRef.current = savedPlacement;
       setPlacement(savedPlacement);
       updateDirection(getPanelDirection(savedPlacement, workArea, currentPositionDip, FLOATING_PANEL_SIZE));
       setFeedback("");
     } catch {
+      if (disposedRef.current) return;
       saveFailed = true;
       showFeedbackRef.current("位置无法保存，下次启动可能回到安全默认位置", "error");
     } finally {
+      if (disposedRef.current) return;
       // Windows may finish the non-client drag without sending pointerup back
       // to the WebView. The debounced final position is therefore also the
       // authoritative drag-end signal.

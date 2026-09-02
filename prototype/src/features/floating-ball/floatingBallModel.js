@@ -89,32 +89,66 @@ export function getRecentEntries(entries, limit = FLOATING_BALL_CONSTANTS.recent
     .slice(0, Math.max(0, limit));
 }
 
-export function mergePendingPaths(pendingPaths, nextPaths) {
+export function mergePendingPaths(pendingPaths, nextPaths, excludedPaths = []) {
   const merged = [];
   const seen = new Set();
+  for (const path of excludedPaths || []) {
+    const key = normalizeFloatingPathKey(path);
+    if (key) seen.add(key);
+  }
   for (const path of [...(pendingPaths || []), ...(nextPaths || [])]) {
-    if (typeof path !== "string" || !path.trim() || seen.has(path)) continue;
-    seen.add(path);
-    merged.push(path);
+    const key = normalizeFloatingPathKey(path);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    merged.push(path.trim());
   }
   return merged;
 }
 
+export function normalizeFloatingPathKey(path) {
+  if (typeof path !== "string") return "";
+  return path.trim().replaceAll("/", "\\").replace(/\\+/g, "\\").toLocaleLowerCase("zh-CN");
+}
+
+export function getFloatingQueryResultDecision({
+  requestId,
+  activeRequestId,
+  resultRevision,
+  currentRevision = 0,
+  requiredRevision = 0,
+}) {
+  if (requestId !== activeRequestId) return "superseded";
+  const revision = Number(resultRevision);
+  const minimumRevision = Math.max(Number(currentRevision) || 0, Number(requiredRevision) || 0);
+  return Number.isSafeInteger(revision) && revision >= minimumRevision ? "accept" : "stale";
+}
+
 export function getRecordStatus(result) {
-  const recordedCount = Number(result?.recordedCount) || 0;
+  const recordedCount = Number(result?.recordedCount) || Number(result?.indexedCount) + Number(result?.refreshedCount) || 0;
   const skippedCount = Number(result?.skippedCount) || 0;
   if (recordedCount > 0 && skippedCount > 0) return "partial-error";
+  if (recordedCount > 0 && result?.truncated) return "partial-error";
   if (recordedCount > 0) return "recorded";
+  if (result?.truncated) return "partial-error";
   return "error";
 }
 
 export function getRecordMessage(result) {
   if (!result) return "悬浮球记录失败，请重试";
   const parts = [];
-  if (result.indexedCount) parts.push(`新增 ${result.indexedCount} 项`);
-  if (result.refreshedCount) parts.push(`刷新 ${result.refreshedCount} 项`);
-  if (result.skippedCount) parts.push(`跳过 ${result.skippedCount} 项`);
-  if (result.skippedReasons?.length) parts.push(`原因：${result.skippedReasons.join("、")}`);
+  const indexedCount = Number(result.indexedCount) || 0;
+  const refreshedCount = Number(result.refreshedCount) || 0;
+  const recordedCount = Number(result.recordedCount) || indexedCount + refreshedCount;
+  const skippedCount = Number(result.skippedCount) || 0;
+  const skippedReasons = Array.isArray(result.skippedReasons)
+    ? result.skippedReasons.filter((reason) => typeof reason === "string" && reason)
+    : [];
+  if (indexedCount) parts.push(`新增 ${indexedCount} 项`);
+  if (refreshedCount) parts.push(`刷新 ${refreshedCount} 项`);
+  if (skippedCount) parts.push(`${recordedCount ? "跳过" : "全部失败"} ${skippedCount} 项`);
+  const pathReasons = skippedReasons.filter((reason) => /路径|权限/.test(reason));
+  if (pathReasons.length) parts.push(`路径失效或不可访问（${pathReasons.join("、")}）`);
+  else if (skippedReasons.length) parts.push(`原因：${skippedReasons.join("、")}`);
   if (result.truncated) parts.push("已达到索引上限");
   return parts.length ? parts.join("，") : "没有找到可记录的路径";
 }

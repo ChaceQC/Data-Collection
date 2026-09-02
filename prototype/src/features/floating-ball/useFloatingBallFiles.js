@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { getFloatingFiles } from "./floatingBallApi.js";
 import { setFavorite } from "../library/libraryApi.js";
+import { getFloatingQueryResultDecision } from "./floatingBallModel.js";
 import {
   FLOATING_LIBRARY_DEFAULT_QUERY,
   FLOATING_LIBRARY_PAGE_SIZE,
@@ -12,6 +13,7 @@ import {
 import { DEMO_FLOATING_FILES } from "./floatingBallDemoData.js";
 
 const SEARCH_DEBOUNCE_MS = 180;
+const INDEX_SYNC_DEBOUNCE_MS = 50;
 const DEFAULT_FILE_QUERY = Object.freeze({
   ...FLOATING_LIBRARY_DEFAULT_QUERY,
   limit: FLOATING_LIBRARY_PAGE_SIZE,
@@ -37,8 +39,13 @@ export function useFloatingBallFiles({ isTauriRuntime, showFeedback }) {
   const filesRequestRef = useRef(0);
   const countRequestRef = useRef(0);
   const searchDebounceRef = useRef(null);
+  const indexSyncDebounceRef = useRef(null);
   const lastFetchedQueryRef = useRef(DEFAULT_FILE_QUERY);
   const queryRef = useRef(DEFAULT_FILE_QUERY);
+  const appliedRevisionRef = useRef(isTauriRuntime ? 0 : demoRevisionRef.current);
+  const observedRevisionRef = useRef(isTauriRuntime ? 0 : demoRevisionRef.current);
+  const libraryCountRevisionRef = useRef(isTauriRuntime ? 0 : demoRevisionRef.current);
+  const disposedRef = useRef(false);
   showFeedbackRef.current = showFeedback;
   queryRef.current = query;
 
@@ -50,8 +57,20 @@ export function useFloatingBallFiles({ isTauriRuntime, showFeedback }) {
       filesRequestRef.current += 1;
       countRequestRef.current += 1;
       clearTimeout(searchDebounceRef.current);
+      clearTimeout(indexSyncDebounceRef.current);
     };
   }, [isTauriRuntime]);
+
+  useEffect(() => {
+    disposedRef.current = false;
+    return () => {
+      disposedRef.current = true;
+      filesRequestRef.current += 1;
+      countRequestRef.current += 1;
+      clearTimeout(searchDebounceRef.current);
+      clearTimeout(indexSyncDebounceRef.current);
+    };
+  }, []);
 
   useEffect(() => {
     if (lastFetchedQueryRef.current?.query === query.query) return undefined;
@@ -64,15 +83,38 @@ export function useFloatingBallFiles({ isTauriRuntime, showFeedback }) {
     return () => clearTimeout(searchDebounceRef.current);
   }, [query.query]);
 
-  async function refreshFiles({ initial = false, queryOverride, background = false } = {}) {
+  async function refreshFiles({ initial = false, queryOverride, background = false, requiredRevision = 0, staleRetry = false } = {}) {
+    clearScheduledIndexRefresh();
     const requestId = ++filesRequestRef.current;
-    const requestQuery = normalizeFloatingFilesQuery(queryOverride || queryRef.current);
+    const requestQuery = normalizeFloatingFilesQuery(queryOverride ?? queryRef.current);
     lastFetchedQueryRef.current = requestQuery;
     if (!background) setFilesStatus("loading");
     setFilesRefreshing(true);
     try {
       const result = await fetchFiles(requestQuery);
-      if (requestId !== filesRequestRef.current) return false;
+      if (disposedRef.current) return false;
+      const decision = getFloatingQueryResultDecision({
+        requestId,
+        activeRequestId: filesRequestRef.current,
+        resultRevision: result.revision,
+        currentRevision: appliedRevisionRef.current,
+        requiredRevision: Math.max(requiredRevision, observedRevisionRef.current),
+      });
+      if (decision === "superseded") return false;
+      if (decision === "stale") {
+        if (!staleRetry) {
+          return refreshFiles({
+            initial,
+            queryOverride: requestQuery,
+            background: true,
+            requiredRevision: Math.max(requiredRevision, observedRevisionRef.current),
+            staleRetry: true,
+          });
+        }
+        setFilesRefreshing(false);
+        scheduleIndexRefresh(observedRevisionRef.current);
+        return false;
+      }
       if (requestQuery.offset > 0 && requestQuery.offset >= result.total) {
         const correctedOffset = result.total > 0
           ? Math.floor((result.total - 1) / requestQuery.limit) * requestQuery.limit
@@ -81,8 +123,10 @@ export function useFloatingBallFiles({ isTauriRuntime, showFeedback }) {
         queryRef.current = correctedQuery;
         setQuery(correctedQuery);
         lastFetchedQueryRef.current = correctedQuery;
-        return refreshFiles({ queryOverride: correctedQuery, background });
+        return refreshFiles({ queryOverride: correctedQuery, background, requiredRevision });
       }
+      appliedRevisionRef.current = result.revision;
+      observedRevisionRef.current = Math.max(observedRevisionRef.current, result.revision);
       setFiles(result.items);
       setTotal(result.total);
       setHasMore(result.hasMore);
@@ -91,7 +135,7 @@ export function useFloatingBallFiles({ isTauriRuntime, showFeedback }) {
       setFilesRefreshing(false);
       return true;
     } catch (error) {
-      if (requestId !== filesRequestRef.current) return false;
+      if (disposedRef.current || requestId !== filesRequestRef.current) return false;
       setFilesRefreshing(false);
       if (!background) setFilesStatus("error");
       showFeedbackRef.current(getErrorMessage(error, initial ? "文件库读取失败，请重试" : "文件库暂时无法刷新"), "error");
@@ -105,27 +149,78 @@ export function useFloatingBallFiles({ isTauriRuntime, showFeedback }) {
     return { ...result, revision: demoRevisionRef.current };
   }
 
-  async function refreshLibraryCount() {
+  async function refreshLibraryCount({ requiredRevision = 0, staleRetry = false } = {}) {
     const requestId = ++countRequestRef.current;
     setLibraryCountStatus("loading");
     try {
       const result = isTauriRuntime
         ? await getFloatingFiles({ ...DEFAULT_FILE_QUERY, offset: 0, limit: 1 })
-        : queryFloatingFiles(demoFilesRef.current, { ...DEFAULT_FILE_QUERY, offset: 0, limit: 1 });
-      if (requestId !== countRequestRef.current) return false;
+        : { ...queryFloatingFiles(demoFilesRef.current, { ...DEFAULT_FILE_QUERY, offset: 0, limit: 1 }), revision: demoRevisionRef.current };
+      if (disposedRef.current) return false;
+      const decision = getFloatingQueryResultDecision({
+        requestId,
+        activeRequestId: countRequestRef.current,
+        resultRevision: result.revision,
+        currentRevision: libraryCountRevisionRef.current,
+        requiredRevision: Math.max(requiredRevision, observedRevisionRef.current),
+      });
+      if (decision === "superseded") return false;
+      if (decision === "stale") {
+        if (!staleRetry) {
+          return refreshLibraryCount({
+            requiredRevision: Math.max(requiredRevision, observedRevisionRef.current),
+            staleRetry: true,
+          });
+        }
+        setLibraryCountStatus("error");
+        scheduleIndexRefresh(observedRevisionRef.current);
+        return false;
+      }
+      libraryCountRevisionRef.current = result.revision;
+      observedRevisionRef.current = Math.max(observedRevisionRef.current, result.revision);
       setLibraryCount(result.total);
       setLibraryCountStatus("ready");
       return true;
     } catch (error) {
-      if (requestId !== countRequestRef.current) return false;
+      if (disposedRef.current || requestId !== countRequestRef.current) return false;
       setLibraryCountStatus("error");
       showFeedbackRef.current(getErrorMessage(error, "文件库数量读取失败，请重试"), "error");
       return false;
     }
   }
 
+  function handleIndexChanged(payload) {
+    const nextRevision = Number(payload?.revision ?? payload);
+    if (!Number.isSafeInteger(nextRevision) || nextRevision <= observedRevisionRef.current || disposedRef.current) return false;
+    observedRevisionRef.current = nextRevision;
+    scheduleIndexRefresh(nextRevision);
+    return true;
+  }
+
+  function scheduleIndexRefresh(requiredRevision = 0) {
+    if (disposedRef.current || !isTauriRuntime) return;
+    clearTimeout(indexSyncDebounceRef.current);
+    indexSyncDebounceRef.current = window.setTimeout(() => {
+      indexSyncDebounceRef.current = null;
+      const revisionToLoad = Math.max(requiredRevision, observedRevisionRef.current);
+      void refreshFiles({ background: true, requiredRevision: revisionToLoad });
+      void refreshLibraryCount({ requiredRevision: revisionToLoad });
+    }, INDEX_SYNC_DEBOUNCE_MS);
+  }
+
+  function clearScheduledIndexRefresh() {
+    clearTimeout(indexSyncDebounceRef.current);
+    indexSyncDebounceRef.current = null;
+  }
+
+  function invalidateFilesRequest() {
+    filesRequestRef.current += 1;
+  }
+
   function applyQueryChange(patch, { immediate = true } = {}) {
     clearTimeout(searchDebounceRef.current);
+    clearScheduledIndexRefresh();
+    invalidateFilesRequest();
     const nextQuery = normalizeFloatingFilesQuery({
       ...queryRef.current,
       ...patch,
@@ -186,6 +281,7 @@ export function useFloatingBallFiles({ isTauriRuntime, showFeedback }) {
       if (isTauriRuntime) {
         const result = await setFavorite(entry.id, favorite);
         nextFavorite = result.entry?.favorite ?? favorite;
+        observedRevisionRef.current = Math.max(observedRevisionRef.current, result.revision);
       } else {
         demoFilesRef.current = demoFilesRef.current.map((item) => (
           item.id === entry.id ? { ...item, favorite } : item
@@ -195,7 +291,7 @@ export function useFloatingBallFiles({ isTauriRuntime, showFeedback }) {
       setFiles((current) => current.map((item) => (
         item.id === entry.id ? { ...item, favorite: nextFavorite } : item
       )));
-      const refreshed = await refreshFiles({ background: true });
+      const refreshed = await refreshFiles({ background: true, requiredRevision: isTauriRuntime ? observedRevisionRef.current : 0 });
       if (refreshed) showFeedbackRef.current(nextFavorite ? "已加入收藏" : "已取消收藏", "recorded");
     } catch (error) {
       showFeedbackRef.current(getErrorMessage(error, "收藏状态更新失败，请重试"), "error");
@@ -250,6 +346,7 @@ export function useFloatingBallFiles({ isTauriRuntime, showFeedback }) {
     handleDirectionToggle,
     handlePreviousPage,
     handleNextPage,
+    handleIndexChanged,
     clearSearch,
     clearFilters,
     addDemoFiles,

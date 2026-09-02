@@ -3858,6 +3858,27 @@ summary:focus-visible,
   background: #f4fbf6;
 }
 
+.floating-ball-drop-state {
+  display: flex;
+  flex: 0 0 auto;
+  min-width: 0;
+  min-height: 37px;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 17px;
+  color: #1c5e91;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.35;
+  border-bottom: 1px solid #cfe0ed;
+  background: #edf6fc;
+}
+
+.floating-ball-drop-state span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .floating-ball-feedback-partial-error,
 .floating-ball-feedback-error {
   color: #9b4b2f;
@@ -3877,6 +3898,8 @@ summary:focus-visible,
   margin: 0;
   padding: 8px;
   overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
   list-style: none;
 }
 
@@ -5108,6 +5131,12 @@ summary:focus-visible,
   .floating-ball-feedback {
     color: #79dfa5;
     background: #1d3027;
+  }
+
+  .floating-ball-drop-state {
+    color: #a9d3f4;
+    border-color: #405157;
+    background: #203441;
   }
 
   .floating-ball-feedback-partial-error,
