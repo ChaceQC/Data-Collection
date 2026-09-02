@@ -2,7 +2,53 @@
 
 ## 2026-09-03
 
-### 阶段 E：同步、拖放反馈、性能和窗口稳定性（0.3.31 代码候选）
+### 阶段 F：完整验收、文档收口和候选发布（0.3.32 已发布）
+
+#### 已完成
+
+- 用户确认已完成当前 `PROJECT_PLAN.md` 阶段 F 的 Windows 11/Tauri/WebView2 原生验收；验收覆盖悬浮球启动、置顶、透明背景、位置恢复、悬停/点击展开、球体到面板过渡、延迟收起、`Escape`、拖拽、边缘吸附、四角展开、多显示器和混合 DPI。
+- 用户确认资源管理器真实拖入文件/文件夹、重复路径与记录反馈、超过五项文件库列表、搜索/筛选/排序/滚动、文件定位、文件夹目录、资源管理器显示、文本/Markdown/图片/Office/PDF 直接预览及失败恢复均通过。
+- 用户确认主窗口导入、收藏、移除、重命名、重新定位后的悬浮窗同步，托盘/悬浮球显示与隐藏、主窗口关闭、真正退出、重启恢复和卸载相关生命周期验收通过。
+- 阶段 F 文档收口已完成；`PROJECT_PLAN.md` 的阶段状态、验收清单、候选版本门禁和最终 Definition of Done 已同步，根 README 与 `prototype/README.md` 已移除当前“待原生验收”表述。
+- 阶段 F 验收确认后，`prototype/package.json`、`prototype/package-lock.json` 根包、Tauri 配置、Rust crate 和 `Cargo.lock` 本地 package 五个版本入口已统一更新为 `0.3.32`。
+
+#### 进行中
+
+- 无；阶段 F 原生验收、文档收口、`0.3.32` 版本入口同步、Tag、远端分支同步和 GitHub Release [`v0.3.32`](https://github.com/ChaceQC/Data-Collection/releases/tag/v0.3.32) 已完成。
+
+#### 用户验收
+
+- 2026-09-03，用户确认当前计划第 11.5 节 Windows 11/Tauri/WebView2 原生验收清单全部通过。具体 Windows、WebView2、显示器和 DPI 版本信息未提供，文档不臆填。
+
+#### 阻塞与风险
+
+- 本轮没有阶段 F 原生验收、构建或发布阻塞；`0.3.32` NSIS 安装包已完成构建和 loader 校验，GitHub Release 已发布。
+- 安装包未签名且不内置 WebView2 Runtime；目标 Windows 11 机器需要已有 WebView2。DOC 预览仍依赖目标机 LibreOffice。
+- `xlsx@0.18.5` 的既有 Prototype Pollution/ReDoS 风险仍按发布边界保留；本轮没有扩大依赖或改变原文件操作权限。
+
+#### 下一步
+
+- 本轮已按用户授权完成 `v0.3.32` Tag、`dev`/`main` 远端同步和 GitHub Release 发布；后续变更需新增明确的 `0.3.x` 阶段。
+
+#### 涉及文件
+
+- `PROJECT_PLAN.md`
+- `PROJECT_PROGRESS.md`
+- `README.md`
+- `prototype/README.md`
+- `prototype/package.json`
+- `prototype/package-lock.json`
+- `prototype/src-tauri/tauri.conf.json`
+- `prototype/src-tauri/Cargo.toml`
+- `prototype/src-tauri/Cargo.lock`
+
+#### 验证
+
+- `npm.cmd run tauri:build`：通过，生成并校验 `0.3.32` Windows x64 NSIS 安装包；安装器和 release 主程序/loader 的大小与 SHA-256 已在本条记录。
+- 复核阶段 A-E 已记录的前端模型、契约、构建、Rust 和 `0.3.31` 候选验证结果；本次版本更新未改变代码逻辑，未重复执行完整测试套件。
+- 发布前运行 `git diff --check`：通过，确认文档、版本入口和代码没有编码或空白错误。
+
+### 阶段 E：同步、拖放反馈、性能和窗口稳定性（0.3.31 代码候选，已通过阶段 F 验收）
 
 #### 已完成
 
@@ -16,11 +62,11 @@
 
 #### 进行中
 
-- 无；阶段 E 代码、自动验证、浏览器回退检查和 Windows x64 NSIS 候选构建已完成，尚未创建 Tag、Release 或推送远程。
+- 无；阶段 E 代码、自动验证、浏览器回退检查、Windows x64 NSIS 构建及阶段 F Windows 原生验收、Tag、Release 和远端同步均已完成。
 
 #### 用户验收
 
-- Windows 11/Tauri/WebView2 原生安装、资源管理器真实拖放、相同/不同路径连续拖入、主窗口操作后的跨窗口最终一致性、混合 DPI、多显示器切换、四边四角贴边、托盘隐藏/退出、重启恢复和卸载仍需用户安装候选后单独确认；本轮没有以浏览器演示或构建成功代替这些验收。
+- 用户已于 2026-09-03 确认 Windows 11/Tauri/WebView2 原生安装、资源管理器真实拖放、相同/不同路径连续拖入、主窗口操作后的跨窗口最终一致性、混合 DPI、多显示器切换、四边四角贴边、托盘隐藏/退出、重启恢复和卸载通过；本轮仍没有以浏览器演示或构建成功代替这些验收。
 
 #### 阻塞与风险
 
@@ -30,7 +76,7 @@
 
 #### 下一步
 
-- 安装 `0.3.31` x64 NSIS 候选，使用 `tests/fixtures/desktop-acceptance/` 记录目标 Windows/WebView2 版本和上述原生验收结果；确认无回归后进入阶段 F `0.3.32` 的文档收口和候选发布准备。
+- 阶段 F 原生验收和文档收口已完成，五个版本入口已统一为 `0.3.32`，并已按发布流程完成 Tag/Release 门禁。
 
 #### 涉及文件
 
@@ -2116,3 +2162,5 @@
 - 已运行 `cargo test`，5 项索引/存储测试和 0 项主程序测试通过。
 - 已运行 `cargo clippy --all-targets --all-features -- -D warnings`，通过。
 - 已用 Tauri CLI 从 `prototype/src-tauri/icons/icon.svg` 生成 `icon.ico`，并清理未使用的移动端图标产物。
+- `0.3.32` NSIS 安装包已构建并通过 loader 校验：`prototype/src-tauri/target/release/bundle/nsis/本地资料工作台_0.3.32_x64-setup.exe`，大小 `8806464` bytes，SHA-256 `40465EAA81D238576EA71DD286A30C6592B9D482E88EF7EBD83BF7FDBD268355`。
+- `0.3.32` release 主程序 `prototype/src-tauri/target/release/local-material-workbench.exe` 大小 `35638321` bytes，SHA-256 `3346C9C7FCCB3B7B3A5FB185B584F5C89A4434FF542D5C75218599EF65D536B0`；`WebView2Loader.dll` 大小 `160320` bytes，SHA-256 `8427B1FC58EC707813E5C0A51EB5D69397BB333250A7B891BE4D3B123F1E0F1C`。
