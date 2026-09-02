@@ -291,6 +291,12 @@
           "markdownDescription": "Enables the floating_window_status command without any pre-configured scope."
         },
         {
+          "description": "Enables the get_floating_files command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-get-floating-files",
+          "markdownDescription": "Enables the get_floating_files command without any pre-configured scope."
+        },
+        {
           "description": "Enables the get_floating_recent command without any pre-configured scope.",
           "type": "string",
           "const": "allow-get-floating-recent",
@@ -607,6 +613,12 @@
           "type": "string",
           "const": "deny-floating-window-status",
           "markdownDescription": "Denies the floating_window_status command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_floating_files command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-get-floating-files",
+          "markdownDescription": "Denies the get_floating_files command without any pre-configured scope."
         },
         {
           "description": "Denies the get_floating_recent command without any pre-configured scope.",

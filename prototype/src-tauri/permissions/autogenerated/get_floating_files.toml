@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-get-floating-files"
+description = "Enables the get_floating_files command without any pre-configured scope."
+commands.allow = ["get_floating_files"]
+
+[[permission]]
+identifier = "deny-get-floating-files"
+description = "Denies the get_floating_files command without any pre-configured scope."
+commands.deny = ["get_floating_files"]

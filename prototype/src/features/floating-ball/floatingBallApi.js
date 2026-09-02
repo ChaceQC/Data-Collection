@@ -1,10 +1,12 @@
 import {
   invokeCommand,
   isDesktopRuntime,
+  parseFloatingFilesResult,
   parseFloatingRecentResult,
   parseFloatingRecordResult,
   parseWindowStatus,
 } from "../../lib/ipcContracts.js";
+import { normalizeFloatingFilesQuery } from "./floatingLibraryModel.js";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { currentMonitor, getCurrentWindow } from "@tauri-apps/api/window";
 import { PhysicalPosition, PhysicalSize } from "@tauri-apps/api/dpi";
@@ -23,6 +25,10 @@ export function saveFloatingPlacement(placement) {
 
 export function getFloatingRecent() {
   return invokeCommand("get_floating_recent", undefined, parseFloatingRecentResult);
+}
+
+export function getFloatingFiles(query = {}) {
+  return invokeCommand("get_floating_files", normalizeFloatingFilesQuery(query), parseFloatingFilesResult);
 }
 
 export function recordFloatingPaths(paths) {

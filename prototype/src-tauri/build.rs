@@ -19,6 +19,7 @@ fn main() {
         "export_index_diagnostic",
         "reposition_file",
         "set_favorite",
+        "get_floating_files",
         "remove_index_entry",
         "copy_indexed_file",
         "open_indexed_file",

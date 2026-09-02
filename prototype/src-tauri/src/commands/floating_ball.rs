@@ -1,6 +1,7 @@
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
 
+use super::{command_error, CommandError};
 use crate::{
     filesystem,
     storage::{self, floating_ball::FloatingPlacement, AppState, StorageError},
@@ -25,6 +26,29 @@ pub struct FloatingRecordResult {
 pub struct FloatingRecentResult {
     pub revision: u64,
     pub recent: Vec<storage::FloatingRecentEntry>,
+}
+
+#[tauri::command]
+pub fn get_floating_files(
+    query: storage::floating_files::FloatingFilesQuery,
+    state: State<'_, AppState>,
+    app: AppHandle,
+) -> Result<storage::floating_files::FloatingFilesResult, CommandError> {
+    storage::floating_files::validate_floating_files_query(&query)
+        .map_err(|error| command_error(error.code(), error.to_string(), false, "unchanged"))?;
+    super::refresh_index_sync(&state, &app)
+        .map_err(|message| command_error("floating-files-unavailable", message, true, "unknown"))?;
+    let repository = crate::storage::repository::IndexRepository::new(state.inner());
+    let snapshot = repository
+        .snapshot_with_revision()
+        .map_err(super::structured_storage_error)?;
+    storage::floating_files::query_floating_files(
+        &snapshot.entries,
+        &snapshot.groups,
+        snapshot.revision,
+        &query,
+    )
+    .map_err(|error| command_error(error.code(), error.to_string(), false, "unchanged"))
 }
 
 #[derive(Clone, Debug, Serialize)]

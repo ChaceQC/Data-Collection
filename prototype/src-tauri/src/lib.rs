@@ -120,6 +120,7 @@ pub fn run() {
             commands::reposition_file,
             commands::floating_ball::record_floating_paths,
             commands::floating_ball::get_floating_recent,
+            commands::floating_ball::get_floating_files,
             commands::floating_ball::open_main_from_floating,
             commands::floating_ball::load_floating_placement,
             commands::floating_ball::save_floating_placement,

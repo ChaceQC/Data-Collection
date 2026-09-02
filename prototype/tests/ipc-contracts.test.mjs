@@ -13,6 +13,7 @@ import {
   parseRecursiveImportResult,
   parseMutationResult,
   parseIndexSnapshot,
+  parseFloatingFilesResult,
   parsePreviewResult,
 } from "../src/lib/ipcContracts.js";
 
@@ -86,6 +87,36 @@ test("validates single-entry mutation responses used by tag and group editors", 
   assert.equal(result.entry.tags[0], "重点");
   assert.equal(result.entry.groupId, "group-a");
   assert.throws(() => parseMutationResult({ revision: 7, changedIds: ["C:\\secret"], entry: null }, "set_entry_group"), IpcContractError);
+});
+
+test("validates floating file projections without accepting paths or duplicate IDs", () => {
+  const item = {
+    id: "file-1",
+    name: "研究.txt",
+    type: "文本文件",
+    kind: "file",
+    status: "已登记",
+    invalid: false,
+    favorite: true,
+    size: 12,
+    modifiedAt: 10,
+    lastOpenedAt: null,
+    groupId: "group-1",
+    groupName: "项目 A",
+  };
+  const result = parseFloatingFilesResult({
+    revision: 9,
+    items: [item],
+    total: 2,
+    offset: 0,
+    limit: 1,
+    hasMore: true,
+  });
+  assert.equal(result.items[0].groupName, "项目 A");
+  assert.throws(() => parseFloatingFilesResult({ items: [item], total: 1, offset: 0, limit: 1, hasMore: false }), IpcContractError);
+  assert.throws(() => parseFloatingFilesResult({ revision: 9, items: [{ ...item, path: "C:\\secret" }], total: 1, offset: 0, limit: 1, hasMore: false }), IpcContractError);
+  assert.throws(() => parseFloatingFilesResult({ revision: 9, items: [item, item], total: 2, offset: 0, limit: 2, hasMore: false }), IpcContractError);
+  assert.throws(() => parseFloatingFilesResult({ revision: 9, items: [{ ...item, kind: "text" }], total: 1, offset: 0, limit: 1, hasMore: false }), IpcContractError);
 });
 
 test("keeps directory child preview targets relative to the registered folder", () => {

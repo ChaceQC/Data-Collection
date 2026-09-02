@@ -1,645 +1,712 @@
-# 本地资料工作台 0.3.x 界面与功能增强实施计划
+# 本地资料工作台悬浮球“文件库”改造实施计划
 
-> 计划状态：已完成（代码、自动验证和 Windows 11/Tauri/WebView2 原生验收均已完成）
-> 编制日期：2026-09-01
-> 最后更新：2026-09-02
+> 计划状态：阶段 A 代码候选已完成，Windows 原生验收待用户
+> 编制日期：2026-09-02
 > 当前工作分支：dev
-> 当前发布版本：v0.3.26
-> 上一发布基线：v0.3.16
-> 当前版本：0.3.26
-> 下一阶段版本：待定（当前计划已完成，后续计划另行确认）
+> 当前发布基线：v0.3.26
+> 计划候选版本：v0.3.27 - v0.3.32
 > 适用平台：Windows 11 x64、Tauri 2、Rust stable、React 19、Vite 6
-> 计划目的：在已完成的资料登记、目录浏览、预览、收藏、标签、分组、批量索引操作、悬浮球和托盘能力之上，继续改善日常整理效率、错误恢复、窄窗口使用和本地检索能力。
+> 计划目的：将悬浮球弹窗从“最近记录”改造成可搜索、可筛选、可直接进入主窗口工作的轻量文件库，同时系统性优化悬浮球外观、状态反馈、弹窗布局、文件定位和预览入口。
 
 ## 1. 计划替换说明
 
-### 1.1 当前文件的职责
+### 1.1 新计划的职责
 
-- 本文件已经替换旧版阶段计划，是仓库唯一的后续功能和体验执行入口。
-- 旧版围绕早期悬浮球阶段 A-J 的计划内容不再作为执行依据；已经完成的历史事实保留在 PROJECT_PROGRESS.md、README.md、prototype/README.md 和 Git 历史中。
-- 本计划从当前已发布的 0.3.16 继续编号，按 0.3.17 至 0.3.26 拆成独立阶段。
-- 每个阶段都有独立的代码完成、最小自动验证、文档同步和版本更新门禁，不把所有版本号推迟到最终验收后统一修改。
-- 0.3.26 是本轮规划的最后一个阶段版本；阶段 A-J 已完成代码实现、自动验证和用户 Windows 11/Tauri/WebView2 原生验收，并已创建 `v0.3.26` Tag 和发布 GitHub Release。后续仍可在 0.3.x 范围内增加计划外修复阶段。
+- 本文件替换仓库原有的后续阶段计划，旧计划中的阶段 A-J 不再作为后续执行依据。
+- 原计划已经完成的功能、版本、验收和发布事实继续以 `PROJECT_PROGRESS.md`、`README.md`、`prototype/README.md` 和 Git 历史为准，不在本文件中重复保留。
+- 本轮只规划悬浮球“文件库”改造，不重新规划主窗口已有的索引、预览、托盘、设置、操作中心和正文检索功能。
+- 本轮从 `0.3.27` 开始编号，每个阶段都使用完整的 `0.3.x` 版本号，并在该阶段完成代码、最小验证和文档同步后更新版本入口。
+- `0.3.32` 是本轮计划的收口版本。若后续仍需修复，必须新增一个明确的 `0.3.x` 阶段或补丁阶段，不直接修改已验收版本的计划结论。
 
-### 1.2 本轮代码审查形成的主要问题
+### 1.2 “文件库”的定义
 
-| 编号 | 优先级 | 问题或机会 | 当前实现位置 | 计划阶段 |
+- 悬浮窗主列表展示资料索引中的全部登记条目，而不是只展示最近通过悬浮球拖入的记录。
+- 列表包括普通文件、文件夹和路径已失效的条目；失效条目不能静默消失。
+- 列表不受当前 `lastRecordedAt` 最近五项限制。`lastRecordedAt` 仍然保留给“最近记录”语义、托盘菜单或其他已有消费者使用。
+- `lastOpenedAt` 与 `lastRecordedAt` 继续保持独立含义；“最近打开”可以作为排序项或筛选视图，但不能取代“全部文件库”。
+- “文件库”默认理解为应用已经登记的本地资料集合，不等同于资源管理器当前目录，也不直接扫描任意未登记路径。
+
+### 1.3 当前基线
+
+当前实现的关键行为如下：
+
+- `prototype/src/features/floating-ball/FloatingBallPanel.jsx` 使用 `recent` 属性，标题为“最近记录”，每条记录支持打开和收藏。
+- `prototype/src/features/floating-ball/useFloatingBallRecords.js` 调用 `get_floating_recent`，并通过 `getRecentEntries` 限制和排序最近记录。
+- `prototype/src-tauri/src/commands/floating_ball.rs` 的 `get_floating_recent` 返回 `storage::floating_recent`，后者只保留悬浮球记录过的最近条目。
+- 悬浮球窗口当前约为 `64 x 64 DIP`；面板默认约为 `320 x 322 DIP`，现有几何模型已经处理左右展开、边缘吸附、工作区约束和混合 DPI。
+- 现有拖放流程会登记路径和元数据，现有收藏动作通过 `set_favorite` 完成，现有 `open_main_from_floating` 通过不透明索引 ID 通知主窗口。
+- 现有悬停状态机、拖拽、窗口位置保存、托盘生命周期和浏览器回退演示属于既有能力，本轮应在保持行为兼容的前提下扩展。
+
+### 1.4 本轮必须保持的边界
+
+- 继续采用 local-first 设计，不上传文件、路径、正文、缩略图、日志或使用统计，不增加账号、云同步、在线搜索和遥测。
+- 前端只传递不透明索引 ID、受控查询条件和受控相对路径；不把完整本地路径作为普通 UI 数据、事件或日志输出。
+- 悬浮窗中的“在资源管理器中显示”只能调用已有的受控索引 ID command，不能让前端拼接任意系统命令或任意路径。
+- 文件点击、文件夹点击、预览和资源管理器定位都必须通过主窗口或已有 Rust command 完成，不能在悬浮窗中绕过 Tauri 权限直接读取本地文件。
+- 默认不在悬浮窗中提供删除原文件、重命名原文件、复制原文件等高影响操作；这些操作继续交给主窗口的明确操作和确认流程。
+- 不以浏览器回退模式代替 Windows 11/Tauri 原生验收。浏览器只验证布局、前端状态和无真实文件副作用的演示流程。
+
+## 2. 目标、非目标和完成标准
+
+### 2.1 目标
+
+- 弹窗打开后首先看到“文件库”列表，能够浏览全部登记资料。
+- 用户可以在小尺寸窗口内快速搜索、筛选、排序和滚动文件列表。
+- 用户点击文件后，主窗口显示并获得焦点，定位到对应资料；支持预览的文件可以直接进入主窗口预览。
+- 用户点击文件夹后，主窗口显示并进入对应目录视图。
+- 用户可以从文件行进入“在资源管理器中显示”操作。
+- 用户可以继续把文件或文件夹拖到悬浮球，拖放结果会反馈并刷新文件库，不改变文件库的主排序语义。
+- 悬浮球能够用外观清楚表达普通、悬停、拖入、记录中、成功和失败状态，且不使用持续干扰性的动画。
+- 索引、收藏、主窗口操作和悬浮窗之间通过 revision/event 保持一致，不因旧请求返回而覆盖新列表。
+- 面板在四边、四角、混合 DPI、多显示器和窄工作区下仍能展开、收起、滚动和点击。
+
+### 2.2 非目标
+
+- 不把悬浮窗改造成完整的主窗口替代品。
+- 不在悬浮窗内实现完整的多选、批量删除、批量重命名或批量物理文件操作。
+- 不取消或重定义托盘“最近记录”功能；本轮只改变悬浮球弹窗的主展示内容。
+- 不新增索引持久化格式版本，除非后续确实需要保存悬浮窗的筛选、排序或尺寸设置；若需要，必须单独记录迁移、备份和回滚策略。
+- 不引入全局快捷键、后台服务、启动项、网络服务或新的系统运行时依赖。
+
+### 2.3 端到端完成标准
+
+只有同时满足以下条件，才可以把本轮标记为完成：
+
+- 弹窗标题、空状态、计数和列表内容不再以“最近记录”作为主语义。
+- 列表能够展示超过五项的索引资料，并且滚动、搜索、筛选和排序结果正确。
+- 点击文件能够打开主窗口并定位到该文件；支持格式能够直接进入预览。
+- 点击文件夹能够打开主窗口对应目录；文件和文件夹都能执行资源管理器定位。
+- 拖放新增、重复、跳过、失效、收藏变更和主窗口索引变更都能同步到悬浮窗。
+- 球体和面板视觉状态在浏览器检查和 Windows 11 原生检查中都没有遮挡、跳动、无法点击或焦点丢失问题。
+- 相关前端模型、IPC 契约、Rust command、构建和必要的 Windows 原生验收证据完整记录。
+
+## 3. 目标交互和视觉规格
+
+### 3.1 悬浮球外观
+
+悬浮球继续保持桌面工具的克制风格，强调识别、状态和拖放目标，不做大面积装饰：
+
+- 保持约 `64 x 64 DIP` 的固定球体尺寸，保证拖拽和触控命中区域稳定。
+- 普通状态使用文件堆、资料库或文件夹类图标，避免仅使用容易被理解为“归档”的图标。
+- 右下角增加轻量文件数量徽标；数字为当前文件库条目数，超过两位数使用 `99+`，读取失败时隐藏徽标而不是显示错误数字。
+- 普通状态使用现有绿色主色，悬停可增加轻微外环和阴影，不持续放大，不持续闪烁。
+- 拖入状态切换为蓝色或蓝绿色，并使用加号、文件落入或明显外环表达可放置状态。
+- 记录中显示受控的旋转指示或短暂呼吸效果；成功后短暂显示勾，失败后显示错误标记。
+- 状态动画只服务于状态变化，必须支持 `prefers-reduced-motion`，不能影响窗口拖拽、点击和边缘吸附。
+- 保留键盘焦点可见样式；焦点环不能被球体阴影或窗口裁切。
+- 悬浮球的 `aria-label`、`title` 和屏幕阅读器文本随状态变化，但不能泄露完整文件路径。
+
+### 3.2 文件库面板布局
+
+面板以“标题 + 工具条 + 列表 + 状态反馈”为固定结构，建议默认尺寸约为 `360 x 420 DIP`，具体值由窄工作区几何模型约束：
+
+- 标题区：产品名称、标题“文件库”、总数量、关闭按钮。
+- 搜索区：文件名和元数据搜索输入框，带清空操作；打开面板时不因悬停自动抢走输入焦点。
+- 筛选区：使用紧凑的分段控制，至少提供“全部、收藏、文件夹、失效”。
+- 列表区：固定行高、内部滚动、加载骨架、空结果和错误重试状态。
+- 反馈区：显示导入数量、跳过原因、同步中或失败信息；反馈出现和消失不能改变列表主体高度。
+- 关闭按钮继续支持鼠标、键盘和 `Escape`；关闭后焦点回到悬浮球。
+- 面板与球体保持连续的交互区域，鼠标从球体移动到面板时不因短暂离开而误收起。
+- 面板左右方向继续由可用空间决定；上下位置必须在当前工作区内约束，不能遮挡屏幕边界外的重要内容。
+
+### 3.3 文件行结构
+
+每一行保持稳定尺寸，避免文件名、状态或图标加载导致列表跳动：
+
+- 左侧显示文件或文件夹类型图标。
+- 主文本显示名称，单行省略并通过 `title` 或可访问名称提供完整显示名。
+- 次文本显示类型、大小、所属分组或父目录摘要；文件夹不显示无意义的文件大小。
+- 失效条目显示明确的失效状态；失效条目的打开和预览动作不可执行，但仍可进入主窗口重新定位流程。
+- 收藏按钮独立存在，支持悬停、键盘焦点、忙碌和失败状态。
+- 预览入口使用预览图标；只对支持预览的文件启用，或允许点击后进入主窗口并显示统一的“不支持预览”状态。
+- “在资源管理器中显示”使用独立的定位图标或行操作菜单，不与打开主窗口动作混淆。
+- 文件名或主行点击是主要工作流入口，不能要求用户先打开一个难以发现的菜单。
+
+### 3.4 四个必须提供的快捷工作流
+
+以下四项是硬性验收要求，不得只写在设计说明中：
+
+1. 点击文件直接打开主窗口并定位到该文件。主窗口需要显示、获得焦点、选中对应条目，并滚动或切换到能够看见该条目的列表上下文。
+2. 点击文件夹后打开主窗口对应目录。主窗口需要进入该索引文件夹的目录视图，显示目录面包屑和可浏览的子项。
+3. 增加“在资源管理器中显示”快捷操作。该操作只能使用登记条目的安全 ID，文件或文件夹路径失效时显示可执行错误和重新定位入口。
+4. 增加直接预览入口。支持预览的文件从悬浮窗触发后，主窗口直接打开并进入对应预览会话；不支持、损坏、权限不足或文件过大的情况使用主窗口已有的明确错误状态和下一步动作。
+
+点击文件的默认行为应优先保证“主窗口显示、定位和焦点”成立；直接预览可以作为行内图标或操作菜单入口。若产品最终决定点击文件同时自动预览，必须保留可验证的定位状态，不能只切换到预览而让用户失去当前列表位置。
+
+### 3.5 键盘、焦点和无障碍
+
+- 悬浮球支持 `Enter`、`Space` 打开或收起，`Escape` 收起，现有拖拽快捷行为保持不变。
+- 面板打开后，鼠标悬停展开不自动抢焦点；键盘打开或用户点击搜索框时才进入面板交互。
+- 搜索框支持清空；列表支持 `ArrowUp`、`ArrowDown`、`Home`、`End` 和 `Enter`。
+- `Enter` 在文件行上执行主工作流，在预览按钮、收藏按钮和资源管理器按钮上执行对应动作，不触发行点击两次。
+- `Escape` 按层级关闭操作菜单、清除临时焦点状态并最终收起面板。
+- 弹窗关闭后焦点返回关闭按钮的触发点或悬浮球；失败时焦点不能跳到不可见元素。
+- 图标按钮必须有可访问名称和 tooltip；状态提示使用 `aria-live`，但不重复播报同一结果。
+- `prefers-reduced-motion` 下不依赖动画传达成功、失败或拖放状态。
+
+## 4. 数据、IPC 和状态架构
+
+### 4.1 推荐的数据方向
+
+新增独立的文件库查询 command，不直接把 `get_floating_recent` 改造成全量文件接口：
+
+```text
+悬浮球面板
+  -> useFloatingBallFiles
+  -> floatingBallApi.getFloatingFiles
+  -> get_floating_files
+  -> 索引快照和受控元数据投影
+```
+
+原因如下：
+
+- `get_floating_recent` 已被托盘和最近记录语义使用，直接改变会造成跨功能行为漂移。
+- 文件库需要搜索、筛选、排序、分页和总数，和最近五项不是同一个返回契约。
+- 新 command 可以只返回悬浮窗需要的字段，不暴露完整路径，也避免每次搜索都传输主窗口完整索引和正文数据。
+- revision 可以明确绑定查询结果，避免旧请求覆盖新列表。
+
+### 4.2 `get_floating_files` 请求契约
+
+建议请求字段如下，具体命名以实现时的 IPC 约定为准：
+
+```text
+{
+  query: string,
+  filter: "all" | "favorite" | "folder" | "invalid",
+  sortKey: "name" | "type" | "modifiedAt" | "lastOpenedAt",
+  direction: "asc" | "desc",
+  offset: number,
+  limit: number
+}
+```
+
+约束要求：
+
+- `query` 长度有上限，按名称、类型、标签和必要的分组元数据搜索，不搜索正文。
+- `filter` 和 `sortKey` 只能使用白名单枚举，不能接收任意字段名或表达式。
+- `offset` 和 `limit` 必须是安全的非负整数，`limit` 设置硬上限，防止一次返回异常大的列表。
+- 默认排序使用名称升序，确保“文件库”首先表现为完整、稳定的文件列表；“最近打开”只是可选排序。
+- 搜索和排序不改变索引持久化内容，不写入用户文件目录。
+
+### 4.3 `get_floating_files` 返回契约
+
+建议返回字段如下：
+
+```text
+{
+  revision: number,
+  items: [
+    {
+      id: string,
+      name: string,
+      type: string,
+      kind: "file" | "folder" | other,
+      status: string,
+      invalid: boolean,
+      favorite: boolean,
+      size: number | null,
+      modifiedAt: number | null,
+      lastOpenedAt: number | null,
+      groupId: string | null,
+      groupName: string | null
+    }
+  ],
+  total: number,
+  offset: number,
+  limit: number,
+  hasMore: boolean
+}
+```
+
+- 返回中不包含完整文件路径、正文、缩略图、命令行或外部程序输出。
+- 文件夹的 `size` 使用 `null` 或统一空值语义，不显示为误导性的 `0`。
+- `invalid` 条目仍返回 `id`、名称和必要的状态字段，供主窗口重新定位。
+- 后端排序和分页结果必须稳定；同一排序值使用 `id` 作为确定性次排序键。
+- 若第一版选择一次加载全部条目，也必须保留 `revision` 和受控数量上限，并在索引规模达到边界前切换到分页；不能让 UI 永久依赖无上限全量返回。
+
+### 4.4 既有接口兼容策略
+
+- `get_floating_recent` 保持原有最近记录语义，继续服务托盘或其他已有消费者。
+- `record_floating_paths` 可以继续返回最近记录字段以兼容现有调用方；悬浮窗收到记录结果后，重新请求文件库列表，不把返回的 `recent` 当作主列表。
+- `open_main_from_floating(fileId)` 继续使用不透明 ID，并扩展主窗口事件处理，使其能够区分文件与文件夹。
+- “在资源管理器中显示”优先复用已有 `reveal_indexed_file(fileId)` command；若现有返回状态不足，再补充受控错误类型，不新增前端任意路径能力。
+- 直接预览优先复用主窗口已有预览入口、`floating-open-file` 事件和预览会话管理；不能在悬浮窗中复制一套预览加载器。
+- 收藏动作继续复用 `set_favorite`，成功后只更新受影响条目并等待 revision 事件校正列表。
+
+### 4.5 事件和并发规则
+
+- `index-changed` 到达时，若事件 revision 不大于当前 revision，则丢弃；否则刷新当前查询上下文。
+- 搜索词、筛选、排序或分页改变时生成查询序号；旧查询完成后不能覆盖新查询。
+- 拖放记录进行中时，列表显示记录中状态；记录完成后刷新文件库并显示新增、刷新、跳过和截断结果。
+- 多次快速拖放继续使用现有去重队列，不能因为文件库刷新而重复登记路径。
+- 收藏、主窗口重命名、重新定位、索引移除和最近打开事件到达后，列表要保留当前查询条件并更新可见条目。
+- 面板关闭不取消已经提交的索引写入，但可以取消尚未开始的查询或丢弃过期查询结果。
+
+## 5. 阶段总表
+
+| 阶段 | 目标版本 | 主题 | 交付重点 | 状态 |
 | --- | --- | --- | --- | --- |
-| U-01 | P1 | 多选资料后切换导航、搜索或筛选，隐藏的资料仍可能被批量操作 | prototype/src/features/library/LibraryPanel.jsx、useLibraryNavigation.js、App.jsx | 0.3.17 |
-| U-02 | P1 | 行操作菜单位于表格滚动容器内部，靠近底部时菜单和危险操作会被裁切 | prototype/src/features/library/LibraryActions.jsx、prototype/src/styles.css | 0.3.18 |
-| U-03 | P1 | 预览失败提示“请重试”，但没有重试、定位、复制位置或默认程序打开按钮 | prototype/src/features/preview/PreviewPane.jsx、UnsupportedPreviewer.jsx | 0.3.19 |
-| U-04 | P1 | Rust 已有单条标签和分组 command，前端主要只提供批量入口，单条整理成本高 | prototype/src-tauri/src/commands/library.rs、libraryRepository.js、LibraryActions.jsx | 0.3.20 |
-| U-05 | P1 | 导入、批量操作和部分成功结果主要依靠短时 toast，详细原因不易回看 | prototype/src/features/library/useLibraryActions.js、App.jsx | 0.3.21 |
-| U-06 | P2 | 已有资料时导入区仍占据首屏较大空间，窄窗口下资料表下沉 | prototype/src/App.jsx、prototype/src/styles.css | 0.3.18 |
-| U-07 | P2 | 活动筛选只在弹出菜单内显示，资料总数和当前结果数不够直观 | prototype/src/features/library/LibraryPanel.jsx | 0.3.18 |
-| U-08 | P2 | 设置弹窗 draft 只在首次挂载时读取，外部设置变化后可能覆盖新状态 | prototype/src/features/settings/SettingsPanel.jsx、useSettingsController.js | 0.3.21 |
-| U-09 | P2 | DOCX 的 Mammoth 转换在前端主线程执行，取消只覆盖下载阶段（阶段 H 已解决） | prototype/src/features/preview/OfficePreviewer.jsx | 0.3.24 |
-| U-10 | P2/P3 | 当前没有最近打开、递归导入和全文检索 | prototype/src/features/library、prototype/src-tauri/src/storage、README.md | 0.3.23、0.3.25、0.3.26 |
+| A | 0.3.27 | 文件库数据契约 | 新查询 command、返回投影、IPC 校验、文件库模型 | 代码、自动验证和 NSIS 候选已完成；Windows 原生验收待用户 |
+| B | 0.3.28 | 悬浮球外观和面板骨架 | 球体状态视觉、数量徽标、文件库标题、面板尺寸和稳定布局 | 待开始 |
+| C | 0.3.29 | 文件列表交互 | 全量列表、搜索、筛选、排序、分页、加载和空状态 | 待开始 |
+| D | 0.3.30 | 主窗口连续工作流 | 文件定位、文件夹目录、资源管理器显示和直接预览 | 待开始 |
+| E | 0.3.31 | 同步和稳定性 | 拖放反馈、revision 同步、竞态、混合 DPI、窄窗口和性能 | 待开始 |
+| F | 0.3.32 | 完整验收和候选发布 | 文档收口、自动验证、Windows 11 验收、安装包候选 | 待开始 |
 
-### 1.3 当前基线中必须保持的能力
+每个阶段必须先完成代码和最小验证，再更新该阶段版本；不能先把所有版本入口统一改成 `0.3.32`。
 
-- 默认使用 local-first 方案，不上传文件、路径、缩略图、日志或使用统计，不新增账号、云同步、在线搜索和遥测。
-- 当前的文件索引、设置、预览资源协议、系统托盘、悬浮球位置和窗口拖动行为保持兼容。
-- 资料导入默认仍只保存路径和元数据，不自动复制、移动、重命名或删除原文件。
-- “从资料库移除”和“删除原文件并移入回收站”继续使用不同的操作、文案、确认范围和错误状态。
-- Rust 继续负责路径授权、文件系统、持久化、外部转换器和任务生命周期；前端只负责交互状态和安全内容渲染。
-- 不使用浏览器回退模式代替 Windows 11/Tauri 原生验收。浏览器只能验证页面布局、前端状态和无真实文件副作用的演示流程。
-
-## 2. 版本和 Git 执行规则
-
-### 2.1 阶段版本总表
-
-| 阶段 | 目标版本 | 交付主题 | 当前状态 |
-| --- | --- | --- | --- |
-| A | 0.3.17 | 多选范围、上下文切换和列表滚动状态 | 已完成代码、验证和用户验收 |
-| B | 0.3.18 | 行菜单弹层、首屏布局和活动筛选反馈 | 已完成代码、验证和用户验收 |
-| C | 0.3.19 | 预览错误恢复、预览快捷操作和连续浏览 | 已完成代码、验证和用户验收 |
-| D | 0.3.20 | 单条标签、分组编辑和资料详情 | 已完成代码、验证和用户验收 |
-| E | 0.3.21 | 导入/批量操作结果中心和设置一致性 | 已完成代码、验证和用户验收 |
-| F | 0.3.22 | 键盘操作、范围选择、响应式和无障碍细节 | 已完成代码、验证和用户验收 |
-| G | 0.3.23 | 最近打开和悬浮球到主窗口的连续工作流 | 已完成代码、验证和用户验收 |
-| H | 0.3.24 | DOCX 和大型预览任务的性能与取消 | 已完成代码、验证和用户验收 |
-| I | 0.3.25 | 递归导入、导入策略、进度和取消 | 已完成代码、验证和用户验收 |
-| J | 0.3.26 | 本地全文检索和结果摘要 | 已完成代码、验证和用户验收 |
-
-### 2.2 版本更新时机
-
-每个阶段的版本更新不等待最终 Windows 验收，具体顺序固定为：
-
-1. 完成该阶段的代码、契约、测试和必要的界面状态。
-2. 执行该阶段列出的最小自动验证，修复阻断问题。
-3. 同步 README.md、prototype/README.md、PROJECT_PROGRESS.md 和相关技术文档，明确区分“已实现”“部分支持”“外部依赖”和“计划实现”。
-4. 检查 git diff --check、工作树状态、版本入口和未提交文件范围。
-5. 将以下五个版本入口统一改为该阶段目标版本：
-   - prototype/package.json
-   - prototype/package-lock.json 的根包版本
-   - prototype/src-tauri/tauri.conf.json
-   - prototype/src-tauri/Cargo.toml
-   - prototype/src-tauri/Cargo.lock 的根 package 版本
-6. 在 PROJECT_PROGRESS.md 记录该阶段版本、代码完成状态、自动验证结果、尚未完成的 Windows 验收项和下一阶段入口，然后提交阶段变更。
-
-阶段版本更新表示“该阶段已完成代码交付并形成候选版本”，不表示已经创建 Tag、GitHub Release 或完成 Windows 11 手工验收。只有用户明确授权时，才执行推送、Tag、安装包构建、Release 或远程操作。
-
-### 2.3 分支规则
-
-- 阶段开发以 dev 为基线，可使用 `codex/` 前缀的短生命周期分支；本轮阶段 A-B 使用 `codex/implement-phases-a-b`，已快进合入 dev。
-- 每个阶段建议使用 feature/0.3.17-selection、feature/0.3.18-overlay 等短生命周期分支，完成后合并回 dev。
-- 阶段合并前确认 dev 没有无关改动，检查分支方向和祖先关系，不使用强制推送、硬重置或覆盖用户工作树。
-- 阶段代码完成并同步版本后，dev 可以继续进入下一阶段；Windows 手工验收记录单独维护，不阻塞下一阶段的计划编写和代码准备。
-- 如果候选版本已经发布后才发现问题，修复必须按新的 0.3.x 补丁版本处理；未发布候选的修复可留在当前阶段版本中。
-
-## 3. 目标架构
-
-### 3.1 列表和选择状态
-
-将当前列表中的三个概念明确分开：
-
-- activeNav、搜索词、类型/标签/分组筛选和目录面包屑组成“列表上下文”。
-- selectedId 表示当前键盘焦点或当前预览对象。
-- selectedIds 表示批量操作对象，只允许作用于用户当前明确看到并选择的上下文，除非界面明确提示存在跨上下文选择。
-
-上下文切换时默认清空 selectedIds，刷新索引时保留仍存在的选择、预览对象、目录面包屑和滚动位置。搜索、筛选、导航和目录切换时重置表格滚动到顶部，避免新列表从旧滚动位置开始显示。
-
-### 3.2 统一弹层和焦点管理
-
-- Dialog 继续复用 prototype/src/components/Dialog.jsx 的焦点陷阱、Escape、背景点击和关闭后焦点返回。
-- 行操作菜单使用受控状态和独立的弹层定位逻辑，不能被 .file-table-scroll 或表格单元格的 overflow 裁切。
-- 所有弹层都要定义打开触发点、初始焦点、关闭触发点、窗口边界和窄窗口布局。
-- 菜单使用完整的键盘行为：打开后聚焦第一项，方向键切换，Home/End 跳转，Escape 返回触发按钮。
-
-### 3.3 预览会话
-
-统一由 PreviewPane 管理以下状态：
-
-- 当前资料身份、当前列表上下文和相邻资料 ID。
-- loading、ready、unsupported、missing、permission-denied、too-large、converter-missing、parse-error、cancelled。
-- 重试、关闭、切换资料、打开原文件、定位文件、复制位置和收藏动作。
-- 旧任务取消和旧响应丢弃，任何预览错误都不能影响索引和当前选择。
-
-预览操作只能传递索引 ID 或已登记文件夹 ID 加受控相对路径，不能重新开放任意本地路径。
-
-### 3.4 资料元数据编辑
-
-- 单条标签和分组编辑复用已有的 set_entry_tags、set_entry_group command 和 IPC validator。
-- 批量标签/分组操作继续使用批量 command，不复制单条操作逻辑。
-- 标签、分组、收藏和原文件状态更新后只刷新受影响条目或使用 revision 事件，不无条件重载整份索引。
-- 目录临时子项没有稳定的主索引条目时保持只读，不允许通过详情面板绕过授权。
-
-### 3.5 操作结果中心
-
-操作中心只保存必要的本地元数据，不保存正文、缩略图、完整命令行或不必要的真实路径。建议字段包括：操作 ID、操作类型、开始/结束时间、状态、成功/跳过/失败数量、可重试数量、revision 和错误类别。
-
-单项资料名称可以从当前索引按 ID 显示；不把正文和完整路径写入普通日志。持久化历史最多保留 50 条，支持用户清除，损坏不阻塞应用启动。
-
-## 4. 阶段 A：多选范围和列表状态（0.3.17）
-
-### 4.1 目标
-
-让批量操作永远作用于用户能够理解的选择范围，解决切换导航、搜索、筛选、目录和分页后的隐藏选择问题。
-
-### 4.2 主要文件
-
-- prototype/src/App.jsx
-- prototype/src/features/library/LibraryPanel.jsx
-- prototype/src/features/library/useLibraryNavigation.js
-- prototype/src/features/library/useIndexController.js
-- prototype/src/features/library/libraryModel.js
-- prototype/src/styles.css
-- prototype/tests/library-model.test.mjs
-- 新增必要的列表选择模型测试或浏览器检查脚本
-
-### 4.3 实现清单
-
-- [x] 抽取纯函数，计算列表上下文 key，并提供 clearSelectionOnContextChange 或等价模型。
-- [x] 切换“资料库、最近添加、收藏、失效路径”时清空 selectedIds。
-- [x] 搜索词、类型/标签/分组筛选和目录面包屑变化时清空 selectedIds。
-- [x] 保留 selectedId 的预览/键盘焦点语义，不让清空批量选择导致当前预览丢失。
-- [x] 刷新索引和跨窗口 revision 更新时，只移除已不存在的批量选择，保留仍有效的选择。
-- [x] 将表格滚动容器保存为 ref；列表上下文变化时滚动到顶部，刷新索引时保留当前位置。
-- [x] 批量工具栏显示当前可见选择数量和总选择数量；默认策略下二者保持一致。
-- [x] 页眉全选只作用于当前页，取消选择按钮清空整个当前上下文的选择。
-- [x] 选择状态变化不触发预览窗口打开，复选框事件继续阻止行点击冒泡。
-
-### 4.4 验证
-
-- [x] 选择非收藏资料后切换到“收藏”，工具栏不再保留隐藏选择。
-- [x] 选择资料后输入搜索词、清除搜索、选择类型、切换目录，批量选择均被明确收束。
-- [x] 刷新索引后有效选中项、当前预览和目录路径保持不变。
-- [x] 分页全选不会误选其他页，返回上一页后状态可解释。
-- [x] 运行 npm.cmd run test:library。
-- [x] 运行 npm.cmd run test:contracts 和 npm.cmd run build。
-- [x] 在 1280px、680px、360px 检查表格滚动位置、复选框和批量工具栏。
-
-### 4.5 阶段版本门禁
-
-阶段 A 的代码、最小测试和文档通过后，立即将五个版本入口同步为 0.3.17，在 PROJECT_PROGRESS.md 记录“代码候选已完成、Windows 手工验收状态单独记录”，再进入阶段 B。不得等到整个计划最终验收才更新 0.3.17。
-
-## 5. 阶段 B：行菜单弹层和首屏布局（0.3.18）
-
-### 5.1 目标
-
-解决单项操作菜单被表格裁切的问题，并把已有资料场景的首屏空间优先让给搜索和资料列表。
-
-### 5.2 主要文件
-
-- prototype/src/features/library/LibraryActions.jsx
-- prototype/src/features/library/LibraryPanel.jsx
-- prototype/src/App.jsx
-- prototype/src/components/Dialog.jsx 或新增局部 OverlayPortal.jsx
-- prototype/src/styles.css
-- 新增菜单定位模型测试和响应式浏览器检查
-
-### 5.3 实现清单
-
-- [x] 将行菜单从表格滚动容器中移到 document overlay 层，或者使用可靠的 fixed 定位方案。
-- [x] 根据触发按钮的 getBoundingClientRect() 计算菜单位置，自动判断向下或向上展开。
-- [x] 对左右边界进行约束，菜单宽度不超过当前窗口可用空间。
-- [x] 监听窗口 resize、表格滚动和页面上下文变化，关闭或重新定位菜单。
-- [x] 菜单关闭时恢复触发按钮焦点，菜单内点击不触发行点击和预览。
-- [x] 增加方向键、Home、End、Escape 和 Tab 行为，保持 role=menu 语义完整。
-- [x] 文件存在时将大拖放区收缩为紧凑导入条；仍保留“导入文件夹、选择文件和拖放”入口。
-- [x] 搜索框在桌面宽度下使用剩余空间，不再固定为过窄的 260px，长 placeholder 不被过早截断。
-- [x] 筛选菜单外显示活动条件摘要，例如类型、标签和分组 chip，并支持逐项清除。
-- [x] 结果数同时显示当前结果和总索引数，例如“显示 2 项 / 共 4 项”。
-- [x] 360px 下将设置等低频导航收进“更多”入口或提供明显的导航滚动状态，不让入口只依赖用户猜测横向滚动。
-
-### 5.4 验证
-
-- [x] 第一行、最后一行和表格滚动到底部时打开菜单，所有菜单项都可见并可点击。
-- [x] 菜单打开后滚动表格、改变窗口宽度或切换筛选，菜单不会悬浮在错误位置。
-- [x] 键盘打开菜单后，焦点和 Escape 返回行为正确。
-- [x] 已有资料的 1280px 首屏能看到更多列表内容；360px 下导入条和表格不互相覆盖。
-- [x] 活动筛选 chip 与结果数在搜索、清除、刷新后保持一致。
-- [x] 运行 npm.cmd run test:library、npm.cmd run test:contracts 和 npm.cmd run build。
-
-### 5.5 阶段版本门禁
-
-阶段 B 的菜单定位、响应式布局、键盘检查、测试和文档通过后，立即同步五个版本入口到 0.3.18，并在进度文档记录菜单裁切问题已由代码修复、Windows 原生窗口尺寸验收仍单独记录。
-
-## 6. 阶段 C：预览错误恢复和连续浏览（0.3.19）
+## 6. 阶段 A：文件库数据契约和查询模型（0.3.27）
 
 ### 6.1 目标
 
-让用户在预览窗口内完成“失败后恢复、查看相邻资料和执行常用操作”，不必频繁关闭预览再回到列表。
+建立与“最近记录”分离的文件库数据来源，确保悬浮窗可以取得全部登记条目，并为后续搜索、筛选、排序、分页和同步提供稳定契约。
 
 ### 6.2 主要文件
 
-- prototype/src/features/preview/PreviewPane.jsx
-- prototype/src/features/preview/UnsupportedPreviewer.jsx
-- prototype/src/features/preview/previewApi.js
-- prototype/src/features/preview/previewTypes.js
-- prototype/src/features/library/libraryRepository.js
-- prototype/src/features/library/useLibraryActions.js
-- prototype/src/App.jsx
-- prototype/src/styles.css
-- prototype/tests/preview-*.test.mjs
-- prototype/tests/ipc-contracts.test.mjs
+- `prototype/src-tauri/src/commands/floating_ball.rs`
+- `prototype/src-tauri/src/commands/mod.rs`
+- `prototype/src-tauri/src/storage/mod.rs`
+- `prototype/src-tauri/src/storage/repository.rs`
+- `prototype/src/lib/ipcContracts.js`
+- `prototype/src/lib/ipcContracts.d.ts`
+- `prototype/src/features/floating-ball/floatingBallApi.js`
+- `prototype/src/features/floating-ball/floatingBallModel.js`
+- `prototype/src/features/floating-ball/floatingLibraryModel.js`（如需要，新增）
+- `prototype/src-tauri/capabilities/` 或自动生成权限声明（仅在 command 需要时）
+- `prototype/tests/floating-ball-model.test.mjs`
+- `prototype/tests/floating-library-model.test.mjs`（新增）
+- `prototype/tests/ipc-contracts.test.mjs`
+- `prototype/tests/floating-ball-contracts.test.mjs`（新增或并入既有契约测试）
 
 ### 6.3 实现清单
 
-- [x] 为 PreviewPane 增加显式的 onRetry、onOpenDefault、onReveal、onCopyLocation、onFavorite 和相邻资料导航回调。
-- [x] 重试时生成新的 task ID，取消旧任务并清理旧 preview resource，不复用已失效的资源 ID。
-- [x] 在 unsupported、missing、permission-denied、too-large、converter-missing 和 parse-error 状态显示对应的可执行动作。
-- [x] “文件过大”显示系统默认程序打开和关闭预览；“路径失效”显示返回列表和重新定位入口；“缺少 DOC 转换器”显示本地依赖说明和默认程序打开入口。
-- [x] 预览头部增加上一项、下一项、收藏、定位、复制位置和默认程序打开按钮；目录临时子项只能执行被授权的定位或预览动作。
-- [x] 相邻资料由当前可见列表快照计算，不能跨搜索、筛选或导航上下文误跳转。
-- [x] 保持 Markdown 渲染/原文切换、图片缩放旋转、PDF 分页缩放、XLSX Sheet 切换和视频控制行为不变。
-- [x] 浏览器回退模式仍不读取真实本地文件，并将状态标记为“浏览器演示限制”，不与格式不支持混为一谈。
+- [x] 定义 `get_floating_files` 的请求、返回和错误契约。
+- [x] 从索引快照投影悬浮窗需要的安全元数据，不返回完整路径和正文。
+- [x] 默认返回全部索引条目，不应用 `lastRecordedAt` 最近五项限制。
+- [x] 保留文件夹和失效条目，并对不存在或无效字段使用明确状态。
+- [x] 实现白名单筛选、稳定排序、数量统计和分页边界。
+- [x] 增加前端 IPC 解析器，拒绝缺少 revision、items、total 或错误类型字段的返回值。
+- [x] 增加纯模型函数，覆盖搜索匹配、筛选、排序、分页、重复 ID 和空列表。
+- [x] 继续保留并测试 `get_floating_recent`，证明本轮没有破坏最近记录消费者。
+- [x] 评估 Tauri 权限声明；只增加实际需要的 command 权限。
 
 ### 6.4 验证
 
-- [x] 模拟所有预览失败状态，确认每个状态都有下一步。
-- [x] 快速切换资料、连续点击上一项/下一项，旧内容不会覆盖新内容。
-- [x] 关闭预览后 preview resource、任务和 Worker 都会释放。
-- [x] 运行 npm.cmd run test:preview、npm.cmd run test:contracts 和 npm.cmd run build。
-- [x] 使用现有预览注册表、测试夹具和 Rust 预览适配器检查已登记格式的成功/失败边界；真实 Windows 文件检查已在下一项由用户完成验收。
-- [x] Windows 手工验收已由用户完成，覆盖默认程序打开、资源管理器定位、DOC 转换器缺失和文件被移动后的恢复路径。
+- [x] 一个索引包含超过五项时，文件库结果不被截断到五项。
+- [x] 只被主窗口导入、从未通过悬浮球拖入的条目也能出现在文件库。
+- [x] 文件夹、失效文件、收藏文件和普通文件的字段投影稳定。
+- [x] 搜索、筛选、排序和分页不会返回重复 ID 或越过数量边界。
+- [x] 不合法 query、filter、sort、offset、limit 和 IPC 返回值都会被拒绝。
+- [x] 运行 `npm.cmd run test:contracts`。
+- [x] 运行新增文件库模型测试和 `npm.cmd run test:floating-ball`。
+- [x] 在 Rust 侧运行与 command/storage 相关的最小 `cargo test` 和 `cargo check`。
 
 ### 6.5 阶段版本门禁
 
-阶段 C 的预览状态、重试、连续浏览、最小测试、README 限制说明和进度记录通过后，立即同步版本到 0.3.19。Windows 11 真实文件预览的结果在版本更新后补录，不作为版本入口更新的前置条件。
+- [x] 更新 `prototype/package.json`、`prototype/package-lock.json` 根包、`prototype/src-tauri/tauri.conf.json`、`prototype/src-tauri/Cargo.toml` 和 `prototype/src-tauri/Cargo.lock` 的版本入口到 `0.3.27`。
+- [x] 在 `PROJECT_PROGRESS.md` 记录数据契约、测试结果、未完成的 Windows 原生验收和阶段 B 入口。
+- [x] 执行 `git diff --check`、检查工作树范围并提交阶段变更。
 
-## 7. 阶段 D：单条标签、分组和详情面板（0.3.20）
+## 7. 阶段 B：悬浮球外观和文件库面板骨架（0.3.28）
 
 ### 7.1 目标
 
-把批量整理能力下沉到单条资料，降低用户只想整理一两个资料时的操作成本，并为后续操作结果和最近打开提供稳定的详情区域。
+在不破坏现有透明窗口、拖拽、边缘吸附和悬停状态机的前提下，完成悬浮球外观升级和文件库面板的稳定骨架，为后续列表交互提供固定布局。
 
 ### 7.2 主要文件
 
-- prototype/src/features/library/LibraryPanel.jsx
-- prototype/src/features/library/LibraryActions.jsx
-- prototype/src/features/library/useLibraryActions.js
-- prototype/src/features/library/libraryRepository.js
-- prototype/src/features/library/libraryControllerModel.js
-- prototype/src-tauri/src/commands/library.rs
-- prototype/src-tauri/src/storage/mod.rs
-- prototype/src/lib/ipcContracts.js
-- prototype/src/lib/ipcContracts.d.ts
-- prototype/src/styles.css
-- prototype/tests/library-controller.test.mjs
-- prototype/tests/ipc-contracts.test.mjs
+- `prototype/src/features/floating-ball/FloatingBallWindow.jsx`
+- `prototype/src/features/floating-ball/FloatingBallPanel.jsx`
+- `prototype/src/features/floating-ball/floatingBallModel.js`
+- `prototype/src/features/floating-ball/floatingBallGeometryModel.js`
+- `prototype/src/features/floating-ball/useFloatingBallWindowGeometry.js`
+- `prototype/src/styles.css`
+- `prototype/src/main.jsx`
+- `prototype/tests/floating-ball-model.test.mjs`
+- `prototype/tests/floating-ball-hover.test.mjs`
+- 新增必要的浏览器检查或组件状态测试
 
-### 7.3 实现清单
+### 7.3 实现清单：球体外观
 
-- [x] 在行菜单增加“编辑标签”和“设置分组”，只对主索引条目显示。
-- [x] 标签编辑支持查看现有标签、添加、删除、去重、空值校验、最大数量和最大长度提示。
-- [x] 分组编辑提供“未分组”和已有分组，保存后立即更新当前行并同步 revision。
-- [x] 复用 setEntryTags、setEntryGroup 和现有错误映射，不在前端重复实现 Rust 校验规则。
-- [x] 将常用元数据放入可选的右侧详情面板或资料详情弹窗，显示完整名称、类型、大小、修改时间、来源位置、收藏、标签、分组和状态。
-- [x] 详情面板提供收藏、预览、复制位置、定位和默认程序打开等快捷操作。
-- [x] 详情面板关闭和切换资料时正确恢复列表焦点，不丢失当前筛选和滚动位置。
-- [x] 删除分组前显示受影响资料数量，明确“只解除归属，不删除资料记录和原文件”；支持取消。
-- [x] 标签 chip 可点击进入该标签筛选，但不把展示 chip 误当成删除按钮。
+- [ ] 将普通状态图标调整为文件库/文件堆语义，保留现有图标库，不手写重复 SVG。
+- [ ] 增加当前文件库数量徽标，数量加载中、读取失败、超过上限时分别有稳定表现。
+- [ ] 设计普通、悬停、拖入、记录中、记录成功、部分成功和失败状态的颜色、图标和外环。
+- [ ] 成功和失败标记不遮挡球体主图标，且在窗口边缘、缩放和混合 DPI 下仍在球体范围内。
+- [ ] 控制动画时长和触发频率，加入 `prefers-reduced-motion` 降级。
+- [ ] 保证 `64 x 64 DIP` 命中区域、拖拽手势、键盘焦点和 tooltip 不发生回归。
 
-### 7.4 验证
+### 7.4 实现清单：面板骨架
 
-- [x] 单条添加、删除和替换标签后重启应用，状态仍正确。
-- [x] 单条设置、解除和重命名分组后，筛选、详情、列表和批量工具栏一致。
-- [x] 分组删除只解除归属，不改变资料记录和原文件。
-- [x] 目录临时子项没有可绕过授权的编辑入口。
-- [x] 运行 npm.cmd run test:library、npm.cmd run test:contracts、npm.cmd run test:settings 和 npm.cmd run build。
-- [x] 在窄窗口下详情区域不遮挡表格，必要时改为底部或全屏弹层。
-- [x] Windows 11/Tauri 下重启后的标签持久化、真实分组编辑和分组删除结果已由用户手工验收。
+- [ ] 将标题从“最近记录”改为“文件库”或“全部资料”，移除 `recent` 语义命名。
+- [ ] 将数量显示从 `n / 5` 改为总条目数，并处理加载中和读取失败状态。
+- [ ] 将默认面板尺寸调整为约 `360 x 420 DIP`，由几何模型在窄工作区中压缩到安全最小值。
+- [ ] 增加标题区、搜索区、筛选区、列表占位区和反馈区的固定结构。
+- [ ] 为列表行定义稳定的最小高度、图标尺寸、文本截断和右侧动作空间。
+- [ ] 增加加载骨架、空列表、空搜索结果和查询错误的视觉占位，不依赖内容高度改变窗口尺寸。
+- [ ] 保持面板左右方向、球体锚点和窗口工作区约束不变。
+- [ ] 为文件库面板建立独立 class 命名，避免把主窗口表格样式直接复制进悬浮窗。
 
-### 7.5 阶段版本门禁
+### 7.5 验证
 
-阶段 D 的单条编辑、详情面板、分组删除确认、契约测试和文档通过后，立即同步版本到 0.3.20。索引格式不变时不升级索引版本；如发现需要新增字段，必须在本阶段记录迁移方案后再改版本。
+- [ ] 在普通、悬停、拖入、记录中、成功和失败状态下检查图标、颜色、徽标和提示一致。
+- [ ] 浏览器演示模式能显示文件库标题、数量徽标、固定行骨架和空状态。
+- [ ] 在 1280px、680px、360px 视口检查面板不溢出、文本不遮挡、列表仍可滚动。
+- [ ] 检查左侧和右侧展开、四角位置、工作区不足时的面板压缩。
+- [ ] 运行 `npm.cmd run test:floating-ball` 和 `npm.cmd run build`。
+- [ ] 运行几何模型、悬停状态机和窗口尺寸相关的最小 Rust/前端检查。
 
-## 8. 阶段 E：操作结果中心和设置一致性（0.3.21）
+### 7.6 阶段版本门禁
+
+- [ ] 同步五个版本入口到 `0.3.28`。
+- [ ] 在 `PROJECT_PROGRESS.md` 记录外观、面板尺寸、浏览器截图检查和待进行的 Windows 原生窗口验收。
+- [ ] 执行 `git diff --check`，确认没有加入构建产物、截图临时文件或真实资料。
+- [ ] 提交阶段变更后进入阶段 C。
+
+## 8. 阶段 C：文件列表、搜索、筛选和排序（0.3.29）
 
 ### 8.1 目标
 
-把短时 toast 改造成可回看的操作反馈，保留批量部分成功、失败、取消、重试和导入跳过原因，并避免设置弹窗覆盖跨窗口产生的新设置。
+将文件库面板从骨架变成可日常使用的索引列表，确保用户看到的是完整文件集合，而不是最近拖入历史。
 
 ### 8.2 主要文件
 
-- prototype/src/App.jsx
-- prototype/src/features/library/useLibraryActions.js
-- prototype/src/features/library/useIndexController.js
-- prototype/src/features/library/LibraryActions.jsx
-- prototype/src/features/settings/SettingsPanel.jsx
-- prototype/src/features/settings/useSettingsController.js
-- prototype/src/features/settings/settingsModel.js
-- prototype/src/features/window/useWindowController.js
-- prototype/src/features/operations/OperationCenter.jsx、operationModel.js、operationApi.js、useOperationController.js
-- prototype/src-tauri/src/storage/ 下新增或拆分的操作记录模块
-- prototype/src-tauri/src/commands/ 下新增的操作历史 command
-- prototype/src/lib/ipcContracts.js、ipcContracts.d.ts
-- prototype/src/styles.css
+- `prototype/src/features/floating-ball/FloatingBallPanel.jsx`
+- `prototype/src/features/floating-ball/useFloatingBallFiles.js`（新增或从 records hook 拆分）
+- `prototype/src/features/floating-ball/useFloatingBallRecords.js`
+- `prototype/src/features/floating-ball/floatingBallApi.js`
+- `prototype/src/features/floating-ball/floatingLibraryModel.js`
+- `prototype/src/features/floating-ball/FloatingBallWindow.jsx`
+- `prototype/src/styles.css`
+- `prototype/src/lib/ipcContracts.js`
+- `prototype/src/lib/ipcContracts.d.ts`
+- `prototype/tests/floating-library-model.test.mjs`
+- `prototype/tests/floating-library-overlay.test.mjs`（新增或并入现有 UI 检查）
+- `prototype/tests/floating-ball-model.test.mjs`
 
 ### 8.3 实现清单
 
-- [x] 建立 OperationRecord 模型，区分导入、刷新、批量收藏、标签、分组、索引移除和撤销。
-- [x] 操作中心展示进行中、成功、部分成功、失败、已取消和超时状态。
-- [x] 导入结果显示新增、更新、跳过、跳过原因和达到上限；批量结果显示成功、跳过、失败和可重试项。
-- [x] 为部分成功结果提供“查看详情”和“重试失败项”，取消和超时结果保留已完成项。
-- [x] toast 只做短确认，不再承担唯一的错误详情来源。
-- [x] 批量操作仍保持现有最大选择数量、取消标记、10 秒任务边界和逐项结果，不因为 UI 改造开放批量物理删除。
-- [x] 操作历史只保存必要元数据，限制记录数量，提供清除入口；损坏时回退为空历史而不阻塞启动。
-- [x] SettingsPanel 在打开时记录设置 revision 或快照；外部 settings-changed 到来时提示草稿已过期，避免静默覆盖。
-- [x] 设置保存采用合并或冲突提示，确保只修改用户实际编辑的字段。
+- [ ] 将面板主数据从 `recent` 调整为 `files` 或等价文件库语义，禁止继续通过 `getRecentEntries` 限制主列表。
+- [ ] 初次打开面板时读取文件库，显示加载中、成功、空列表、无搜索结果和错误重试状态。
+- [ ] 实现文件名和元数据搜索；查询输入采用受控长度，必要时增加轻量 debounce。
+- [ ] 实现“全部、收藏、文件夹、失效”筛选，并显示当前筛选状态。
+- [ ] 实现名称、类型、修改时间和最近打开时间排序，默认名称升序。
+- [ ] 实现受控分页或增量加载；列表内部滚动，不能把主窗口滚动条带入悬浮窗。
+- [ ] 显示文件/文件夹图标、名称、类型、大小、分组摘要和失效状态。
+- [ ] 收藏按钮保留现有行为，收藏更新后不清除搜索、筛选、排序和滚动上下文。
+- [ ] 空列表提供打开主窗口资料库或导入入口；空搜索结果提供清除搜索入口。
+- [ ] 浏览器回退使用多条无敏感信息的演示文件项，覆盖文件、文件夹、收藏、失效和长文件名。
+- [ ] 拖放成功后刷新当前文件库；新条目若不符合当前筛选，不强行插入当前视图。
 
 ### 8.4 验证
 
-- [x] 导入含重复、不可读和超过上限内容的文件夹，结果可在 toast 消失后再次查看。
-- [x] 批量操作模拟成功、跳过、失败、取消、超时和重试，详情与当前索引一致。
-- [x] 关闭并重启应用，操作历史按限制恢复；损坏历史文件不阻塞启动。
-- [x] 打开设置后从托盘改变悬浮窗状态，再保存资料库设置，不会把悬浮窗状态改回旧值。
-- [x] 运行 npm.cmd run test:library、npm.cmd run test:contracts、npm.cmd run test:settings 和 npm.cmd run build。
-- [x] Rust 侧新增存储或 command 后运行对应 cargo test、cargo check 和 cargo clippy。
+- [ ] 1、5、6、50 和超过分页上限的文件条目都能显示并正确滚动。
+- [ ] 主窗口导入的文件会出现在悬浮窗文件库，不要求再次拖到悬浮球。
+- [ ] 最近没有拖放记录但索引已有资料时，文件库仍然有内容。
+- [ ] 搜索、清空、切换筛选、切换排序、翻页和刷新后的列表、数量和空状态一致。
+- [ ] 长中文文件名、空格文件名、同名文件、文件夹和失效路径不会导致布局横向溢出。
+- [ ] 收藏成功、收藏失败和收藏忙碌时，按钮状态、提示和列表内容一致。
+- [ ] 运行 `npm.cmd run test:floating-ball`、新增文件库模型测试和 `npm.cmd run test:contracts`。
+- [ ] 运行 `npm.cmd run build`，确认 Sites 产物仍然生成。
 
 ### 8.5 阶段版本门禁
 
-阶段 E 的操作记录、结果中心、设置冲突处理、测试和文档通过后，立即同步版本到 0.3.21。操作历史新增持久化结构时，必须在版本说明中记录数据迁移和清理策略。
+- [ ] 同步五个版本入口到 `0.3.29`。
+- [ ] 在 `PROJECT_PROGRESS.md` 记录文件库列表、搜索、筛选、排序和分页验证结果。
+- [ ] 同步 `README.md` 和 `prototype/README.md` 中关于悬浮球“最近记录”的描述，明确区分当前已实现和下一阶段未完成的快捷操作。
+- [ ] 提交阶段变更后进入阶段 D。
 
-## 9. 阶段 F：键盘、范围选择和响应式细节（0.3.22）
+## 9. 阶段 D：主窗口连续工作流和四项快捷操作（0.3.30）
 
 ### 9.1 目标
 
-让高频整理流程不依赖鼠标，并把 360px、680px、缩放和键盘焦点下的界面状态收敛到可预测行为。
+让悬浮窗成为主窗口的快速入口。用户不需要先打开主窗口再重新搜索，就能完成文件定位、文件夹进入、资源管理器显示和直接预览。
 
 ### 9.2 主要文件
 
-- prototype/src/App.jsx
-- prototype/src/features/library/LibraryPanel.jsx
-- prototype/src/features/library/useLibraryNavigation.js
-- prototype/src/features/library/libraryModel.js
-- prototype/src/features/library/LibraryActions.jsx
-- prototype/src/components/Dialog.jsx
-- prototype/src/features/preview/PreviewPane.jsx
-- prototype/src/features/settings/SettingsPanel.jsx
-- prototype/src/styles.css
-- 新增快捷键和范围选择模型测试
+- `prototype/src/features/floating-ball/FloatingBallWindow.jsx`
+- `prototype/src/features/floating-ball/FloatingBallPanel.jsx`
+- `prototype/src/features/floating-ball/floatingBallApi.js`
+- `prototype/src/features/floating-ball/useFloatingBallFiles.js`
+- `prototype/src/App.jsx`
+- `prototype/src/features/library/useLibraryNavigation.js`
+- `prototype/src/features/library/useIndexController.js`
+- `prototype/src/features/library/LibraryPanel.jsx`
+- `prototype/src/features/library/libraryRepository.js`
+- `prototype/src/features/preview/PreviewPane.jsx`
+- `prototype/src/lib/ipcContracts.js`
+- `prototype/src/lib/ipcContracts.d.ts`
+- `prototype/src-tauri/src/commands/floating_ball.rs`
+- `prototype/src-tauri/src/commands/library.rs`
+- `prototype/src-tauri/src/lib.rs`
+- `prototype/src/styles.css`
+- `prototype/tests/floating-library-actions.test.mjs`（新增）
+- `prototype/tests/library-controller.test.mjs`
+- `prototype/tests/ipc-contracts.test.mjs`
+- 相关预览和主窗口事件测试
 
-### 9.3 实现清单
+### 9.3 实现清单：点击文件和文件夹
 
-- [x] Ctrl+F 聚焦搜索框，F5 刷新索引，Ctrl+O 选择文件，Ctrl+Shift+O 选择文件夹，Ctrl+Z 撤销可撤销索引操作。
-- [x] Escape 按层级关闭菜单、详情、预览和设置，不触发危险操作。
-- [x] 快捷键只在主窗口内部生效，输入框、选择框、文本编辑区域中不抢占用户输入；不在本阶段引入全局系统快捷键。
-- [x] 支持 Shift 选择连续资料，保留复选框和当前页全选；范围选择以当前列表上下文为边界。
-- [x] 预览窗口增加左右方向键切换资料，焦点在输入框或预览内容编辑区域时不抢占。
-- [x] 行菜单打开后焦点进入菜单，菜单关闭后回到触发按钮。
-- [x] 检查表格、状态文字、图标按钮和错误提示的颜色对比；颜色不能成为判断状态的唯一方式。
-- [x] 360px 下导航增加清晰的滚动/更多入口，设置、刷新和清除选择仍可到达。
-- [x] 检查浏览器缩放 125%、150% 和系统字体增大后的标题、按钮、表格和 Dialog，不允许文字溢出或互相覆盖。
-- [x] 保留 prefers-reduced-motion，新增动画不得把任务状态只交给动画表达。
+- [ ] 文件行主点击调用 `open_main_from_floating(fileId)`，主窗口显示、获得焦点并接收 `floating-open-file` 事件。
+- [ ] 主窗口收到文件 ID 后，切换到包含该条目的有效列表上下文，保留搜索/目录边界的可解释行为。
+- [ ] 主窗口选中对应文件并滚动到可见位置，确保“定位到该文件”不是只打开一个不可见的预览层。
+- [ ] 点击文件夹后，主窗口进入该索引文件夹的目录视图，更新面包屑并显示目录子项。
+- [ ] 文件夹不存在、权限不足或路径失效时，不进入空目录；显示主窗口已有的失效/重新定位状态。
+- [ ] 文件和文件夹的点击行为使用同一个安全 ID 入口，由主窗口根据索引条目的 `kind` 区分处理。
+- [ ] 操作成功后悬浮面板按既有交互规则收起或保持可解释状态，不能留下失焦的透明窗口。
 
-### 9.4 验证
+### 9.4 实现清单：资源管理器显示
 
-- [x] 键盘完成搜索、筛选、选择、预览、关闭、刷新和撤销流程的代码路径；浏览器回退无法触发真实文件选择器和桌面撤销 command。
-- [x] Shift 范围选择、跨页、筛选变化和刷新后的选择范围可解释。
-- [x] Tab 顺序不会进入隐藏输入框，Dialog、菜单和预览的焦点不会跑出当前层。
-- [x] 运行 1280px、960px、680px、360px 的浏览器检查，并保存失败状态截图。
-- [x] 运行 npm.cmd run test:library、npm.cmd run test:contracts、npm.cmd run test:preview 和 npm.cmd run build。
-- [x] Windows 原生环境检查无边框窗口拖动区域没有被快捷键或弹层覆盖。
+- [ ] 文件行增加“在资源管理器中显示”图标或操作菜单项，提供明确的 tooltip 和可访问名称。
+- [ ] 操作调用已有 `reveal_indexed_file(fileId)` 或等价安全 command，不向前端暴露任意路径拼接能力。
+- [ ] 文件和文件夹都覆盖资源管理器定位；文件夹定位到文件夹本身，文件定位到文件或其父目录的既有约定。
+- [ ] 路径失效、权限拒绝、资源管理器启动失败时显示明确错误，并提供返回主窗口或重新定位入口。
+- [ ] 快捷操作的点击事件阻止行点击冒泡，避免同时触发预览、定位和资源管理器三个动作。
+- [ ] 该操作保持外部程序启动边界：只在用户明确点击时执行，不在悬浮窗打开或刷新时静默启动资源管理器。
 
-### 9.5 阶段版本门禁
+### 9.5 实现清单：直接预览
 
-阶段 F 的快捷键、范围选择、焦点、缩放和窄窗口检查通过后，立即同步版本到 0.3.22。系统级全局快捷键、开机启动和托盘新行为不在本阶段默认引入，避免扩大原生验收范围。
+- [ ] 文件行增加直接预览入口，支持 `.md`、`.txt`、图片、视频、`.docx`、`.xlsx`、`.doc`、`.pdf` 等已有登记格式。
+- [ ] 直接预览入口通过主窗口已有预览会话和资源协议启动，不在悬浮窗复制格式判断、文件读取或渲染实现。
+- [ ] 支持预览的文件从悬浮窗触发后，主窗口显示、获得焦点、定位条目并进入 `loading` 到 `ready` 的预览流程。
+- [ ] 不支持、损坏、加密、过大、权限不足、缺少 DOC 转换器和路径失效的情况使用已有明确状态，不显示空白预览。
+- [ ] 预览入口在不支持时可以打开主窗口并显示错误详情和默认程序打开/资源管理器定位等下一步，不直接静默失败。
+- [ ] 预览打开后继续支持关闭、相邻浏览、收藏、重试和资源释放，悬浮窗关闭不能泄露 preview resource。
+- [ ] 若文件行主点击也自动预览，必须与直接预览入口使用同一事件和状态模型，避免两套行为不一致。
 
-## 10. 阶段 G：最近打开和悬浮球连续工作流（0.3.23）
+### 9.6 验证
+
+- [ ] 点击普通文件后，主窗口显示、聚焦、选中并定位到该文件。
+- [ ] 点击文件夹后，主窗口进入对应目录，面包屑和子项列表正确。
+- [ ] 点击“在资源管理器中显示”后，只启动一次资源管理器，不触发行点击或预览。
+- [ ] 通过直接预览入口打开正常文本、Markdown、图片、XLSX、DOCX 和 PDF 测试夹具，主窗口进入对应预览。
+- [ ] 通过直接预览入口检查不支持、损坏、失效和缺少转换器状态，确认错误可诊断且资源被释放。
+- [ ] 快速连续点击不同文件时，旧的打开/预览结果不能覆盖新选中项。
+- [ ] 运行 `npm.cmd run test:preview`、`npm.cmd run test:contracts`、`npm.cmd run test:library` 和新增快捷操作模型测试。
+- [ ] Rust 侧运行 `cargo fmt --check`、`cargo check` 和相关 `cargo test`。
+
+### 9.7 阶段版本门禁
+
+- [ ] 同步五个版本入口到 `0.3.30`。
+- [ ] 在 `PROJECT_PROGRESS.md` 逐条记录四项快捷工作流的自动验证和 Windows 原生验收状态。
+- [ ] 同步 README 中悬浮球能力描述，不能把浏览器回退或模型测试写成真实资源管理器/预览验收。
+- [ ] 提交阶段变更后进入阶段 E。
+
+## 10. 阶段 E：同步、拖放反馈、性能和窗口稳定性（0.3.31）
 
 ### 10.1 目标
 
-区分“最近添加”“最近记录”和“最近打开”，让用户从悬浮球、预览和主窗口之间连续返回正在处理的资料。
+处理文件库化之后的真实使用边界：索引变化、收藏变化、拖放记录、快速查询、旧请求竞态、混合 DPI、多显示器和窄工作区。
 
 ### 10.2 主要文件
 
-- prototype/src/App.jsx
-- prototype/src/features/library/libraryModel.js
-- prototype/src/features/library/useLibraryNavigation.js
-- prototype/src/features/library/useLibraryActions.js
-- prototype/src/features/preview/PreviewPane.jsx
-- prototype/src/features/floating-ball/FloatingBallWindow.jsx
-- prototype/src/features/floating-ball/FloatingBallPanel.jsx
-- prototype/src/features/floating-ball/useFloatingBallRecords.js
-- prototype/src/features/floating-ball/floatingBallModel.js
-- prototype/src-tauri/src/storage/mod.rs
-- prototype/src-tauri/src/commands/library.rs
-- prototype/src-tauri/src/commands/floating_ball.rs
-- prototype/src-tauri/src/windows/tray.rs
-- prototype/src/lib/ipcContracts.js、ipcContracts.d.ts
+- `prototype/src/features/floating-ball/FloatingBallWindow.jsx`
+- `prototype/src/features/floating-ball/FloatingBallPanel.jsx`
+- `prototype/src/features/floating-ball/useFloatingBallFiles.js`
+- `prototype/src/features/floating-ball/useFloatingBallRecords.js`
+- `prototype/src/features/floating-ball/floatingBallModel.js`
+- `prototype/src/features/floating-ball/floatingBallHoverController.js`
+- `prototype/src/features/floating-ball/floatingBallGeometryModel.js`
+- `prototype/src/features/floating-ball/useFloatingBallWindowGeometry.js`
+- `prototype/src/features/floating-ball/useFloatingBallDrag.js`
+- `prototype/src/styles.css`
+- `prototype/src-tauri/src/windows/monitor.rs`
+- `prototype/src-tauri/src/windows/floating_ball.rs`
+- `prototype/src-tauri/src/commands/floating_ball.rs`
+- `prototype/tests/floating-ball-*.test.mjs`
+- `prototype/tests/keyboard-model.test.mjs`
+- `prototype/tests/library-controller.test.mjs`
 
 ### 10.3 实现清单
 
-- [x] 将索引格式从 v4 迁移到 v5，新增可选的 lastOpenedAt，迁移前备份，迁移失败保留旧索引。
-- [x] 只有预览成功或默认程序打开 command 成功后才更新 lastOpenedAt；点击失效资料不能伪造最近打开记录。
-- [x] 主窗口新增“最近打开”导航，按最近打开时间倒序，显示数量和空状态。
-- [x] “最近添加”继续基于 addedAt，悬浮球和托盘继续基于 lastRecordedAt，三者文案和计数严格区分。
-- [x] 最近打开、收藏、失效状态和重命名通过 revision 事件同步到悬浮球和托盘。
-- [x] 从悬浮球打开主窗口时，主窗口直接定位到目标资料并打开预览或文件夹目录。
-- [x] 最近打开列表限制数量，不保存正文，不在日志中输出完整路径。
+- [ ] `index-changed`、`floating-recorded`、收藏变化、重命名、重新定位和索引移除都能刷新文件库当前上下文。
+- [ ] 刷新时保留搜索词、筛选、排序、当前页和可解释的滚动位置；当前条目消失时显示空状态而不是旧内容。
+- [ ] 使用 revision 和查询序号丢弃过期返回，覆盖快速搜索、快速切换筛选、连续收藏和拖放期间刷新。
+- [ ] 拖入悬浮球时球体和面板都显示明确拖入态；记录中禁止重复提交同一路径，完成后只显示结果反馈并刷新文件库。
+- [ ] 反馈信息区分新增、刷新、跳过、达到上限、失败和路径失效，不把“最近记录”重新渲染成主列表。
+- [ ] 对大索引使用分页或增量加载，搜索输入不触发无节制的全量 command 调用。
+- [ ] 面板打开和关闭时不产生明显跳动；几何尺寸改变不能导致球体锚点漂移。
+- [ ] 检查左、右、上、下边缘以及四角的面板方向、工作区约束、阴影和点击区域。
+- [ ] 检查不同 DPI 和多显示器切换下球体位置、面板尺寸、徽标和成功/失败标记。
+- [ ] 关闭主窗口、退出应用、隐藏到托盘、销毁悬浮球时清理监听器、定时器、未完成查询和预览资源引用。
+- [ ] 使用 `prefers-reduced-motion` 检查动画降级和状态文本仍然完整。
 
 ### 10.4 验证
 
-- [x] v4 索引迁移后收藏、标签、分组、添加时间、最近记录和路径不丢失。
-- [x] 预览失败、默认程序打开失败、资料移除和原文件失效不会错误写入最近打开。
-- [x] 重启应用后最近打开排序和数量正确。
-- [x] 主窗口、托盘、悬浮球之间的收藏、移除、重命名和失效状态一致。
-- [x] 运行迁移、索引、IPC、预览和悬浮球测试，并执行 npm.cmd run build。
-- [x] Windows 11 手工检查托盘菜单、悬浮球、预览焦点和关闭/重启行为。
+- [ ] 主窗口新增文件、移除索引、收藏、重命名和重新定位后，悬浮窗列表最终一致。
+- [ ] 连续输入搜索词并快速清空时，最终列表只对应最后一次查询。
+- [ ] 连续拖入相同和不同路径时，索引写入不重复，文件库刷新不丢条目。
+- [ ] 在面板打开、关闭、拖动、边缘吸附、拖入和文件打开之间切换，悬停状态机没有卡在 `opening`、`closing` 或 `dragging`。
+- [ ] 在小工作区中面板能压缩到安全最小值，列表仍可滚动，操作按钮不会被裁切。
+- [ ] 运行 `npm.cmd run test:floating-ball`、`npm.cmd run test:library`、`npm.cmd run test:contracts` 和 `npm.cmd run build`。
+- [ ] Rust 侧运行 `cargo fmt --check`、`cargo check`、`cargo test` 和必要的 `cargo clippy --all-targets --all-features -- -D warnings`。
+- [ ] 使用 Playwright 或等价浏览器检查记录桌面/移动视口截图和核心交互；截图只使用测试演示数据。
 
 ### 10.5 阶段版本门禁
 
-阶段 G 的 v4 到 v5 迁移、最近打开、跨窗口同步、自动验证和文档通过后，立即同步版本到 0.3.23。迁移失败和用户数据保护证据必须先写入进度记录，再进入下一阶段。
+- [ ] 同步五个版本入口到 `0.3.31`。
+- [ ] 在 `PROJECT_PROGRESS.md` 记录并发、同步、窗口几何、拖放和性能验证结果。
+- [ ] 明确列出仍需用户在 Windows 11 桌面端验证的项目，不以浏览器结果代替原生验收。
+- [ ] 提交阶段变更后进入阶段 F。
 
-## 11. 阶段 H：DOCX 和大型预览性能（0.3.24）
+## 11. 阶段 F：完整验收、文档收口和候选发布（0.3.32）
 
 ### 11.1 目标
 
-减少大型 DOCX 或复杂文档转换对界面线程的阻塞，使取消、超时、关闭和快速切换真正能够结束旧任务。
+完成端到端回归、文档同步、候选版本验证和 Windows 11 原生验收准备，形成可发布的 `v0.3.32` 候选，但不在未获授权时执行远程推送或 GitHub Release。
 
 ### 11.2 主要文件
 
-- prototype/src/features/preview/OfficePreviewer.jsx
-- 新增 prototype/src/features/preview/docxWorker.js 或 Rust 侧 DOCX 任务适配器
-- prototype/src/features/preview/PreviewPane.jsx
-- prototype/src/features/preview/previewApi.js
-- prototype/src/features/preview/previewTypes.js
-- prototype/src-tauri/src/preview/、commands/、storage/ 中相关任务生命周期模块
-- prototype/shared/file-types.json
-- prototype/package.json、package-lock.json 或 prototype/src-tauri/Cargo.toml、Cargo.lock
-- prototype/tests/preview-*.test.mjs
+- `PROJECT_PLAN.md`
+- `PROJECT_PROGRESS.md`
+- `README.md`
+- `prototype/README.md`
+- `prototype/src/features/floating-ball/`
+- `prototype/src-tauri/src/commands/floating_ball.rs`
+- `prototype/src-tauri/src/windows/`
+- `prototype/src-tauri/src/storage/`
+- `prototype/tests/`
+- `prototype/package.json`
+- `prototype/package-lock.json`
+- `prototype/src-tauri/tauri.conf.json`
+- `prototype/src-tauri/Cargo.toml`
+- `prototype/src-tauri/Cargo.lock`
 
-### 11.3 实现清单
+### 11.3 文档收口清单
 
-- [x] 使用 Mammoth 自带无敏感夹具测量原实现在原始、2 MiB、10 MiB、20 MiB 输入及复杂表格/图片下的转换耗时；记录了当前实现没有可中断转换和浏览器主线程内存基线的限制。
-- [x] 评估 Mammoth 在 Worker 中运行的兼容性并采用可终止的 DOCX Worker；未引入 Rust DOCX 解析器或新的运行时依赖。
-- [x] 取消覆盖下载、解析、转换、分批 HTML 清理和资源释放，而不是只取消 fetch。
-- [x] 对转换输出增加 8 MiB 和 50,000 个元素的二次限制，超过限制显示 `too-large` 和默认程序打开入口。
-- [x] 显示读取、后台转换、HTML 清理和耗时较长状态；关闭/取消/切换时终止 Worker，30 秒后返回 `timed-out`。
-- [x] 保持 DOMPurify HTML sanitization、脚本/外链/嵌入对象禁止和 DOCX 只读语义。
-- [x] DOCX 复用现有 PreviewPane 的 task/dispose 生命周期；XLSX 超时与 DOC/DOCX 超时统一使用 `timed-out`，PDF.js 和资源 TTL 既有清理路径保持不变。
-- [x] 依赖评估确认 Mammoth、DOMPurify、Vite、Tauri 和 WebView2 使用现有锁定版本；没有新增安装条件或未记录系统依赖。
+- [ ] `README.md` 和 `prototype/README.md` 将悬浮球主功能描述为“文件库”，明确写出文件列表、搜索、筛选、文件定位、文件夹目录、资源管理器显示和直接预览。
+- [ ] 文档单独说明“最近记录”仍属于保留的历史/托盘语义，不再是悬浮球弹窗主列表。
+- [ ] 文档区分自动化验证、浏览器回退检查和 Windows 11/Tauri/WebView2 原生验收。
+- [ ] 文档说明支持预览格式、失效路径、外部程序和 LibreOffice 等既有依赖边界，不扩大“已支持”声明。
+- [ ] `PROJECT_PROGRESS.md` 记录每个阶段的版本、主要文件、验证命令、候选安装包和未完成的用户验收。
+- [ ] 若新增 IPC command、权限或数据结构，记录接口兼容性和安全边界。
 
-### 11.4 验证
+### 11.4 自动验证清单
 
-- [x] 代码级确认大型 DOCX 转换的关闭、切换和取消都会触发 AbortSignal/Worker terminate；真实桌面响应已由用户完成 Windows 手工验收。
-- [x] 代码级确认资源 URL 变化会清理旧 Worker，旧结果不会写入新资料状态。
-- [x] 超时、输出过大、损坏文档和加密文档均映射到带重试/默认程序打开等可执行下一步的状态。
-- [x] 运行 `npm.cmd run test:preview`、`npm.cmd run build`；Rust 变更运行 `cargo test`、`cargo check` 和 `cargo clippy`。
-- [x] 使用无敏感测试夹具做 Windows WebView2 手工验证，不读取用户真实文档。
+- [ ] 运行 `npm.cmd run test:floating-ball`。
+- [ ] 运行 `npm.cmd run test:library`。
+- [ ] 运行 `npm.cmd run test:contracts`。
+- [ ] 运行 `npm.cmd run test:preview`。
+- [ ] 运行 `npm.cmd run test:settings`、`npm.cmd run test:operations` 和必要的 `npm.cmd run test:content`。
+- [ ] 运行 `npm.cmd run build`。
+- [ ] 在 `prototype/src-tauri` 运行 `cargo fmt --check`、`cargo check`、`cargo check --tests`、`cargo test`。
+- [ ] 适用时运行 `cargo clippy --all-targets --all-features -- -D warnings`。
+- [ ] 运行 `git diff --check`，确认版本入口、文档和代码没有编码或空白错误。
 
-### 11.5 阶段版本门禁
+### 11.5 Windows 11 原生验收清单
 
-阶段 H 的性能基线、取消、资源清理、依赖评估和自动验证通过后，立即同步版本到 0.3.24。如果引入新的运行时依赖，必须同时更新 README 的安装条件和进度记录，不能先改版本后补说明。
+以下项目必须在真实 Windows 11/Tauri 环境中验证，不能用浏览器回退模式替代：
 
-## 12. 阶段 I：递归导入和导入策略（0.3.25）
+- [ ] 应用启动后悬浮球显示、置顶、透明背景和位置恢复正常。
+- [ ] 悬停展开、点击展开、从球体移动到面板、延迟收起和 `Escape` 行为正常。
+- [ ] 球体拖拽、边缘吸附、四角展开、面板方向和多显示器切换正常。
+- [ ] 混合 DPI 下球体大小、面板尺寸、数量徽标、成功/失败标记和点击区域正确。
+- [ ] 从资源管理器拖入文件和文件夹，记录结果、跳过原因和文件库刷新正确。
+- [ ] 文件库展示超过五项资料；搜索、筛选、排序和滚动不丢失条目。
+- [ ] 点击文件能够打开主窗口并定位到该文件。
+- [ ] 点击文件夹能够打开主窗口对应目录。
+- [ ] “在资源管理器中显示”能够定位文件和文件夹；失效路径显示正确错误。
+- [ ] 直接预览至少覆盖一个文本/Markdown、一个图片、一个 Office 文件和一个 PDF 流程；失败状态可恢复。
+- [ ] 主窗口导入、收藏、移除、重命名、重新定位后悬浮窗最终同步。
+- [ ] 隐藏到托盘、显示/隐藏悬浮球、主窗口关闭和真正退出时生命周期清理正常。
+- [ ] 重启应用后文件库、收藏、失效状态和悬浮球位置符合持久化约定。
 
-### 12.1 目标
+### 11.6 候选版本门禁
 
-解决“导入文件夹只登记文件夹本身，子文件只能进入目录查看”的预期差异，同时保留当前按需浏览的低成本默认行为。
+- [ ] 同步五个版本入口到 `0.3.32`，确认所有版本一致。
+- [ ] 若用户要求安装包，运行 `npm.cmd run tauri:build` 并运行 `npm.cmd run verify:loader`，记录 NSIS 安装包路径、架构和校验信息。
+- [ ] 安装包验证必须单独记录安装、首次启动、升级、卸载、托盘和悬浮球行为，不能只记录构建成功。
+- [ ] 未经用户明确要求，不执行 `git push`、创建 tag、发布 GitHub Release 或修改远程仓库。
+- [ ] `v0.3.32` 只有在用户确认 Windows 11 原生验收后才可以标记为正式发布；自动测试通过只能标记为候选。
 
-### 12.2 主要文件
+## 12. 版本、分支和提交规则
 
-- prototype/src/features/library/useLibraryActions.js
-- prototype/src/features/library/libraryRepository.js
-- prototype/src/features/library/LibraryPanel.jsx
-- prototype/src/App.jsx
-- prototype/src-tauri/src/commands/mod.rs
-- prototype/src-tauri/src/commands/library.rs
-- prototype/src-tauri/src/filesystem/mod.rs
-- prototype/src-tauri/src/storage/、windows/ 中事件和任务模块
-- prototype/src/lib/ipcContracts.js、ipcContracts.d.ts
-- prototype/src/styles.css
-- prototype/tests/ 下新增递归扫描、取消和上限夹具
+### 12.1 版本入口
 
-### 12.3 实现清单
+每个阶段版本更新时，以下五个入口必须保持一致：
 
-- [x] 文件夹选择后显示明确选项：“登记文件夹”与“导入文件夹内资料”。
-- [x] 保持“登记文件夹”为默认选项，当前目录浏览行为不改变。
-- [x] 递归导入必须明确扫描范围、文件类型、排除规则、最大条目数和预计影响范围。
-- [x] 扫描任务支持进度、取消、超时、跳过原因、重复路径和部分成功结果。
-- [x] Rust 对每个路径重新执行 canonical、symlink/reparse point、普通文件类型和权限校验。
-- [x] 不跟随符号链接、Windows reparse point 或目录外跳转；递归深度、总条目、单次任务和内存上限全部受限。
-- [x] 重复路径保留现有 ID、收藏、标签、分组、添加时间和预览状态，不产生重复条目。
-- [x] 导入策略记录在当前操作摘要中，不允许静默修改用户原文件。
-- [x] 结果中心提供扫描摘要、跳过原因和当前会话重试入口，不能只靠 toast。
+- `prototype/package.json`
+- `prototype/package-lock.json` 的根包版本
+- `prototype/src-tauri/tauri.conf.json`
+- `prototype/src-tauri/Cargo.toml`
+- `prototype/src-tauri/Cargo.lock` 的本地 package 版本
 
-### 12.4 验证
+版本更新顺序固定为：
 
-- [x] 当前默认“登记文件夹”行为完全保持兼容。
-- [x] 递归导入包含中文、空格、深层目录、同名文件、损坏文件、权限拒绝、符号链接和 reparse point 边界的测试夹具/代码覆盖。
-- [x] 达到条目上限、取消、超时和部分失败后，索引没有重复或半写状态。
-- [x] 递归导入不会把真实文件内容和路径写入普通日志或测试输出。
-- [x] 运行前端契约/库测试、Rust filesystem/storage/command 测试、cargo clippy 和 npm.cmd run build。
-- [x] Windows 11 手工检查文件夹选择器、进度、取消、重启恢复和长路径显示。
+1. 完成阶段代码、IPC 契约、测试和必要界面状态。
+2. 执行该阶段的最小自动验证并修复阻断问题。
+3. 同步 README、`prototype/README.md`、`PROJECT_PROGRESS.md` 和受影响技术文档。
+4. 检查五个版本入口、`git status`、`git diff --check` 和构建产物范围。
+5. 更新为该阶段的 `0.3.x` 候选版本并提交。
+6. 将 Windows 11 原生验收单独记录；未验收完成时不能把候选描述成正式发布。
 
-### 12.5 阶段版本门禁
+### 12.2 分支
 
-阶段 I 的递归导入、取消、上限、安全边界、测试和文档通过后，立即同步版本到 0.3.25。递归导入不应通过修改默认行为来“顺便完成”，必须保留用户可选择的导入模式。
+- 默认以 `dev` 为开发基线，阶段分支可以使用 `codex/` 前缀。
+- 建议分支命名为 `codex/floating-library-contract`、`codex/floating-ball-visual`、`codex/floating-library-actions` 等，完成后合并回 `dev`。
+- 不使用强制推送、硬重置或覆盖用户工作树的命令。
+- 每个阶段形成一个可定位的提交，提交说明使用 `feat:`、`fix:`、`test:` 或 `docs:` 前缀，冒号后的说明使用中文。
+- 未得到明确要求时不修改 remote、不推送、不创建发布 tag。
 
-## 13. 阶段 J：本地全文检索（0.3.26）
+### 12.3 变更范围
 
-### 13.1 目标
+- 本轮允许修改悬浮球 feature、必要的主窗口事件接收、已有安全 command 的复用、对应契约、样式、测试和计划/进度文档。
+- 本轮不顺手重构无关的资料库、预览器、设置、托盘或存储代码。
+- 若一个阶段发现超出悬浮球文件库范围的缺陷，先记录在 `PROJECT_PROGRESS.md` 的风险项，不自动扩大阶段目标。
 
-在不引入云端服务和隐藏网络请求的前提下，让用户能够检索文本和 Markdown 正文，逐步扩大“可检索本地库”的实际价值。
+## 13. 测试和验收矩阵
 
-### 13.2 设计前置决策
+| 范围 | 重点 | 最小证据 |
+| --- | --- | --- |
+| 纯模型 | 搜索、筛选、排序、分页、状态映射、查询序号 | Node test |
+| IPC 契约 | 请求白名单、返回字段、ID、revision、错误边界 | `npm.cmd run test:contracts` |
+| 前端构建 | JSX、CSS、Sites 产物、浏览器回退 | `npm.cmd run build` |
+| 悬浮状态 | 悬停、拖拽、打开/关闭、反馈、几何和 DPI 转换 | `npm.cmd run test:floating-ball` |
+| 主窗口工作流 | 文件定位、目录进入、预览事件、焦点和上下文 | library/preview/controller tests |
+| Rust | command、索引投影、路径安全、窗口模块 | `cargo fmt`、`cargo check`、`cargo test` |
+| 浏览器视觉 | 文件库标题、球体状态、列表布局、窄视口、空状态 | 临时高位端口 + 浏览器检查 |
+| Windows 原生 | 真实拖放、资源管理器、预览、DPI、托盘、退出 | 用户 Windows 11 手工记录 |
+| 安装包 | 仅在用户要求时验证安装器、loader、卸载和升级 | `npm.cmd run tauri:build` + loader 检查 |
 
-- [x] 结合现有索引的 20,000 条上限和预览的 2 MiB 单文件边界，首期继续使用原子 JSON + 独立正文索引；不为当前规模引入 SQLite/FTS 运行时。
-- [x] 新增并锁定 Rust `regex` 依赖；它使用线性时间匹配，不支持回溯型 look-around/backreference，程序大小、查询长度和结果数量也有上限，兼顾许可证、安装体积、Windows/Tauri 兼容性和锁文件复现。
-- [x] 正文索引保存为 app data 下独立的 `content-index.json`，支持清除和重建；损坏时只进入正文索引恢复状态并保留备份，不阻塞 `index.json` 元数据启动。
-- [x] 首期索引共享文件类型 manifest 中 `kind` 为 `text` 或 `markdown` 的纯文本内容，包含代码、JSON、配置和 Markdown，不按 `.txt` 扩展名硬编码；DOCX、PDF、XLSX、图片和视频不抽取正文。
+测试数据必须使用 `prototype/tests/fixtures/` 中无敏感信息的夹具，覆盖中文文件名、空格路径、文件夹、失效路径、长名称和多种预览格式。不得把用户真实资料、真实路径、日志或密钥写入测试、截图、诊断导出或提交记录。
 
-### 13.3 主要文件
+## 14. 风险和决策记录
 
-- prototype/src/features/library/LibraryPanel.jsx
-- prototype/src/features/library/libraryModel.js
-- prototype/src/features/library/useIndexController.js
-- prototype/src/features/library/useLibraryActions.js
-- prototype/src/features/library/useContentIndexController.js
-- prototype/src/lib/ipcContracts.js、ipcContracts.d.ts
-- prototype/src-tauri/src/storage/content_index.rs、content_search.rs
-- prototype/src-tauri/src/commands/mod.rs 中的搜索、重建、清除和取消 command
-- prototype/src/features/preview/ 复用已验证的文本读取边界
-- prototype/src/styles.css
-- prototype/tests/ 新增全文索引和隐私边界测试
+### 14.1 全量索引性能
 
-### 13.4 实现清单
+如果索引规模较小，第一阶段可以先由 Rust 返回受控数量的元数据并在前端完成轻量过滤；一旦列表规模可能明显增长，必须采用 Rust 侧搜索、排序和分页。不能通过无限扩大悬浮窗高度解决大列表问题。
 
-- [x] 搜索界面增加“文件名和元数据 / 正文”模式，默认仍使用现有元数据搜索；两种模式均支持正则，正则语法错误在界面内返回可执行提示。
-- [x] 正文索引在启动、导入、刷新和索引变更后通过后台任务增量更新；设置中可取消重建并在失败后重试。
-- [x] 搜索结果显示命中字段、受限短摘要和 React 文本高亮，不把完整正文写入日志、toast、URL 或 IPC 诊断。
-- [x] 搜索结果先按正文命中 ID 与现有导航、收藏、失效路径、类型、标签、分组和目录上下文合并筛选。
-- [x] 文件删除、移除索引、重命名、重新定位、失效和清除索引后，通过索引 revision 事件清理或重建对应正文记录。
-- [x] 设置面板提供正文索引状态、条目数、占用大小、失败数、重建、取消和清除入口，不提供上传或远程分析选项。
-- [x] 对单文件 2 MiB、总正文 64 MiB、正文 1,000,000 字符、正则表达式 256 字符、单文件 64 处匹配、摘要 240 字符和重建 60 秒设定上限。
-- [x] 索引损坏或写入失败只影响全文检索；元数据资料库和现有预览仍可启动和使用，正文索引可从设置中重建。
+### 14.2 最近记录兼容性
 
-### 13.5 验证
+最近记录、最近打开和文件库是三个不同概念：
 
-- [x] 中文、英文、数字、标点、代码块和 Markdown 表格的纯文本内容由统一正文索引读取，正则结果返回受限摘要和高亮范围。
-- [x] 通过文件名、标签和正文搜索时，结果范围和高亮来源明确；目录和其他筛选仍在前端组合执行。
-- [x] 取消、超时、索引损坏、重建、写入失败、移除和清除后的状态具备恢复路径，并覆盖新增 Rust/前端测试。
-- [x] 正文索引实现不包含网络调用；日志、操作历史、诊断导出和测试输出不写入正文。
-- [x] 已运行新增全文索引/IPC 测试、Rust content index 测试、cargo check 和 npm.cmd run build；依赖已写入锁文件。
-- [x] Windows 11/Tauri/WebView2 下的真实文件导入、重启恢复、长路径和大规模性能已由用户验收；浏览器回退和开发机自动测试仍不作为原生验收依据。
+- 最近记录：由 `lastRecordedAt` 表达，表示通过悬浮球记录的最近资料。
+- 最近打开：由 `lastOpenedAt` 表达，表示成功预览或成功默认程序打开的最近资料。
+- 文件库：表示全部登记资料，是本轮悬浮窗主列表。
 
-### 13.6 阶段版本门禁
+实现时不能因为界面改名而删除或复用错误的时间字段。
 
-阶段 J 的索引方案、依赖、安全边界、增量更新、失败恢复、测试、文档和用户验收均已通过，版本已同步到 0.3.26，并已创建 `v0.3.26` Tag 和发布 GitHub Release。
+### 14.3 主窗口定位和预览竞态
 
-## 14. 跨阶段质量门禁
+文件点击可能同时触发主窗口显示、列表上下文切换和预览加载。必须使用不透明 ID、当前 revision 和预览任务 ID，确保旧列表或旧预览结果不覆盖新选择。定位成功不能只依据“窗口已经显示”，还要验证条目被选中并可见。
 
-质量检查在每个阶段执行，不集中到最后一个阶段：
+### 14.4 外部程序边界
 
-### 14.1 前端
+资源管理器显示和默认程序打开都属于用户明确触发的外部操作。命令失败时应显示通用、可诊断的错误，不展示完整命令行、临时目录或内部堆栈。
 
-- [x] 组件状态具备加载、成功、空列表、无结果、失败和重试路径。
-- [x] 所有输入、筛选、菜单、Dialog、预览和批量操作均有明确的键盘焦点和关闭行为。
-- [x] 资料行操作不把文件系统副作用藏在普通点击或导入流程中。
-- [x] 页面不依赖颜色、动画或图标单独表达状态。
-- [x] 1280px、960px、680px、360px 和至少 125% 浏览器缩放下没有关键文字覆盖、按钮裁切和不可达入口。
-- [x] 不为单次需求引入无必要的全局状态或通用抽象；组件超过 300 行时评估拆分职责。
+### 14.5 窗口尺寸和视觉密度
 
-### 14.2 Rust、文件系统和预览
+面板扩大后可能影响边缘展开空间和多 DPI 几何。必须以 `PhysicalPosition`、`PhysicalSize` 处理 Tauri 运行时窗口调用，以 DIP 处理几何模型和持久化位置；浏览器的 CSS 尺寸检查不能替代原生窗口验收。
 
-- [x] 所有新增路径仍通过索引 ID、登记文件夹 ID 和受控相对路径授权。
-- [x] 不跟随符号链接、Windows reparse point 或目录外跳转。
-- [x] 外部进程处理超时、退出码、标准错误、取消和临时目录清理。
-- [x] 索引、设置、内容索引和操作历史写入采用临时文件加原子替换或等价方案。
-- [x] 预览任务在成功、失败、取消、切换和关闭时释放资源。
-- [x] 错误返回结构化类别、用户可执行下一步和不泄露内部路径/命令行的消息。
+## 15. 最终 Definition of Done
 
-### 14.3 文档和版本
-
-- [x] 每个阶段完成后立即同步 README.md、prototype/README.md 和 PROJECT_PROGRESS.md。
-- [x] 五个版本入口始终一致，版本更新不等待最终验收。
-- [x] 新增索引、设置、预览、快捷键、依赖、Tauri capability 或数据目录时，记录版本影响。
-- [x] 不将浏览器回退、模型测试、Rust 编译或构建成功写成 Windows 11 手工验收完成；本轮原生验收由用户单独完成并已记录。
-- [x] git status、git diff --check 和改动范围在每个阶段提交前完成。
-
-## 15. 测试命令矩阵
-
-根据阶段风险执行最小必要命令，不在纯文档或窄范围前端改动中无条件执行完整安装包构建。
-
-| 变更范围 | 最小验证 |
-| --- | --- |
-| 选择、搜索、排序、筛选、分页、布局 | npm.cmd run test:library、npm.cmd run test:contracts、npm.cmd run build |
-| 预览 UI、预览状态、资源释放 | npm.cmd run test:preview、npm.cmd run test:contracts、npm.cmd run build |
-| 设置和跨窗口设置同步 | npm.cmd run test:settings、npm.cmd run test:contracts、npm.cmd run build |
-| 悬浮球、托盘和事件 | npm.cmd run test:floating-ball、npm.cmd run test:tray，必要时再运行 Rust 检查 |
-| Rust command、存储、路径和外部进程 | cargo fmt --check、cargo test、cargo check、cargo clippy --all-targets --all-features -- -D warnings |
-| 版本、Tauri 配置、安装能力和发布流程 | 前端构建、Rust 检查、必要时 npm.cmd run tauri:build 和 loader 验证 |
-| Windows 原生行为 | 用户在 Windows 11/Tauri/WebView2 环境执行安装、启动、托盘、窗口、预览和文件操作验收 |
-
-## 16. 风险和回退
-
-- 任何阶段失败时保留当前候选版本、失败项、复现步骤、测试输出和上一稳定版本，不把失败功能半隐藏在默认流程中。
-- 索引迁移始终先备份后替换；迁移失败保持旧索引可恢复。
-- 原文件删除、重命名、复制和递归导入都不能因为 UI 优化而扩大默认权限或绕过 Rust 校验。
-- 新增全文索引、操作历史或 DOCX Worker 时，损坏的附属数据不能阻塞元数据索引和主窗口启动。
-- 任何无法确认的物理文件状态都显示“状态未确认”，不自动重复执行破坏性操作。
-- 如果阶段改动影响悬浮球位置、无边框拖动、托盘退出、WebView2 loader 或安装目录，必须重新安排对应 Windows 手工验收。
-- 不使用 git reset --hard、强制推送、覆盖用户未提交改动或删除未确认的构建/测试产物。
-
-## 17. 当前状态与后续入口
-
-截至 2026-09-02，本轮计划已完成：
-
-- 阶段 A-J（`0.3.17` 至 `0.3.26`）均已完成代码实现、对应自动验证、文档同步和版本入口同步。
-- 用户已完成 Windows 11/Tauri/WebView2 原生验收，覆盖真实文件导入与预览、默认程序打开、资源管理器定位、标签与分组持久化、操作历史、设置冲突、键盘与无边框拖动、最近打开、托盘与悬浮球、DOCX 后台转换、递归导入、正文检索/正则、重建/清除/取消、长路径和重启恢复等计划场景。
-- 当前发布版本为 `v0.3.26`，上一发布基线为 `v0.3.16`；`v0.3.26` 已创建 Tag、发布 GitHub Release，并已将 `main` 与 `dev` 推送到 `origin`。
-- 当前没有待执行的计划项。后续新增需求应另行建立新的 0.3.x 阶段或修复版本，并同步更新版本、进度和发布边界。
+- [ ] 旧的“最近记录”主面板计划和主语义已被本计划替换；当前 `PROJECT_PLAN.md` 只保留文件库改造路线。
+- [ ] `0.3.27` 至 `0.3.32` 每个阶段都有明确目标、文件边界、实现清单、验证方式和版本门禁。
+- [ ] 悬浮球外观升级已完成：图标、数量徽标、状态颜色、拖入反馈、成功/失败提示、动画降级和焦点样式均可验证。
+- [ ] 悬浮窗已显示全部文件库条目，支持搜索、筛选、排序、分页、空状态、错误重试和失效状态。
+- [ ] 点击文件直接打开主窗口并定位到该文件。
+- [ ] 点击文件夹打开主窗口对应目录。
+- [ ] 文件和文件夹都提供“在资源管理器中显示”快捷操作。
+- [ ] 支持格式提供直接预览入口，预览失败有明确下一步并释放资源。
+- [ ] 拖放记录、收藏、索引变更、主窗口操作和悬浮窗列表保持 revision 一致。
+- [ ] 自动化验证与 Windows 11/Tauri/WebView2 原生验收分别记录，未完成的原生验收不被描述为已完成。
+- [ ] 所有版本入口、项目文档、进度文档和 Git 状态一致，未提交真实资料、构建缓存、密钥或临时产物。

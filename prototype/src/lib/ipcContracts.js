@@ -10,7 +10,7 @@ export const IPC_COMMANDS = Object.freeze([
   "batch_remove_index_entries", "batch_update_tags", "batch_set_group", "cancel_batch_operation", "undo_last",
   "load_operation_history", "save_operation_record", "clear_operation_history",
   "load_settings", "update_settings",
-  "floating_window_status", "retry_floating_ball", "tray_status", "get_floating_recent",
+  "floating_window_status", "retry_floating_ball", "tray_status", "get_floating_recent", "get_floating_files",
   "record_floating_paths", "open_main_from_floating", "load_floating_placement",
   "save_floating_placement", "set_floating_window_visible", "show_main_window", "exit_app",
   "can_preview", "load_preview", "dispose_preview", "cancel_preview_task",
@@ -55,6 +55,8 @@ const OPERATION_MESSAGES = Object.freeze({
   "recursive-root-missing": "选择的文件夹已不存在，请重新选择",
   "recursive-root-permission-denied": "没有访问所选文件夹的权限",
   "recursive-root-too-many": "一次最多扫描 8 个文件夹",
+  "invalid-floating-files-query": "文件库查询条件无效，请重试",
+  "floating-files-unavailable": "文件库暂时无法读取，请重试",
 });
 
 export class IpcContractError extends Error {
@@ -350,6 +352,51 @@ export function parseFloatingRecentResult(value, command = "get_floating_recent"
   };
 }
 
+export function parseFloatingFilesResult(value, command = "get_floating_files") {
+  const source = record(value, command);
+  if ("path" in source || "content" in source) throw contractError(command, "文件库返回了禁止字段");
+  const revision = nonNegativeInteger(source.revision, command, "revision");
+  const total = nonNegativeInteger(source.total, command, "total");
+  const offset = nonNegativeInteger(source.offset, command, "offset");
+  const limit = nonNegativeInteger(source.limit, command, "limit");
+  if (total > 20_000 || offset > 20_000 || limit < 1 || limit > 100) throw contractError(command, "文件库分页字段无效");
+  const items = array(source.items, command).map((item) => {
+    const parsed = record(item, command);
+    if ("path" in parsed || "content" in parsed || "recordedAt" in parsed) {
+      throw contractError(command, "文件库条目包含禁止字段");
+    }
+    const requiredFields = ["id", "name", "type", "kind", "status", "invalid", "favorite", "size", "modifiedAt", "lastOpenedAt", "groupId", "groupName"];
+    if (requiredFields.some((field) => !Object.prototype.hasOwnProperty.call(parsed, field))) {
+      throw contractError(command, "文件库条目字段不完整");
+    }
+    const kind = parsed.kind;
+    if (!(kind === "file" || kind === "folder" || kind === "other")) {
+      throw contractError(command, "kind 字段无效");
+    }
+    return {
+      id: assertOpaqueId(parsed.id),
+      name: string(parsed.name, command, "name"),
+      type: string(parsed.type, command, "type"),
+      kind,
+      status: string(parsed.status, command, "status"),
+      invalid: boolean(parsed.invalid, command, "invalid"),
+      favorite: boolean(parsed.favorite, command, "favorite"),
+      size: nullableNonNegativeInteger(parsed.size, command, "size"),
+      modifiedAt: nullableNonNegativeInteger(parsed.modifiedAt, command, "modifiedAt"),
+      lastOpenedAt: nullableNonNegativeInteger(parsed.lastOpenedAt, command, "lastOpenedAt"),
+      groupId: parsed.groupId == null ? null : assertOpaqueId(parsed.groupId, "groupId"),
+      groupName: parsed.groupName == null ? null : string(parsed.groupName, command, "groupName"),
+    };
+  });
+  const ids = new Set(items.map((item) => item.id));
+  if (ids.size !== items.length || items.length > limit) throw contractError(command, "文件库分页结果无效");
+  const hasMore = boolean(source.hasMore, command, "hasMore");
+  if (hasMore !== offset + items.length < total) {
+    throw contractError(command, "hasMore 字段无效");
+  }
+  return { revision, items, total, offset, limit, hasMore };
+}
+
 export function parseFloatingRecordResult(value, command = "record_floating_paths") {
   const source = parseFloatingRecentResult(value, command);
   return { ...source, indexedCount: nonNegativeInteger(source.indexedCount, command, "indexedCount"), refreshedCount: nonNegativeInteger(source.refreshedCount, command, "refreshedCount"), recordedCount: nonNegativeInteger(source.recordedCount, command, "recordedCount"), skippedCount: nonNegativeInteger(source.skippedCount, command, "skippedCount"), skippedReasons: stringArray(source.skippedReasons, command, "skippedReasons"), truncated: boolean(source.truncated, command, "truncated") };
@@ -493,6 +540,10 @@ function opaqueIdArray(value, command, field) {
 function nonNegativeInteger(value, command, field) {
   if (!Number.isSafeInteger(value) || value < 0) throw contractError(command, `${field} 字段无效`);
   return value;
+}
+
+function nullableNonNegativeInteger(value, command, field) {
+  return value == null ? null : nonNegativeInteger(value, command, field);
 }
 
 function positiveInteger(value, command, field) {

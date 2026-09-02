@@ -10,7 +10,7 @@ export type IpcCommand =
   | "batch_remove_index_entries" | "batch_update_tags" | "batch_set_group" | "cancel_batch_operation" | "undo_last"
   | "load_operation_history" | "save_operation_record" | "clear_operation_history"
   | "load_settings" | "update_settings"
-  | "floating_window_status" | "retry_floating_ball" | "tray_status" | "get_floating_recent"
+  | "floating_window_status" | "retry_floating_ball" | "tray_status" | "get_floating_recent" | "get_floating_files"
   | "record_floating_paths" | "open_main_from_floating" | "load_floating_placement"
   | "save_floating_placement" | "set_floating_window_visible" | "show_main_window" | "exit_app"
   | "can_preview" | "load_preview" | "dispose_preview" | "cancel_preview_task";
@@ -50,6 +50,43 @@ export interface IndexSnapshot {
   revision: number;
   recovery: IndexRecoveryStatus | null;
   undo: UndoStatus | null;
+}
+
+export type FloatingFilesFilter = "all" | "favorite" | "folder" | "invalid";
+export type FloatingFilesSortKey = "name" | "type" | "modifiedAt" | "lastOpenedAt";
+export type FloatingFilesDirection = "asc" | "desc";
+
+export interface FloatingFilesQuery {
+  query: string;
+  filter: FloatingFilesFilter;
+  sortKey: FloatingFilesSortKey;
+  direction: FloatingFilesDirection;
+  offset: number;
+  limit: number;
+}
+
+export interface FloatingFileItem {
+  id: string;
+  name: string;
+  type: string;
+  kind: "file" | "folder" | "other";
+  status: string;
+  invalid: boolean;
+  favorite: boolean;
+  size: number | null;
+  modifiedAt: number | null;
+  lastOpenedAt: number | null;
+  groupId: string | null;
+  groupName: string | null;
+}
+
+export interface FloatingFilesResult {
+  revision: number;
+  items: FloatingFileItem[];
+  total: number;
+  offset: number;
+  limit: number;
+  hasMore: boolean;
 }
 
 export interface Group {

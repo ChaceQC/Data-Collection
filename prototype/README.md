@@ -1,6 +1,6 @@
 # 本地资料工作台原型
 
-这是基于 `AGENT.md` 方案 3“收纳入口”实现的本地资料工作台。当前发布版本 `v0.3.26` 建立在上一正式发布版本 `v0.3.16` 之上，已完成新计划阶段 A-J 的代码、最小自动验证、浏览器回退检查和用户 Windows 11/Tauri/WebView2 原生验收，并已创建 Tag 和 GitHub Release；浏览器运行时仍只保留安全的原型回退。
+这是基于 `AGENT.md` 方案 3“收纳入口”实现的本地资料工作台。当前发布版本仍为 `v0.3.26`，建立在上一正式发布版本 `v0.3.16` 之上；此前计划阶段 A-J 的代码、最小自动验证、浏览器回退检查和用户 Windows 11/Tauri/WebView2 原生验收均已完成并发布。新的悬浮球“文件库”计划当前处于阶段 A `0.3.27` 代码候选，尚未创建发布 Tag 或 Release；浏览器运行时仍只保留安全的原型回退。
 
 ## 启动
 
@@ -55,6 +55,7 @@ npm.cmd run tauri:build
 - `0.3.24` 候选将 DOCX 的 Mammoth 转换移入可终止 Worker，增加解析阶段、耗时提示、取消/超时状态以及转换 HTML 的二次大小和节点限制；没有新增 npm 或系统运行时依赖。
 - `0.3.25` 候选增加文件夹导入策略对话框；递归模式可选择支持格式范围、隐藏/系统项排除、递归深度和最大登记条目。Rust 逐项重新执行 canonical、普通文件、权限和根目录边界校验，扫描结果通过进度事件反馈，取消/超时后一次原子合并已完成部分；操作中心保存扫描摘要、跳过原因和当前会话重试入口，不保存正文或完整路径。
 - `0.3.26` 候选增加独立的 `content-index.json` 正文索引；索引共享 manifest 中 `kind=text` 或 `kind=markdown` 的纯文本内容，不限于 `.txt`，启动、导入、刷新和索引变更后后台增量同步。资料库支持元数据/正文范围切换和受控正则搜索，结果显示命中字段、短摘要和高亮；设置可查看占用统计并执行重建、取消和清除。
+- `0.3.27` 阶段 A 代码候选新增 `get_floating_files` 文件库查询 command，返回全部登记条目的安全元数据投影，支持名称/类型/标签/分组搜索、白名单筛选、稳定排序和分页，并使用 revision 绑定查询结果；返回不包含完整路径、正文、缩略图或命令行。面板标题、数量徽标和全量列表将在后续阶段实现。
 - 分组支持创建、重命名和删除；删除分组只解除资料归属，不删除索引记录或原文件。收藏、标签、分组和索引移除写入最多 50 条本地元数据撤销记录，只有当前 revision 和目标状态均匹配时才允许撤销。
 - `shared/file-types.json` 是前端和 Rust 共用的类型/预览限制 manifest；`src/lib/ipcContracts.js` 和 `ipcContracts.d.ts` 负责 IPC 结构校验，`features/library` 下的 repository/controller 负责 command 与页面状态协调。
 - 预览、设置、重命名、索引移除和原文件删除共用 Dialog 焦点陷阱；窄窗口将资料表切换为保留名称、类型、状态和高频操作的紧凑卡片，样式提供 reduced-motion 和深色模式策略。
@@ -62,6 +63,7 @@ npm.cmd run tauri:build
 - 桌面应用支持由用户明确点击“用默认程序打开”和“在资源管理器中定位”；Rust 端只从索引按 ID 或登记文件夹 ID 加相对路径取回并重新校验当前路径，通过系统文件关联或资源管理器执行，不开放任意 shell。文件夹和目录临时子项均使用受控定位入口，失效记录不提供外部操作。
 - 桌面应用启动时创建独立的 `floating-ball` 悬浮球窗口。用户可以从资源管理器把普通文件或文件夹拖到球体，Rust 端只登记路径和元数据；重复路径保留原索引 ID、收藏、添加时间和预览状态，并更新悬浮球专用的毫秒级 `lastRecordedAt`。
 - 悬浮球最近面板只显示最近 5 条通过悬浮球成功记录的资料，主窗口导入不会自动进入该列表；每条记录提供收藏/取消收藏按钮，路径失效、索引移除、重命名、重新定位、最近打开和原文件操作通过 `index-changed` 事件同步。
+- 当前阶段 A 只新增独立的文件库数据源，不改变最近记录面板的既有五项语义；主窗口导入的资料已能通过文件库查询契约返回，但面板接入和交互改造留在后续阶段。
 - 悬浮球使用受控的低频光标位置轮询、阈值滞回和延迟展开；用户可以拖动球体到工作区内自由位置或在 `24 DIP` 范围内贴到边缘。位置独立保存于 app data 目录的 `floating-ball.json` v1，保存的是显示器标识和逻辑坐标，不保存文件路径。
 - 悬浮球悬停优化使用 `floatingBallGeometryModel` 的 `ballRect`、`panelRect`、`hostRect` 和 `workArea` 纯模型，以及单一 `floatingBallHoverController` 状态机；面板从球体到面板的交互区域连续，打开前按水平位置选择左/右，空间不足时压缩面板并保留内部滚动。
 - 桌面端在启动后创建唯一的“本地资料工作台”系统托盘图标，菜单提供打开主窗口、刷新索引、打开设置、显示/隐藏悬浮窗、最近任务和真正退出入口；托盘创建失败时主窗口保持可用并显示安全错误。
@@ -90,7 +92,7 @@ Windows WebView2 使用 `http://preview.localhost/<previewId>` 访问受控资�
 
 PDF 的初始无范围请求返回完整 `200` 响应，客户端明确发起的范围请求仍按 `Content-Range` 分段返回，以兼容 PDF.js 的文件长度探测和分页读取。
 
-预览、资料库核心功能、阶段 F 的设置和显式外部操作，以及悬浮球阶段 A-F 的实现、自动验证、Windows 11 桌面手工验收和 `v0.3.6` GitHub Release 均已完成。新计划阶段 A-J 的代码实现、自动验证、浏览器回退检查和用户 Windows 11/Tauri/WebView2 原生验收均已完成；`v0.3.26` 已创建 Tag 并发布 GitHub Release。不把所有格式写成无条件“已支持”，视频编码、LibreOffice 和 WebView2 Runtime 仍按各自外部依赖边界处理。
+预览、资料库核心功能、阶段 F 的设置和显式外部操作，以及此前悬浮球阶段 A-F 的实现、自动验证、Windows 11 桌面手工验收和 `v0.3.6` GitHub Release 均已完成。此前计划阶段 A-J 的代码实现、自动验证、浏览器回退检查和用户 Windows 11/Tauri/WebView2 原生验收均已完成，`v0.3.26` 已创建 Tag 并发布 GitHub Release；新的阶段 A `0.3.27` 仅完成代码候选和自动验证，Windows 原生验收与后续面板阶段仍待完成。不把所有格式写成无条件“已支持”，视频编码、LibreOffice 和 WebView2 Runtime 仍按各自外部依赖边界处理。
 
 依赖审计注意事项：当前公开 `xlsx@0.18.5` 没有可用的 npm 修复版本，并存在已知 Prototype Pollution/ReDoS 报告。应用不打开宏、外部链接或 HTML，限制工作簿大小和展示范围，并在 Worker 中解析以便超时或异常时终止；在替换为有修复的兼容库前，该风险仍需纳入发布判断。
 
@@ -132,6 +134,6 @@ cargo test
 cargo clippy --all-targets --all-features -- -D warnings
 ```
 
-`npm.cmd run build` 会生成 Sites 所需的 `dist/client/index.html`、`dist/server/index.js` 和 `dist/.openai/hosting.json`。浏览器/Sites 模式不会调用真实文件预览、托盘、窗口、递归导入或正文索引 command；上一版 Windows 桌面预览、资料库操作、阶段 F、悬浮球基础能力和阶段 H 验收记录在根目录 `PROJECT_PROGRESS.md`，新计划阶段 A-J 的代码实现、自动验证、浏览器回退、NSIS 构建结果、用户 Windows 原生验收和 `v0.3.26` 发布记录也记录在同一进度文档中。
+`npm.cmd run build` 会生成 Sites 所需的 `dist/client/index.html`、`dist/server/index.js` 和 `dist/.openai/hosting.json`。浏览器/Sites 模式不会调用真实文件预览、托盘、窗口、递归导入或正文索引 command；此前 Windows 桌面预览、资料库操作、阶段 F、悬浮球基础能力和阶段 H-J 验收记录在根目录 `PROJECT_PROGRESS.md`，新的阶段 A `0.3.27` 代码候选、自动验证、NSIS 构建结果和用户原生验收边界也记录在同一进度文档中。
 
 悬浮球阶段的自动验证使用 `npm.cmd run test:floating-ball`、`cargo test`、`cargo check` 和 `cargo clippy`；真实 Windows 窗口、文件拖放、多显示器位置和关闭/重启行为的验收记录均保留，本轮悬停面板优化的四边四角、DPI 和组合行为已由用户完成手工确认，代理不以浏览器页面或开发侧命令结果替代该验收。
