@@ -331,7 +331,7 @@ fn open_task<R: Runtime>(app: &AppHandle<R>, file_id: &str) {
     let _ = app.emit_to(
         "main",
         "floating-open-file",
-        serde_json::json!({ "fileId": file_id }),
+        serde_json::json!({ "fileId": file_id, "action": "preview" }),
     );
 }
 

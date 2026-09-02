@@ -3,6 +3,8 @@ import test from "node:test";
 import {
   IpcContractError,
   getOperationError,
+  parseExternalOpenResult,
+  parseFloatingOpenEvent,
   getPreviewTarget,
   makeDirectoryTarget,
   parseBatchMutationResult,
@@ -87,6 +89,14 @@ test("validates single-entry mutation responses used by tag and group editors", 
   assert.equal(result.entry.tags[0], "重点");
   assert.equal(result.entry.groupId, "group-a");
   assert.throws(() => parseMutationResult({ revision: 7, changedIds: ["C:\\secret"], entry: null }, "set_entry_group"), IpcContractError);
+});
+
+test("validates floating open intents and external action results", () => {
+  assert.deepEqual(parseFloatingOpenEvent({ fileId: "file-1" }), { fileId: "file-1", action: "locate" });
+  assert.deepEqual(parseFloatingOpenEvent({ fileId: "file-1", action: "preview" }), { fileId: "file-1", action: "preview" });
+  assert.throws(() => parseFloatingOpenEvent({ fileId: "file-1", action: "open-default" }), IpcContractError);
+  assert.deepEqual(parseExternalOpenResult({ name: "资料.txt" }), { name: "资料.txt" });
+  assert.throws(() => parseExternalOpenResult({ name: 7 }), IpcContractError);
 });
 
 test("validates floating file projections without accepting paths or duplicate IDs", () => {

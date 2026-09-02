@@ -68,6 +68,7 @@ struct FloatingRecordedEvent {
 #[serde(rename_all = "camelCase")]
 struct FloatingOpenEvent {
     file_id: String,
+    action: String,
 }
 
 #[tauri::command]
@@ -155,6 +156,7 @@ pub fn get_floating_recent(
 #[tauri::command]
 pub fn open_main_from_floating(
     file_id: String,
+    action: Option<String>,
     state: State<'_, AppState>,
     app: AppHandle,
 ) -> Result<(), String> {
@@ -169,6 +171,10 @@ pub fn open_main_from_floating(
     if !exists {
         return Err("找不到需要打开的资料".to_string());
     }
+    let action = action.unwrap_or_else(|| "locate".to_string());
+    if !matches!(action.as_str(), "locate" | "preview") {
+        return Err("悬浮球打开动作无效，请重试".to_string());
+    }
     let main = app
         .get_webview_window("main")
         .ok_or_else(|| "主窗口不可用，请重试".to_string())?;
@@ -176,8 +182,12 @@ pub fn open_main_from_floating(
         .map_err(|_| "主窗口无法显示，请重试".to_string())?;
     main.set_focus()
         .map_err(|_| "主窗口无法获得焦点，请重试".to_string())?;
-    app.emit_to("main", "floating-open-file", FloatingOpenEvent { file_id })
-        .map_err(|_| "主窗口无法接收悬浮球操作，请重试".to_string())
+    app.emit_to(
+        "main",
+        "floating-open-file",
+        FloatingOpenEvent { file_id, action },
+    )
+    .map_err(|_| "主窗口无法接收悬浮球操作，请重试".to_string())
 }
 
 #[tauri::command]

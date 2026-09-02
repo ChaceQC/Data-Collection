@@ -1,6 +1,8 @@
 import {
   invokeCommand,
   isDesktopRuntime,
+  normalizeFloatingOpenAction,
+  parseExternalOpenResult,
   parseFloatingFilesResult,
   parseFloatingRecentResult,
   parseFloatingRecordResult,
@@ -35,8 +37,12 @@ export function recordFloatingPaths(paths) {
   return invokeCommand("record_floating_paths", { paths }, parseFloatingRecordResult);
 }
 
-export function openMainFromFloating(fileId) {
-  return invokeCommand("open_main_from_floating", { fileId });
+export function openMainFromFloating(fileId, action = "locate") {
+  return invokeCommand("open_main_from_floating", { fileId, action: normalizeFloatingOpenAction(action) });
+}
+
+export function revealFloatingFile(fileId) {
+  return invokeCommand("reveal_indexed_file", { fileId }, parseExternalOpenResult);
 }
 
 export function showMainWindow() {

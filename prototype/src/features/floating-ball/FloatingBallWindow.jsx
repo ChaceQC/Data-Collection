@@ -8,10 +8,12 @@ import {
 } from "@phosphor-icons/react";
 import {
   canUseFloatingBallRuntime,
+  revealFloatingFile,
   listenFloatingEvent,
   openMainFromFloating,
   showMainWindow,
 } from "./floatingBallApi.js";
+import { getOperationError } from "../../lib/ipcContracts.js";
 import { FloatingBallPanel } from "./FloatingBallPanel.jsx";
 import {
   createFloatingBallHoverController,
@@ -33,6 +35,7 @@ export function FloatingBallWindow() {
   const [hoverState, setHoverState] = useState("collapsed");
   const [status, setStatus] = useState("idle");
   const [feedback, setFeedback] = useState("");
+  const [actionBusyId, setActionBusyId] = useState("");
   const placementRef = useRef(placement);
   const panelOpenRef = useRef(false);
   const nearRef = useRef(false);
@@ -43,6 +46,7 @@ export function FloatingBallWindow() {
   const closeWindowRef = useRef(null);
   const hoverErrorRef = useRef(null);
   const latestRevisionRef = useRef(0);
+  const actionBusyRef = useRef("");
 
   if (!controllerRef.current) {
     controllerRef.current = createFloatingBallHoverController({
@@ -154,20 +158,49 @@ export function FloatingBallWindow() {
   }
 
   async function handleOpenFile(entry) {
-    if (entry.invalid) {
-      showFeedback("该资料路径已失效，请在主窗口中重新定位", "partial-error");
-      return;
-    }
+    await openEntryInMain(entry, "locate");
+  }
+
+  async function handlePreviewFile(entry) {
+    if (entry?.kind === "folder" || entry?.invalid) return;
+    await openEntryInMain(entry, "preview");
+  }
+
+  async function openEntryInMain(entry, action) {
+    if (!entry?.id || actionBusyRef.current) return;
     if (!IS_TAURI_RUNTIME) {
       showFeedback("浏览器演示仅展示文件库，未打开本地文件", "partial-error");
       return;
     }
+    actionBusyRef.current = entry.id;
+    setActionBusyId(entry.id);
     try {
       if (!await hoverController.explicitClose()) return;
-      await openMainFromFloating(entry.id);
+      await openMainFromFloating(entry.id, action);
     } catch (error) {
-      const message = typeof error === "string" ? error : error?.message;
-      showFeedback(typeof message === "string" && message.length <= 180 ? message : "主窗口无法打开该资料", "error");
+      showFeedback(getOperationError(error, "主窗口无法打开该资料"), "error");
+    } finally {
+      actionBusyRef.current = "";
+      setActionBusyId("");
+    }
+  }
+
+  async function handleReveal(entry) {
+    if (!entry?.id || actionBusyRef.current) return;
+    if (!IS_TAURI_RUNTIME) {
+      showFeedback("浏览器演示仅展示文件库，未启动资源管理器", "partial-error");
+      return;
+    }
+    actionBusyRef.current = entry.id;
+    setActionBusyId(entry.id);
+    try {
+      const result = await revealFloatingFile(entry.id);
+      showFeedback(`已在资源管理器中定位：${result.name}`, "recorded");
+    } catch (error) {
+      showFeedback(getOperationError(error, "无法在资源管理器中定位，请检查路径"), "error");
+    } finally {
+      actionBusyRef.current = "";
+      setActionBusyId("");
     }
   }
 
@@ -214,7 +247,10 @@ export function FloatingBallWindow() {
       status={status}
       feedback={feedback}
       favoriteBusyId={records.favoriteBusyId}
+      actionBusyId={actionBusyId}
       onOpenFile={handleOpenFile}
+      onPreviewFile={handlePreviewFile}
+      onReveal={handleReveal}
       onToggleFavorite={records.handleFavorite}
       onOpenLibrary={handleOpenLibrary}
       onSearchChange={records.handleSearchInput}

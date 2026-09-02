@@ -15,6 +15,7 @@ import {
   FileXls,
   FolderSimple,
   MagnifyingGlass,
+  WarningCircle,
   X,
 } from "@phosphor-icons/react";
 import { BulkLibraryToolbar } from "./LibraryActions";
@@ -40,6 +41,7 @@ import {
   filterEntries,
   formatFileSize,
   getDisplayType,
+  getEntryPage,
   getDuplicateNameIds,
   getParentSummary,
   getRecentEntries,
@@ -88,6 +90,7 @@ export function LibraryPanel({
   pageSize = PAGE_SIZE,
   selectedId,
   selectedIds = [],
+  focusRequest,
   onContextChange,
   onVisibleEntriesChange,
   onSelectionChange,
@@ -96,6 +99,7 @@ export function LibraryPanel({
   onSelectPage,
   searchInputRef,
   directoryView,
+  directoryError,
   directoryLoading,
   indexReady,
   refreshing,
@@ -120,6 +124,7 @@ export function LibraryPanel({
   onRowClick,
   onRowKeyDown,
   onOpenBreadcrumb,
+  onRetryDirectory,
   onReposition,
   onFavorite,
   onRemove,
@@ -143,6 +148,8 @@ export function LibraryPanel({
   const previousContextKeyRef = useRef("");
   const previousRefreshingRef = useRef(false);
   const refreshScrollTopRef = useRef(0);
+  const selectedRowRef = useRef(null);
+  const handledFocusRequestRef = useRef(0);
   const sourceEntries = directoryView?.entries || files;
   const contextKey = useMemo(() => getLibraryContextKey({ activeNav, searchQuery, searchMode, useRegex, filters, directoryView }), [activeNav, directoryView, filters, searchMode, searchQuery, useRegex]);
   const contentMatchIds = useMemo(() => new Set(contentSearchResults.map((result) => result.fileId).filter(Boolean)), [contentSearchResults]);
@@ -243,9 +250,36 @@ export function LibraryPanel({
   }, [contextKey, pageSize, sort]);
 
   useEffect(() => {
+    const requestId = focusRequest?.requestId;
+    if (!requestId || handledFocusRequestRef.current === requestId) return;
+    const hasFilters = filters.type || filters.tags.length || filters.groupIds.length;
+    if (focusRequest.resetFilters && hasFilters) {
+      setFilters({ type: "", tags: [], groupIds: [] });
+      return;
+    }
+    const targetPage = getEntryPage(visibleFiles, focusRequest.fileId, pageSize);
+    if (!targetPage) {
+      handledFocusRequestRef.current = requestId;
+      return;
+    }
+    if (currentPage !== targetPage) {
+      setCurrentPage(targetPage);
+      return;
+    }
+    handledFocusRequestRef.current = requestId;
+    if (focusRequest.scroll) {
+      window.requestAnimationFrame(() => selectedRowRef.current?.scrollIntoView({ block: "nearest", behavior: "auto" }));
+    }
+  }, [currentPage, filters, focusRequest, pageSize, visibleFiles]);
+
+  useEffect(() => {
+    const focusTargetPending = focusRequest?.fileId === selectedId
+      && handledFocusRequestRef.current !== focusRequest?.requestId
+      && sourceEntries.some((file) => file.id === selectedId);
+    if (focusTargetPending) return;
     if (selectedId && visibleFiles.some((file) => file.id === selectedId)) return;
     onSelectionChange(visibleFiles[0]?.id || "");
-  }, [onSelectionChange, selectedId, visibleFiles]);
+  }, [focusRequest, onSelectionChange, selectedId, sourceEntries, visibleFiles]);
 
   useEffect(() => {
     if (headerCheckboxRef.current) headerCheckboxRef.current.indeterminate = !allPageSelected && somePageSelected;
@@ -358,7 +392,7 @@ export function LibraryPanel({
 
       {!directoryView && selectedIds.length > 0 && <BulkLibraryToolbar selectedIds={selectedIds} visibleSelectedCount={visibleSelectedCount} groups={groups} busy={batchBusy} retryBatch={retryBatch} undoStatus={undoStatus} onBatchFavorite={onBatchFavorite} onBatchGroup={onBatchGroup} onBatchTags={onBatchTags} onBatchRemove={onBatchRemove} onUndo={onUndo} onRetry={onRetryBatch} onCancelBatch={onCancelBatch} onClear={onClearSelection} />}
 
-      {!indexReady ? <EmptyState icon={<Clock size={28} weight="regular" />} title="正在读取本地索引" description="请稍候。" /> : directoryLoading ? <EmptyState icon={<Clock size={28} weight="regular" />} title="正在读取文件夹" description="请稍候。" /> : contentSearchLoading && searchMode === SEARCH_MODES.content && searchQuery ? <EmptyState icon={<Clock size={28} weight="regular" />} title="正在搜索正文" description="请稍候。" /> : visibleFiles.length ? (
+      {!indexReady ? <EmptyState icon={<Clock size={28} weight="regular" />} title="正在读取本地索引" description="请稍候。" /> : directoryLoading ? <EmptyState icon={<Clock size={28} weight="regular" />} title="正在读取文件夹" description="请稍候。" /> : directoryError ? <div className="empty-state" role="alert"><WarningCircle size={28} weight="fill" aria-hidden="true" /><strong>无法进入文件夹</strong><span>{directoryError.message}</span><div className="empty-state-actions">{directoryError.retryable !== false && <button type="button" className="text-button" onClick={onRetryDirectory}>重新读取</button>}{onReposition && directoryError.folder && <button type="button" className="text-button" onClick={() => onReposition(directoryError.folder)}>重新定位</button>}<button type="button" className="text-button" onClick={() => onOpenBreadcrumb(-1)}>返回资料库</button></div></div> : contentSearchLoading && searchMode === SEARCH_MODES.content && searchQuery ? <EmptyState icon={<Clock size={28} weight="regular" />} title="正在搜索正文" description="请稍候。" /> : visibleFiles.length ? (
         <div className="file-table">
           <div ref={tableScrollRef} className="file-table-scroll" data-testid="recent-list">
             <table className="file-table-grid">
@@ -371,7 +405,7 @@ export function LibraryPanel({
               </thead>
               <tbody>
                 {page.entries.map((file) => (
-                  <tr className={`file-row ${selectedId === file.id ? "is-selected" : ""}`} key={file.id} tabIndex={0} aria-selected={selectedId === file.id} onClick={() => onRowClick(file)} onKeyDown={(event) => onRowKeyDown(event, file)}>
+                  <tr ref={(element) => { if (selectedId === file.id) selectedRowRef.current = element; }} data-entry-id={file.id} className={`file-row ${selectedId === file.id ? "is-selected" : ""}`} key={file.id} tabIndex={0} aria-selected={selectedId === file.id} onClick={() => onRowClick(file)} onKeyDown={(event) => onRowKeyDown(event, file)}>
                     <td className="file-selection-cell" data-label="选择"><input type="checkbox" aria-label={`选择 ${file.name}`} checked={selectedIdSet.has(file.id)} disabled={batchBusy || Boolean(directoryView)} onKeyDown={(event) => handleSelectionKeyDown(file.id, event)} onClick={(event) => handleSelectionClick(file.id, event)} onChange={() => {}} /></td>
                     <th scope="row" data-label="名称">
                       <div className="file-name-cell">

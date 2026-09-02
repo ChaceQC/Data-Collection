@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
-import { getOperationError, parseRecursiveImportProgress } from "../../lib/ipcContracts.js";
+import { getOperationError, normalizeFloatingOpenAction, parseRecursiveImportProgress } from "../../lib/ipcContracts.js";
 import { getFileKind, getFileType } from "../../lib/fileTypes.js";
 import { createOperationId } from "../operations/operationModel.js";
 import { libraryRepository } from "./libraryRepository.js";
@@ -34,8 +34,11 @@ export function useLibraryActions({
   setActiveNav,
   setSelectedId,
   setDirectoryView,
+  setDirectoryError,
   previewEntryId,
   setPreviewEntryId,
+  focusEntry,
+  resetToLibrary,
   openDirectory,
   applyIndexSnapshot,
   reloadIndexPreservingState,
@@ -43,6 +46,7 @@ export function useLibraryActions({
   setIndexing,
   showToast,
   operationReporter,
+  onFloatingPreviewIntent,
 }) {
   const [busyFileId, setBusyFileId] = useState("");
   const [pendingAction, setPendingAction] = useState(null);
@@ -66,6 +70,7 @@ export function useLibraryActions({
   const groupBusyRef = useRef(false);
   const indexingRef = useRef(false);
   const indexRealPathsRef = useRef(null);
+  const floatingOpenRequestRef = useRef(0);
 
   indexRealPathsRef.current = indexRealPaths;
 
@@ -914,6 +919,7 @@ export function useLibraryActions({
     try {
       const result = await libraryRepository.repositionFile(fileId, newPath);
       if (result.entry) setFiles((current) => current.map((item) => item.id === fileId ? result.entry : item));
+      setDirectoryError?.(null);
       setSelectedId(fileId);
       showToast("路径已更新");
     } catch (error) {
@@ -933,6 +939,7 @@ export function useLibraryActions({
     if (!pickedFile) return;
     const kind = getFileKind(pickedFile.name);
     setFiles((current) => current.map((file) => file.id === targetId ? { ...file, name: pickedFile.name, kind, type: getFileType(pickedFile.name, kind), status: "已登记", invalid: false, modified: "刚刚" } : file));
+    setDirectoryError?.(null);
     setSelectedId(targetId);
     showToast("路径已更新");
   }
@@ -940,21 +947,38 @@ export function useLibraryActions({
   async function openFromFloating(payload) {
     const fileId = payload?.fileId;
     if (!fileId || !isTauriRuntime) return;
+    let action;
+    try {
+      action = normalizeFloatingOpenAction(payload?.action);
+    } catch {
+      showToast("悬浮球打开动作无效，请重试");
+      return;
+    }
+    const requestId = ++floatingOpenRequestRef.current;
     try {
       const snapshot = await libraryRepository.loadIndex();
+      if (requestId !== floatingOpenRequestRef.current) return;
       const target = snapshot.entries.find((file) => file.id === fileId);
       applyIndexSnapshot(snapshot);
-      setDirectoryView(null);
-      setActiveNav("library");
-      setSelectedId(fileId);
-      setPreviewEntryId(target && !target.invalid && target.kind !== "folder" ? fileId : null);
-      if (!target) showToast("资料已从索引中移除");
-      else if (target.invalid) showToast("该资料路径已失效，请重新定位");
-      else if (target.kind === "folder") {
+      if (!target) {
+        resetToLibrary?.();
+        showToast("资料已从索引中移除");
+      }
+      else if (target.invalid) {
+        focusEntry?.(fileId);
+        showToast("该资料路径已失效，请重新定位");
+      } else if (target.kind === "folder") {
+        focusEntry?.(fileId, { scroll: false });
         showToast("已打开资料库中的文件夹记录");
-        openDirectory(target, [target]);
+        await openDirectory(target, [target]);
+      } else {
+        if (action === "preview") onFloatingPreviewIntent?.(fileId);
+        focusEntry?.(fileId);
+        if (action === "preview") setPreviewEntryId(fileId);
+        else showToast("已在资料库中定位该资料");
       }
     } catch (error) {
+      if (requestId !== floatingOpenRequestRef.current) return;
       showActionError(error, "无法定位悬浮球记录，请重试");
     }
   }

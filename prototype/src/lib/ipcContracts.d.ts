@@ -1,5 +1,6 @@
 export type EntryKind = "folder" | "other" | "markdown" | "text" | "doc" | "docx" | "xlsx" | "pdf" | "image" | "video";
 export type PreviewStatus = "idle" | "loading" | "ready" | "unsupported" | "missing" | "permission-denied" | "too-large" | "converter-missing" | "parse-error" | "cancelled" | "timed-out";
+export type FloatingOpenAction = "locate" | "preview";
 export type IpcCommand =
   | "load_file_index" | "list_directory" | "reveal_directory_child" | "index_paths" | "import_folders_recursive" | "refresh_index"
   | "content_index_status" | "search_content" | "rebuild_content_index" | "clear_content_index" | "cancel_content_index" | "get_index_recovery"
@@ -87,6 +88,15 @@ export interface FloatingFilesResult {
   offset: number;
   limit: number;
   hasMore: boolean;
+}
+
+export interface FloatingOpenEvent {
+  fileId: string;
+  action: FloatingOpenAction;
+}
+
+export interface ExternalOpenResult {
+  name: string;
 }
 
 export interface Group {

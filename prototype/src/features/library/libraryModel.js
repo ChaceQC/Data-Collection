@@ -103,6 +103,12 @@ export function getSelectedIdsInEntries(selectedIds = [], entries = []) {
   return (entries || []).map((entry) => entry?.id).filter((id) => id && selected.has(id));
 }
 
+export function getEntryPage(entries = [], entryId, pageSize = PAGE_SIZE) {
+  if (!Number.isSafeInteger(pageSize) || pageSize < 1 || !entryId) return null;
+  const index = (entries || []).findIndex((entry) => entry?.id === entryId);
+  return index < 0 ? null : Math.floor(index / pageSize) + 1;
+}
+
 export function getSelectionRangeIds(entries = [], anchorId, targetId) {
   const ids = [...new Set((entries || []).map((entry) => entry?.id).filter(Boolean))];
   const targetIndex = ids.indexOf(targetId);

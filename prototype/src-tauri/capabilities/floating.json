@@ -16,6 +16,7 @@
     "allow-get-floating-recent",
     "allow-get-floating-files",
     "allow-set-favorite",
+    "allow-reveal-indexed-file",
     "allow-open-main-from-floating",
     "allow-load-floating-placement",
     "allow-save-floating-placement"

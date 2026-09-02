@@ -6,6 +6,7 @@ import {
   CaretLeft,
   CaretRight,
   Clock,
+  Eye,
   FileText,
   Files,
   FolderOpen,
@@ -53,7 +54,10 @@ export function FloatingBallPanel({
   status,
   feedback,
   favoriteBusyId,
+  actionBusyId,
   onOpenFile,
+  onPreviewFile,
+  onReveal,
   onOpenLibrary,
   onToggleFavorite,
   onSearchChange,
@@ -203,7 +207,7 @@ export function FloatingBallPanel({
         </div>
       ) : files.length ? (
         <ul className="floating-ball-list" aria-label="文件库条目">
-          {files.map((file) => <FloatingBallFileRow key={file.id} file={file} favoriteBusyId={favoriteBusyId} onOpenFile={onOpenFile} onToggleFavorite={onToggleFavorite} />)}
+          {files.map((file) => <FloatingBallFileRow key={file.id} file={file} favoriteBusyId={favoriteBusyId} actionBusyId={actionBusyId} onOpenFile={onOpenFile} onPreviewFile={onPreviewFile} onReveal={onReveal} onToggleFavorite={onToggleFavorite} />)}
         </ul>
       ) : (
         <FloatingBallEmptyState
@@ -251,13 +255,14 @@ export function FloatingBallPanel({
   );
 }
 
-function FloatingBallFileRow({ file, favoriteBusyId, onOpenFile, onToggleFavorite }) {
+function FloatingBallFileRow({ file, favoriteBusyId, actionBusyId, onOpenFile, onPreviewFile, onReveal, onToggleFavorite }) {
   const typeLabel = file.kind === "folder" ? "文件夹" : file.type || "已登记";
   const statusLabel = file.invalid ? "路径失效" : file.status || "已登记";
   const sizeLabel = file.kind === "folder" ? "文件夹" : formatFloatingFileSize(file.size);
   const groupLabel = file.groupName || "未分组";
   const modifiedLabel = formatFloatingTimestamp(file.modifiedAt, "未记录");
   const isFavoriteBusy = favoriteBusyId === file.id;
+  const isActionBusy = actionBusyId === file.id;
 
   return (
     <li className={"floating-ball-entry" + (file.invalid ? " is-invalid" : "")}>
@@ -266,7 +271,7 @@ function FloatingBallFileRow({ file, favoriteBusyId, onOpenFile, onToggleFavorit
           type="button"
           className="floating-ball-entry-item"
           title={file.name}
-          aria-label={`${file.name}，${typeLabel}，${statusLabel}`}
+          aria-label={`${file.name}，${typeLabel}，${statusLabel}，在主窗口中定位`}
           onClick={() => onOpenFile(file)}
         >
           <span className={"floating-ball-file-icon floating-ball-file-icon-" + file.kind} aria-hidden="true">
@@ -284,18 +289,44 @@ function FloatingBallFileRow({ file, favoriteBusyId, onOpenFile, onToggleFavorit
           </span>
           <ArrowSquareOut className="floating-ball-open-icon" size={16} weight="regular" aria-hidden="true" />
         </button>
-        <button
-          type="button"
-          className={"floating-ball-favorite-button" + (file.favorite ? " is-favorite" : "")}
-          aria-label={(file.favorite ? "取消收藏" : "收藏") + "：" + file.name}
-          aria-pressed={Boolean(file.favorite)}
-          aria-busy={isFavoriteBusy}
-          title={file.favorite ? "取消收藏" : "收藏"}
-          disabled={Boolean(favoriteBusyId)}
-          onClick={() => onToggleFavorite(file)}
-        >
-          {isFavoriteBusy ? <SpinnerGap className="is-spinning" size={16} weight="bold" aria-hidden="true" /> : <Star size={17} weight={file.favorite ? "fill" : "regular"} aria-hidden="true" />}
-        </button>
+        <div className="floating-ball-entry-actions" role="group" aria-label={`${file.name} 快捷操作`}>
+          {!file.invalid && file.kind !== "folder" && (
+            <button
+              type="button"
+              className="floating-ball-entry-action"
+              aria-label={`直接预览：${file.name}`}
+              title="直接预览"
+              aria-busy={isActionBusy}
+              disabled={Boolean(actionBusyId)}
+              onClick={(event) => { event.stopPropagation(); onPreviewFile?.(file); }}
+            >
+              <Eye size={16} weight="regular" aria-hidden="true" />
+            </button>
+          )}
+          <button
+            type="button"
+            className="floating-ball-entry-action"
+            aria-label={`在资源管理器中显示：${file.name}`}
+            title="在资源管理器中显示"
+            aria-busy={isActionBusy}
+            disabled={Boolean(actionBusyId)}
+            onClick={(event) => { event.stopPropagation(); onReveal?.(file); }}
+          >
+            <FolderOpen size={16} weight="regular" aria-hidden="true" />
+          </button>
+          <button
+            type="button"
+            className={"floating-ball-favorite-button" + (file.favorite ? " is-favorite" : "")}
+            aria-label={(file.favorite ? "取消收藏" : "收藏") + "：" + file.name}
+            aria-pressed={Boolean(file.favorite)}
+            aria-busy={isFavoriteBusy}
+            title={file.favorite ? "取消收藏" : "收藏"}
+            disabled={Boolean(favoriteBusyId) || Boolean(actionBusyId)}
+            onClick={(event) => { event.stopPropagation(); onToggleFavorite?.(file); }}
+          >
+            {isFavoriteBusy ? <SpinnerGap className="is-spinning" size={16} weight="bold" aria-hidden="true" /> : <Star size={17} weight={file.favorite ? "fill" : "regular"} aria-hidden="true" />}
+          </button>
+        </div>
       </div>
     </li>
   );

@@ -3962,6 +3962,13 @@ summary:focus-visible,
   gap: 4px;
 }
 
+.floating-ball-entry-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: stretch;
+  gap: 3px;
+}
+
 .floating-ball-entry {
   min-width: 0;
 }
@@ -4036,6 +4043,37 @@ summary:focus-visible,
 .floating-ball-open-icon {
   flex: 0 0 auto;
   color: #9aa6ab;
+}
+
+.floating-ball-entry-action {
+  display: grid;
+  width: 30px;
+  min-height: 66px;
+  flex: 0 0 30px;
+  place-items: center;
+  color: #87969b;
+  border: 1px solid #e0e7e9;
+  border-radius: 5px;
+  background: #ffffff;
+  cursor: pointer;
+  transition: color 160ms ease, background-color 160ms ease, border-color 160ms ease;
+}
+
+.floating-ball-entry-action:hover:not(:disabled),
+.floating-ball-entry-action:focus-visible {
+  color: #1c5e91;
+  border-color: #b9d3e5;
+  background: #f1f7fb;
+}
+
+.floating-ball-entry-action:focus-visible {
+  outline: 3px solid rgba(36, 105, 168, 0.24);
+  outline-offset: 1px;
+}
+
+.floating-ball-entry-action:disabled {
+  color: #c1c9cc;
+  cursor: wait;
 }
 
 .floating-ball-favorite-button {
@@ -4997,6 +5035,7 @@ summary:focus-visible,
   .floating-ball-search-clear,
   .floating-ball-sort-direction,
   .floating-ball-page-button,
+  .floating-ball-entry-action,
   .floating-ball-favorite-button,
   .floating-ball-sort-field select {
     color: #b0bec2;
@@ -5085,6 +5124,13 @@ summary:focus-visible,
   .floating-ball-entry-item:focus-visible {
     color: #78b9ed;
     background: #202f38;
+  }
+
+  .floating-ball-entry-action:hover:not(:disabled),
+  .floating-ball-entry-action:focus-visible {
+    color: #78b9ed;
+    border-color: #405157;
+    background: #243640;
   }
 
   .floating-ball-file-icon {

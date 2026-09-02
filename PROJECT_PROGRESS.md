@@ -2,6 +2,56 @@
 
 ## 2026-09-02
 
+### 阶段 D：主窗口连续工作流和四项快捷操作（0.3.30 代码候选）
+
+#### 已完成
+
+- 按当前 `AGENT.md` 和 `PROJECT_PLAN.md` 完成阶段 D：悬浮球文件行主操作通过 `open_main_from_floating` 将文件定位到主窗口，将文件夹进入主窗口目录视图；主窗口清除会阻塞目标的搜索/筛选条件，按当前列表计算目标页并滚动到目标行。
+- 扩展 `floating-open-file` 事件为白名单动作 `locate`/`preview`；悬浮球主行点击使用定位意图，直接预览按钮使用预览意图，托盘最近任务显式保留预览意图，旧事件缺少动作时兼容为定位。
+- 复用主窗口既有 `PreviewPane`、预览资源协议和失败状态；悬浮球不复制格式判断、文件读取或渲染逻辑，支持格式、不支持格式、失效、权限、过大和转换器缺失均沿用既有状态与下一步。
+- 文件行增加直接预览和“在资源管理器中显示”图标按钮；定位调用已有 `reveal_indexed_file(fileId)`，浮窗 capability 只增加该实际使用的权限，按钮事件阻止行点击冒泡并以 busy 状态防止重复外部操作。
+- 主窗口目录导航增加异步请求序号、目录错误、重试/返回资料库入口；失效或不可访问文件夹不会落入空目录。悬浮球打开事件增加请求序号，旧的索引读取结果不能覆盖较新的操作。
+- 五个版本入口已统一到 `0.3.30`：前端 package、package-lock 根包、Tauri 配置、Rust crate 和 Cargo.lock 本地 package。
+
+#### 进行中
+
+- 无；阶段 D 代码、最小自动验证和浏览器回退检查已完成，已进入 `0.3.30` 安装包候选构建与 Windows 原生验收准备。
+
+#### 用户验收
+
+- Windows 11/Tauri/WebView2 原生安装、主窗口显示/聚焦、目标行滚动、文件夹目录读取、资源管理器真实启动、文本/Markdown/图片/Office/PDF 直接预览、失败恢复、快速连续打开、托盘行为、重启和卸载仍需用户安装候选后单独确认；代理未将浏览器检查或构建成功当作原生验收。
+
+#### 阻塞与风险
+
+- 安装包未签名且不内置 WebView2 Runtime；目标 Windows 11 机器需要已有 WebView2。DOC 预览继续依赖目标机 LibreOffice。
+- 浏览器回退只使用无敏感演示数据，不执行真实 Tauri IPC、文件系统访问、资源管理器或预览资源加载；真实外部程序和桌面窗口行为仍属于用户验收边界。
+
+#### 下一步
+
+- 安装 `0.3.30` x64 NSIS 候选，使用 `tests/fixtures/` 中的测试文件逐项验证文件定位、文件夹目录、资源管理器显示、直接预览和失败恢复；确认无回归后进入阶段 E `0.3.31`。
+
+#### 涉及文件
+
+- `prototype/src/features/floating-ball/FloatingBallWindow.jsx`、`FloatingBallPanel.jsx`、`floatingBallApi.js`
+- `prototype/src/features/library/useLibraryNavigation.js`、`useLibraryActions.js`、`LibraryPanel.jsx`、`libraryModel.js`
+- `prototype/src/App.jsx`、`prototype/src/lib/ipcContracts.js`、`prototype/src/lib/ipcContracts.d.ts`、`prototype/src/styles.css`
+- `prototype/src-tauri/src/commands/floating_ball.rs`、`src-tauri/src/windows/tray.rs`、`src-tauri/capabilities/floating.json`、生成的 capability schema
+- `prototype/tests/floating-library-actions.test.mjs`、`tests/ipc-contracts.test.mjs`、版本入口和项目文档
+
+#### 验证
+
+- `npm.cmd run test:contracts`：16 项通过，覆盖浮窗动作事件和外部结果契约。
+- `npm.cmd run test:library`：23 项通过，覆盖目标页模型以及现有资料库导航、目录、键盘和筛选模型。
+- `npm.cmd run test:floating-ball`：26 项通过，包含新增动作模型测试。
+- `npm.cmd run test:preview`：15 项通过；新增动作模型另行由悬浮球测试覆盖。浏览器回退在默认和 `360 x 760` 视口检查了三类快捷按钮、事件隔离、面板保持打开、body/panel 横向溢出为 0，控制台错误为 0。
+- `cargo fmt --all -- --check`、`cargo check --locked`：通过；`cargo test --locked`：77 项通过。
+- `npm.cmd run build`：通过，生成 Sites 所需的 `dist/client/index.html`、`dist/server/index.js` 和 `dist/.openai/hosting.json`；Vite 既有大 chunk 警告未阻断构建。
+- `npm.cmd run tauri:build`：通过，生成 Windows x64 NSIS 安装包 `prototype/src-tauri/target/release/bundle/nsis/本地资料工作台_0.3.30_x64-setup.exe`，大小 `8806496` bytes，SHA-256 为 `F139F6446264661A9E71868BB57CCA905192E3EA2252D718D73B7ED5E8115B2C`。
+- release 主程序 `prototype/src-tauri/target/release/local-material-workbench.exe`：`35646912` bytes，FileVersion/ProductVersion `0.3.30`，SHA-256 为 `8F58735E4E9BA6B54B6CFCB6EE0FE11A294F0FE333E01BFA1EB6D0F49B1E093E`。
+- `WebView2Loader.dll`：`160320` bytes，SHA-256 为 `8427B1FC58EC707813E5C0A51EB5D69397BB333250A7B891BE4D3B123F1E0F1C`；`verify-webview2-loader.mjs` 确认 loader 与 release 主程序同目录、目标架构为 Windows x64。未执行远程推送、Tag 或 GitHub Release。
+
+## 2026-09-02
+
 ### 阶段 C：文件列表、搜索、筛选和排序（0.3.29 代码候选）
 
 #### 已完成

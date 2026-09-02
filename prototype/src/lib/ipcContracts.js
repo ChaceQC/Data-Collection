@@ -21,6 +21,7 @@ export const PREVIEW_STATUSES = Object.freeze([
   "idle", "loading", "ready", "unsupported", "missing", "permission-denied",
   "too-large", "converter-missing", "parse-error", "cancelled", "timed-out",
 ]);
+export const FLOATING_OPEN_ACTIONS = Object.freeze(["locate", "preview"]);
 
 const OPERATION_MESSAGES = Object.freeze({
   "entry-not-found": "资料已不存在，请刷新索引",
@@ -424,7 +425,19 @@ export function parseRevisionEvent(value, command = "revision-event") {
 
 export function parseFloatingOpenEvent(value, command = "floating-open-file") {
   const source = record(value, command);
-  return { ...source, fileId: assertOpaqueId(source.fileId, "fileId") };
+  const action = source.action == null ? "locate" : string(source.action, command, "action");
+  if (!FLOATING_OPEN_ACTIONS.includes(action)) throw contractError(command, "悬浮球打开动作无效");
+  return { ...source, fileId: assertOpaqueId(source.fileId, "fileId"), action };
+}
+
+export function parseExternalOpenResult(value, command = "external-open") {
+  const source = record(value, command);
+  return { ...source, name: string(source.name, command, "name") };
+}
+
+export function normalizeFloatingOpenAction(value = "locate") {
+  if (!FLOATING_OPEN_ACTIONS.includes(value)) throw new TypeError("悬浮球打开动作无效");
+  return value;
 }
 
 export function parseSettingsChangedEvent(value, command = "settings-changed") {
