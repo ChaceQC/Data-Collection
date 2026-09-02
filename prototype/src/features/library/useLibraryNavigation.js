@@ -99,7 +99,7 @@ export function useLibraryNavigation({ filesRef, initialSelectedId = "", showToa
     if (firstMatch) setSelectedId(firstMatch.id);
   }
 
-  function focusEntry(fileId, { scroll = true } = {}) {
+  function focusEntry(fileId, { scroll = true, preview = false } = {}) {
     if (!fileId) return;
     clearSelection?.();
     setActiveNav("library");
@@ -112,8 +112,13 @@ export function useLibraryNavigation({ filesRef, initialSelectedId = "", showToa
       fileId,
       requestId: ++focusRequestRef.current,
       scroll,
+      preview,
       resetFilters: true,
     });
+  }
+
+  function clearFocusRequest(requestId) {
+    setFocusRequest((current) => current?.requestId === requestId ? null : current);
   }
 
   function resetToLibrary() {
@@ -125,6 +130,7 @@ export function useLibraryNavigation({ filesRef, initialSelectedId = "", showToa
     setDirectoryLoading(false);
     setDirectoryView(null);
     setDirectoryError(null);
+    setFocusRequest(null);
     setPreviewEntryId(null);
     setSelectedId(filesRef.current[0]?.id || "");
   }
@@ -164,6 +170,7 @@ export function useLibraryNavigation({ filesRef, initialSelectedId = "", showToa
     directoryView,
     focusEntry,
     focusRequest,
+    clearFocusRequest,
     handleRowClick,
     handleRowKeyDown,
     openBreadcrumb,

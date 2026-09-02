@@ -175,8 +175,10 @@ export function FloatingBallWindow() {
     actionBusyRef.current = entry.id;
     setActionBusyId(entry.id);
     try {
-      if (!await hoverController.explicitClose()) return;
       await openMainFromFloating(entry.id, action);
+      if (!await hoverController.explicitClose()) {
+        showFeedback("主窗口已打开，但悬浮球无法收起，请重试", "partial-error");
+      }
     } catch (error) {
       showFeedback(getOperationError(error, "主窗口无法打开该资料"), "error");
     } finally {

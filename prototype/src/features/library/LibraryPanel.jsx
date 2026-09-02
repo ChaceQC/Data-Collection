@@ -91,6 +91,7 @@ export function LibraryPanel({
   selectedId,
   selectedIds = [],
   focusRequest,
+  onFocusRequestHandled,
   onContextChange,
   onVisibleEntriesChange,
   onSelectionChange,
@@ -260,6 +261,7 @@ export function LibraryPanel({
     const targetPage = getEntryPage(visibleFiles, focusRequest.fileId, pageSize);
     if (!targetPage) {
       handledFocusRequestRef.current = requestId;
+      onFocusRequestHandled?.(requestId);
       return;
     }
     if (currentPage !== targetPage) {
@@ -267,10 +269,11 @@ export function LibraryPanel({
       return;
     }
     handledFocusRequestRef.current = requestId;
+    onFocusRequestHandled?.(requestId);
     if (focusRequest.scroll) {
       window.requestAnimationFrame(() => selectedRowRef.current?.scrollIntoView({ block: "nearest", behavior: "auto" }));
     }
-  }, [currentPage, filters, focusRequest, pageSize, visibleFiles]);
+  }, [currentPage, filters, focusRequest, onFocusRequestHandled, pageSize, visibleFiles]);
 
   useEffect(() => {
     const focusTargetPending = focusRequest?.fileId === selectedId

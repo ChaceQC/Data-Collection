@@ -1,3 +1,5 @@
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   ArrowClockwise,
   ArrowDown,
@@ -6,6 +8,7 @@ import {
   CaretLeft,
   CaretRight,
   Clock,
+  DotsThree,
   Eye,
   FileText,
   Files,
@@ -261,8 +264,109 @@ function FloatingBallFileRow({ file, favoriteBusyId, actionBusyId, onOpenFile, o
   const sizeLabel = file.kind === "folder" ? "文件夹" : formatFloatingFileSize(file.size);
   const groupLabel = file.groupName || "未分组";
   const modifiedLabel = formatFloatingTimestamp(file.modifiedAt, "未记录");
-  const isFavoriteBusy = favoriteBusyId === file.id;
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [menuPosition, setMenuPosition] = useState(null);
+  const menuId = useId();
+  const menuRef = useRef(null);
+  const menuTriggerRef = useRef(null);
   const isActionBusy = actionBusyId === file.id;
+
+  useLayoutEffect(() => {
+    if (!menuOpen) return undefined;
+    const updatePosition = () => {
+      const trigger = menuTriggerRef.current;
+      if (!trigger) return;
+      setMenuPosition(getFloatingEntryMenuPosition(trigger.getBoundingClientRect(), menuRef.current));
+    };
+    updatePosition();
+    const frameId = window.requestAnimationFrame(() => {
+      updatePosition();
+      menuRef.current?.querySelector('[role="menuitem"]:not(:disabled)')?.focus();
+    });
+    window.addEventListener("resize", updatePosition);
+    document.addEventListener("scroll", updatePosition, true);
+    return () => {
+      window.cancelAnimationFrame(frameId);
+      window.removeEventListener("resize", updatePosition);
+      document.removeEventListener("scroll", updatePosition, true);
+    };
+  }, [menuOpen]);
+
+  useEffect(() => {
+    if (!menuOpen) return undefined;
+    function handleOutsidePointer(event) {
+      if (menuRef.current?.contains(event.target) || menuTriggerRef.current?.contains(event.target)) return;
+      closeMenu(false);
+    }
+    document.addEventListener("pointerdown", handleOutsidePointer, true);
+    return () => document.removeEventListener("pointerdown", handleOutsidePointer, true);
+  }, [menuOpen]);
+
+  function closeMenu(restoreFocus = true) {
+    setMenuOpen(false);
+    setMenuPosition(null);
+    if (restoreFocus) window.requestAnimationFrame(() => menuTriggerRef.current?.focus());
+  }
+
+  function toggleMenu(event) {
+    event.stopPropagation();
+    if (favoriteBusyId || actionBusyId) return;
+    if (menuOpen) closeMenu();
+    else {
+      const rect = menuTriggerRef.current?.getBoundingClientRect();
+      if (rect) setMenuPosition(getFloatingEntryMenuPosition(rect));
+      setMenuOpen(true);
+    }
+  }
+
+  function runMenuAction(action) {
+    closeMenu(false);
+    action?.(file);
+  }
+
+  function handleMenuKeyDown(event) {
+    const items = [...(menuRef.current?.querySelectorAll('[role="menuitem"]') || [])].filter((item) => !item.disabled);
+    if (!items.length) return;
+    const currentIndex = items.indexOf(document.activeElement);
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      const step = event.key === "ArrowDown" ? 1 : -1;
+      items[(currentIndex + step + items.length) % items.length].focus();
+    } else if (event.key === "Home") {
+      event.preventDefault();
+      items[0].focus();
+    } else if (event.key === "End") {
+      event.preventDefault();
+      items.at(-1).focus();
+    } else if (event.key === "Escape" || event.key === "Tab") {
+      event.preventDefault();
+      closeMenu(event.key === "Escape");
+    }
+  }
+
+  const menu = menuOpen && menuPosition && typeof document !== "undefined" ? createPortal(
+    <div
+      ref={menuRef}
+      id={menuId}
+      className="floating-ball-entry-menu"
+      role="menu"
+      aria-label={`${file.name} 的快捷操作`}
+      style={{
+        top: `${menuPosition.top}px`,
+        left: `${menuPosition.left}px`,
+        width: `${menuPosition.width}px`,
+        maxHeight: `${menuPosition.maxHeight}px`,
+      }}
+      onPointerDown={(event) => event.stopPropagation()}
+      onClick={(event) => event.stopPropagation()}
+      onKeyDown={handleMenuKeyDown}
+    >
+      {!file.invalid && file.kind !== "folder" && <FloatingBallMenuAction icon={Eye} label="直接预览" disabled={Boolean(actionBusyId)} onClick={() => runMenuAction(onPreviewFile)} />}
+      <FloatingBallMenuAction icon={FolderOpen} label="在资源管理器中显示" disabled={Boolean(actionBusyId)} onClick={() => runMenuAction(onReveal)} />
+      <FloatingBallMenuAction icon={Star} label={file.favorite ? "取消收藏" : "收藏"} disabled={Boolean(favoriteBusyId) || Boolean(actionBusyId)} onClick={() => runMenuAction(onToggleFavorite)} />
+    </div>,
+    document.body,
+  ) : null;
 
   return (
     <li className={"floating-ball-entry" + (file.invalid ? " is-invalid" : "")}>
@@ -290,46 +394,49 @@ function FloatingBallFileRow({ file, favoriteBusyId, actionBusyId, onOpenFile, o
           <ArrowSquareOut className="floating-ball-open-icon" size={16} weight="regular" aria-hidden="true" />
         </button>
         <div className="floating-ball-entry-actions" role="group" aria-label={`${file.name} 快捷操作`}>
-          {!file.invalid && file.kind !== "folder" && (
-            <button
-              type="button"
-              className="floating-ball-entry-action"
-              aria-label={`直接预览：${file.name}`}
-              title="直接预览"
-              aria-busy={isActionBusy}
-              disabled={Boolean(actionBusyId)}
-              onClick={(event) => { event.stopPropagation(); onPreviewFile?.(file); }}
-            >
-              <Eye size={16} weight="regular" aria-hidden="true" />
-            </button>
-          )}
           <button
             type="button"
-            className="floating-ball-entry-action"
-            aria-label={`在资源管理器中显示：${file.name}`}
-            title="在资源管理器中显示"
+            ref={menuTriggerRef}
+            className="floating-ball-entry-menu-trigger"
+            aria-label={`打开 ${file.name} 的快捷操作`}
+            title="更多操作"
+            aria-haspopup="menu"
+            aria-controls={menuId}
+            aria-expanded={menuOpen}
             aria-busy={isActionBusy}
-            disabled={Boolean(actionBusyId)}
-            onClick={(event) => { event.stopPropagation(); onReveal?.(file); }}
-          >
-            <FolderOpen size={16} weight="regular" aria-hidden="true" />
-          </button>
-          <button
-            type="button"
-            className={"floating-ball-favorite-button" + (file.favorite ? " is-favorite" : "")}
-            aria-label={(file.favorite ? "取消收藏" : "收藏") + "：" + file.name}
-            aria-pressed={Boolean(file.favorite)}
-            aria-busy={isFavoriteBusy}
-            title={file.favorite ? "取消收藏" : "收藏"}
             disabled={Boolean(favoriteBusyId) || Boolean(actionBusyId)}
-            onClick={(event) => { event.stopPropagation(); onToggleFavorite?.(file); }}
+            onClick={toggleMenu}
           >
-            {isFavoriteBusy ? <SpinnerGap className="is-spinning" size={16} weight="bold" aria-hidden="true" /> : <Star size={17} weight={file.favorite ? "fill" : "regular"} aria-hidden="true" />}
+            <DotsThree size={20} weight="bold" aria-hidden="true" />
           </button>
         </div>
       </div>
+      {menu}
     </li>
   );
+}
+
+function FloatingBallMenuAction({ icon: Icon, label, disabled, onClick }) {
+  return (
+    <button type="button" className="floating-ball-entry-menu-item" role="menuitem" disabled={disabled} onClick={(event) => { event.stopPropagation(); onClick?.(); }}>
+      <Icon size={16} weight="regular" aria-hidden="true" />
+      <span>{label}</span>
+    </button>
+  );
+}
+
+function getFloatingEntryMenuPosition(triggerRect, menuElement) {
+  const viewportWidth = window.visualViewport?.width || window.innerWidth;
+  const viewportHeight = window.visualViewport?.height || window.innerHeight;
+  const width = 188;
+  const gap = 4;
+  const height = Math.min(menuElement?.scrollHeight || 148, viewportHeight - 16);
+  const left = Math.min(Math.max(8, triggerRect.right - width), Math.max(8, viewportWidth - width - 8));
+  const belowTop = triggerRect.bottom + gap;
+  const fitsBelow = belowTop + height <= viewportHeight - 8;
+  const top = fitsBelow ? belowTop : Math.max(8, triggerRect.top - gap - height);
+  const maxHeight = Math.max(96, fitsBelow ? viewportHeight - top - 8 : triggerRect.top - gap - 8);
+  return { top, left, width, maxHeight };
 }
 
 function FloatingBallEmptyState({ emptyState, hasActiveFilter, hasActiveSearch, onOpenLibrary, onClearSearch, onClearFilters }) {

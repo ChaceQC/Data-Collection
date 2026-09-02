@@ -150,8 +150,6 @@ function App() {
   const previewEntriesRef = useRef([]);
   const tagFilterSequenceRef = useRef(0);
   const libraryContextKeyRef = useRef("");
-  const floatingPreviewIntentRef = useRef("");
-  const floatingPreviewIntentTimerRef = useRef(null);
   const clearBatchSelection = useCallback(() => setSelectedIds([]), []);
   const navigation = useLibraryNavigation({
     filesRef,
@@ -159,6 +157,10 @@ function App() {
     showToast,
     clearSelection: clearBatchSelection,
   });
+  const focusRequestRef = useRef(null);
+  const previewEntryIdRef = useRef(null);
+  focusRequestRef.current = navigation.focusRequest;
+  previewEntryIdRef.current = navigation.previewEntryId;
   const operations = useOperationController({ isTauriRuntime: IS_TAURI_RUNTIME, showToast });
   const contentIndex = useContentIndexController({
     isTauriRuntime: IS_TAURI_RUNTIME,
@@ -173,19 +175,15 @@ function App() {
     libraryContextKeyRef.current = nextContextKey;
     setSelectedIds((current) => clearSelectionOnContextChange(previousContextKey, nextContextKey, current));
     if (previousContextKey && previousContextKey !== nextContextKey) {
-      const preservePreview = floatingPreviewIntentRef.current === navigation.previewEntryId;
-      if (!preservePreview) {
-        floatingPreviewIntentRef.current = "";
-        clearTimeout(floatingPreviewIntentTimerRef.current);
-        floatingPreviewIntentTimerRef.current = null;
-      }
+      const focusRequest = focusRequestRef.current;
+      const preservePreview = focusRequest?.preview === true
+        && focusRequest.fileId === previewEntryIdRef.current;
       previewEntriesRef.current = [];
       setPreviewEntries([]);
       setPreviewRetryNonce(0);
       if (!preservePreview) navigation.setPreviewEntryId(null);
     }
   }, [navigation.setPreviewEntryId]);
-  useEffect(() => () => clearTimeout(floatingPreviewIntentTimerRef.current), []);
   const handleVisibleEntriesChange = useCallback((entries) => {
     previewEntriesRef.current = entries;
     setPreviewEntries(entries);
@@ -227,14 +225,6 @@ function App() {
     setIndexing: index.setIndexing,
     showToast,
     operationReporter: operations,
-    onFloatingPreviewIntent: (fileId) => {
-      clearTimeout(floatingPreviewIntentTimerRef.current);
-      floatingPreviewIntentRef.current = fileId;
-      floatingPreviewIntentTimerRef.current = window.setTimeout(() => {
-        floatingPreviewIntentRef.current = "";
-        floatingPreviewIntentTimerRef.current = null;
-      }, 0);
-    },
   });
   const {
     applySettings,
@@ -259,7 +249,7 @@ function App() {
     showToast,
   });
   const { files, groups, indexReady, indexRecovery, indexing, refreshing, refreshError, diagnosticExporting, undoStatus } = index;
-  const { activeNav, directoryError, directoryLoading, directoryView, focusRequest, handleRowClick, handleRowKeyDown, openBreadcrumb, previewEntryId, retryDirectory, searchQuery, selectNav, selectedId, setSearchQuery } = navigation;
+  const { activeNav, clearFocusRequest, directoryError, directoryLoading, directoryView, focusRequest, handleRowClick, handleRowKeyDown, openBreadcrumb, previewEntryId, retryDirectory, searchQuery, selectNav, selectedId, setSearchQuery } = navigation;
   const { addTag, batchBusy, busyFileId, canRetryOperation, choosePaths, closePendingAction, confirmBatchRemove, confirmDelete, confirmFolderImport, confirmGroup, confirmRemove, confirmRename, confirmTags, createGroup, deleteGroup, dragActive, fileInputRef, folderInputRef, groupBusy, groupDraft, handleBatchFavorite, handleBatchGroup, handleBatchTags, handleCancelBatch, handleCancelImport, handleCopy, handleCopyLocation, handleDragLeave, handleDragOver, handleDrop, handleFavorite, handleOpenDefault, handleReveal, handleRetryBatch, handleUndo, openRepositionPicker, pendingAction, recursiveImportProgress, repositionInputRef, repositionInvalidPath, removeTag, renameName, renameGroup, renameValidation, requestBatchRemove, requestDelete, requestEditTags, requestRemove, requestRename, requestSetGroup, retryBatch, retryOperation, setGroupDraft, setRenameName, setTagInput, tagDraft, tagInput } = actions;
   const { floatingWindowError, floatingWindowRetrying, handleWindowAction, retryFloatingBall } = windowController;
 
@@ -536,6 +526,7 @@ function App() {
           directoryView={directoryView}
           directoryError={directoryError}
           focusRequest={focusRequest}
+          onFocusRequestHandled={clearFocusRequest}
           directoryLoading={directoryLoading}
           indexReady={indexReady}
           refreshing={refreshing}

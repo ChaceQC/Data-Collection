@@ -46,7 +46,6 @@ export function useLibraryActions({
   setIndexing,
   showToast,
   operationReporter,
-  onFloatingPreviewIntent,
 }) {
   const [busyFileId, setBusyFileId] = useState("");
   const [pendingAction, setPendingAction] = useState(null);
@@ -972,8 +971,7 @@ export function useLibraryActions({
         showToast("已打开资料库中的文件夹记录");
         await openDirectory(target, [target]);
       } else {
-        if (action === "preview") onFloatingPreviewIntent?.(fileId);
-        focusEntry?.(fileId);
+        focusEntry?.(fileId, { preview: action === "preview" });
         if (action === "preview") setPreviewEntryId(fileId);
         else showToast("已在资料库中定位该资料");
       }

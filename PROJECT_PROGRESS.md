@@ -9,8 +9,12 @@
 - 按当前 `AGENT.md` 和 `PROJECT_PLAN.md` 完成阶段 D：悬浮球文件行主操作通过 `open_main_from_floating` 将文件定位到主窗口，将文件夹进入主窗口目录视图；主窗口清除会阻塞目标的搜索/筛选条件，按当前列表计算目标页并滚动到目标行。
 - 扩展 `floating-open-file` 事件为白名单动作 `locate`/`preview`；悬浮球主行点击使用定位意图，直接预览按钮使用预览意图，托盘最近任务显式保留预览意图，旧事件缺少动作时兼容为定位。
 - 复用主窗口既有 `PreviewPane`、预览资源协议和失败状态；悬浮球不复制格式判断、文件读取或渲染逻辑，支持格式、不支持格式、失效、权限、过大和转换器缺失均沿用既有状态与下一步。
-- 文件行增加直接预览和“在资源管理器中显示”图标按钮；定位调用已有 `reveal_indexed_file(fileId)`，浮窗 capability 只增加该实际使用的权限，按钮事件阻止行点击冒泡并以 busy 状态防止重复外部操作。
+- 文件行通过三个点快捷菜单提供直接预览和“在资源管理器中显示”；定位调用已有 `reveal_indexed_file(fileId)`，浮窗 capability 只增加该实际使用的权限，菜单事件阻止行点击冒泡并以 busy 状态防止重复外部操作。
 - 主窗口目录导航增加异步请求序号、目录错误、重试/返回资料库入口；失效或不可访问文件夹不会落入空目录。悬浮球打开事件增加请求序号，旧的索引读取结果不能覆盖较新的操作。
+- 根据用户截图反馈，将每行原先并排显示的预览/资源管理器/收藏按钮改为单个三个点触发器；菜单固定定位、自动聚焦首项、支持 Escape/外部点击关闭，菜单动作不会冒泡为行定位。
+- 修复悬浮球主窗口定位和直接预览时序：预览意图随 `focusRequest` 在搜索/筛选清理、目标页切换和滚动完成后消费；主窗口打开事件先发送再收起悬浮窗，避免收起失败取消定位或预览。
+- 新增截图对照记录 `design-qa.md`；闭合态与展开态均使用 `424 x 420` 视口验证，确认菜单动作、焦点返回、外部点击关闭和窄视口边界行为。
+- 修复主窗口最小化或仅驻留系统托盘时的悬浮球打开失败：`open_main_from_floating` 统一复用 `show_main_window`，先显示窗口、取消最小化并设置焦点，再投递定位/预览事件。
 - 五个版本入口已统一到 `0.3.30`：前端 package、package-lock 根包、Tauri 配置、Rust crate 和 Cargo.lock 本地 package。
 
 #### 进行中
@@ -37,6 +41,7 @@
 - `prototype/src/App.jsx`、`prototype/src/lib/ipcContracts.js`、`prototype/src/lib/ipcContracts.d.ts`、`prototype/src/styles.css`
 - `prototype/src-tauri/src/commands/floating_ball.rs`、`src-tauri/src/windows/tray.rs`、`src-tauri/capabilities/floating.json`、生成的 capability schema
 - `prototype/tests/floating-library-actions.test.mjs`、`tests/ipc-contracts.test.mjs`、版本入口和项目文档
+- `design-qa.md` 及本地可视化截图
 
 #### 验证
 
@@ -46,8 +51,8 @@
 - `npm.cmd run test:preview`：15 项通过；新增动作模型另行由悬浮球测试覆盖。浏览器回退在默认和 `360 x 760` 视口检查了三类快捷按钮、事件隔离、面板保持打开、body/panel 横向溢出为 0，控制台错误为 0。
 - `cargo fmt --all -- --check`、`cargo check --locked`：通过；`cargo test --locked`：77 项通过。
 - `npm.cmd run build`：通过，生成 Sites 所需的 `dist/client/index.html`、`dist/server/index.js` 和 `dist/.openai/hosting.json`；Vite 既有大 chunk 警告未阻断构建。
-- `npm.cmd run tauri:build`：通过，生成 Windows x64 NSIS 安装包 `prototype/src-tauri/target/release/bundle/nsis/本地资料工作台_0.3.30_x64-setup.exe`，大小 `8806496` bytes，SHA-256 为 `F139F6446264661A9E71868BB57CCA905192E3EA2252D718D73B7ED5E8115B2C`。
-- release 主程序 `prototype/src-tauri/target/release/local-material-workbench.exe`：`35646912` bytes，FileVersion/ProductVersion `0.3.30`，SHA-256 为 `8F58735E4E9BA6B54B6CFCB6EE0FE11A294F0FE333E01BFA1EB6D0F49B1E093E`。
+- `npm.cmd run tauri:build`：通过，生成包含托盘/最小化恢复修复的最终 Windows x64 NSIS 安装包 `prototype/src-tauri/target/release/bundle/nsis/本地资料工作台_0.3.30_x64-setup.exe`，大小 `8818791` bytes，SHA-256 为 `3254FB5A708AA0D49957E820F467B8868A0ECFD650BE13C3BD781C11DA383AA2`。
+- release 主程序 `prototype/src-tauri/target/release/local-material-workbench.exe`：`35643130` bytes，FileVersion/ProductVersion `0.3.30`，SHA-256 为 `CE4792D107D885A15E754F871D817D7FDA59DC6FCAE7A37843A717C1C3AA4FCF`。
 - `WebView2Loader.dll`：`160320` bytes，SHA-256 为 `8427B1FC58EC707813E5C0A51EB5D69397BB333250A7B891BE4D3B123F1E0F1C`；`verify-webview2-loader.mjs` 确认 loader 与 release 主程序同目录、目标架构为 Windows x64。未执行远程推送、Tag 或 GitHub Release。
 
 ## 2026-09-02

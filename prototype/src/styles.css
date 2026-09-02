@@ -4045,11 +4045,11 @@ summary:focus-visible,
   color: #9aa6ab;
 }
 
-.floating-ball-entry-action {
+.floating-ball-entry-menu-trigger {
   display: grid;
-  width: 30px;
+  width: 34px;
   min-height: 66px;
-  flex: 0 0 30px;
+  flex: 0 0 34px;
   place-items: center;
   color: #87969b;
   border: 1px solid #e0e7e9;
@@ -4059,57 +4059,65 @@ summary:focus-visible,
   transition: color 160ms ease, background-color 160ms ease, border-color 160ms ease;
 }
 
-.floating-ball-entry-action:hover:not(:disabled),
-.floating-ball-entry-action:focus-visible {
+.floating-ball-entry-menu-trigger:hover:not(:disabled),
+.floating-ball-entry-menu-trigger:focus-visible {
   color: #1c5e91;
   border-color: #b9d3e5;
   background: #f1f7fb;
 }
 
-.floating-ball-entry-action:focus-visible {
+.floating-ball-entry-menu-trigger:focus-visible {
   outline: 3px solid rgba(36, 105, 168, 0.24);
   outline-offset: 1px;
 }
 
-.floating-ball-entry-action:disabled {
+.floating-ball-entry-menu-trigger:disabled {
   color: #c1c9cc;
   cursor: wait;
 }
 
-.floating-ball-favorite-button {
+.floating-ball-entry-menu {
+  position: fixed;
+  z-index: 20;
   display: grid;
-  width: 34px;
-  min-height: 66px;
-  flex: 0 0 34px;
-  place-items: center;
-  color: #8b999e;
-  border: 1px solid #e0e7e9;
-  border-radius: 5px;
+  gap: 2px;
+  min-width: 0;
+  overflow: auto;
+  padding: 6px;
+  color: #35434a;
+  border: 1px solid #d5e0e3;
+  border-radius: 6px;
   background: #ffffff;
+  box-shadow: 0 10px 24px rgba(28, 48, 57, 0.22);
+}
+
+.floating-ball-entry-menu-item {
+  display: flex;
+  width: 100%;
+  min-height: 34px;
+  align-items: center;
+  gap: 9px;
+  padding: 6px 9px;
+  color: #35434a;
+  text-align: left;
+  border-radius: 4px;
+  background: transparent;
   cursor: pointer;
-  transition: color 160ms ease, background-color 160ms ease, border-color 160ms ease;
 }
 
-.floating-ball-favorite-button:hover:not(:disabled),
-.floating-ball-favorite-button:focus-visible {
-  color: #b17813;
-  border-color: #e1c27d;
-  background: #fff8e8;
+.floating-ball-entry-menu-item:hover:not(:disabled),
+.floating-ball-entry-menu-item:focus-visible {
+  color: #1c5e91;
+  background: #f1f7fb;
 }
 
-.floating-ball-favorite-button.is-favorite {
-  color: #d38b2c;
-  border-color: #e7c77f;
-  background: #fffaf0;
-}
-
-.floating-ball-favorite-button:focus-visible {
+.floating-ball-entry-menu-item:focus-visible {
   outline: 3px solid rgba(36, 105, 168, 0.24);
-  outline-offset: 1px;
+  outline-offset: -1px;
 }
 
-.floating-ball-favorite-button:disabled {
-  color: #c1c9cc;
+.floating-ball-entry-menu-item:disabled {
+  color: #b9c2c5;
   cursor: wait;
 }
 
@@ -5035,8 +5043,7 @@ summary:focus-visible,
   .floating-ball-search-clear,
   .floating-ball-sort-direction,
   .floating-ball-page-button,
-  .floating-ball-entry-action,
-  .floating-ball-favorite-button,
+  .floating-ball-entry-menu-trigger,
   .floating-ball-sort-field select {
     color: #b0bec2;
     border-color: #405157;
@@ -5126,10 +5133,27 @@ summary:focus-visible,
     background: #202f38;
   }
 
-  .floating-ball-entry-action:hover:not(:disabled),
-  .floating-ball-entry-action:focus-visible {
+  .floating-ball-entry-menu-trigger:hover:not(:disabled),
+  .floating-ball-entry-menu-trigger:focus-visible {
     color: #78b9ed;
     border-color: #405157;
+    background: #243640;
+  }
+
+  .floating-ball-entry-menu {
+    color: #e7edef;
+    border-color: #405157;
+    background: #172023;
+    box-shadow: 0 14px 30px rgba(0, 0, 0, 0.46);
+  }
+
+  .floating-ball-entry-menu-item {
+    color: #c5d0d3;
+  }
+
+  .floating-ball-entry-menu-item:hover:not(:disabled),
+  .floating-ball-entry-menu-item:focus-visible {
+    color: #78b9ed;
     background: #243640;
   }
 
@@ -5146,14 +5170,6 @@ summary:focus-visible,
   .floating-ball-entry-status.is-invalid,
   .floating-ball-entry.is-invalid .floating-ball-entry-copy strong {
     color: #f08078;
-  }
-
-  .floating-ball-favorite-button:hover:not(:disabled),
-  .floating-ball-favorite-button:focus-visible,
-  .floating-ball-favorite-button.is-favorite {
-    color: #f4b46d;
-    border-color: #6c5936;
-    background: #332d22;
   }
 
   .floating-ball-empty {

@@ -175,13 +175,7 @@ pub fn open_main_from_floating(
     if !matches!(action.as_str(), "locate" | "preview") {
         return Err("悬浮球打开动作无效，请重试".to_string());
     }
-    let main = app
-        .get_webview_window("main")
-        .ok_or_else(|| "主窗口不可用，请重试".to_string())?;
-    main.show()
-        .map_err(|_| "主窗口无法显示，请重试".to_string())?;
-    main.set_focus()
-        .map_err(|_| "主窗口无法获得焦点，请重试".to_string())?;
+    windows::lifecycle::show_main_window(&app).map_err(|_| "主窗口无法恢复，请重试".to_string())?;
     app.emit_to(
         "main",
         "floating-open-file",
