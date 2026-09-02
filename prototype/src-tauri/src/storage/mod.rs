@@ -1304,6 +1304,7 @@ fn validate_entries(entries: &[IndexEntry], groups: &[Group]) -> Result<(), Stor
                     | "too-large"
                     | "converter-missing"
                     | "parse-error"
+                    | "timed-out"
             )
         {
             return Err(StorageError::Corrupt);
@@ -1410,6 +1411,7 @@ fn validate_entry_shape(entry: &IndexEntry) -> Result<(), StorageError> {
                 | "too-large"
                 | "converter-missing"
                 | "parse-error"
+                | "timed-out"
         )
     {
         return Err(StorageError::Corrupt);

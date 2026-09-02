@@ -18,7 +18,7 @@ export const IPC_COMMANDS = Object.freeze([
 export const ENTRY_STATUS = Object.freeze({ registered: "已登记", invalid: "路径失效" });
 export const PREVIEW_STATUSES = Object.freeze([
   "idle", "loading", "ready", "unsupported", "missing", "permission-denied",
-  "too-large", "converter-missing", "parse-error", "cancelled",
+  "too-large", "converter-missing", "parse-error", "cancelled", "timed-out",
 ]);
 
 const OPERATION_MESSAGES = Object.freeze({

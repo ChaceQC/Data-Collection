@@ -2,6 +2,58 @@
 
 ## 2026-09-02
 
+### 阶段 H：DOCX 和大型预览性能（0.3.24 代码候选）
+
+#### 已完成
+
+- DOCX 预览已从前端主线程 Mammoth 转换改为可终止的 `docxWorker.js`；资源下载仍由 `AbortController` 管理，Worker 在关闭、切换、取消、失败和超时路径统一终止。
+- DOCX 解析过程显示读取、后台转换、HTML 清理和耗时提示；用户可在解析期间取消，30 秒截止后返回显式 `timed-out` 状态，已有失败页继续提供重试、默认程序打开和返回列表等下一步。
+- Worker 转换结果和主线程清理结果均受 8 MiB HTML、50,000 个元素限制；源文件继续受共享 manifest 的 20 MiB 限制。HTML 仍经过 DOMPurify，脚本、外链、嵌入对象和宏不进入预览。
+- HTML 清理按顶层节点分批执行并在批次间检查取消信号；预览资源由 `PreviewPane` 既有 dispose 路径释放，XLSX 与 DOC/DOCX 超时状态统一为 `timed-out`。
+- 依赖评估确认没有新增 npm、Rust 或系统运行时依赖；Mammoth、DOMPurify、Vite、Tauri、WebView2 和 Office 容器边界仍使用现有锁定版本。版本入口已统一到 `0.3.24`。
+- `npm.cmd run tauri:build` 已生成 Windows x64 NSIS 安装包 `prototype/src-tauri/target/release/bundle/nsis/本地资料工作台_0.3.24_x64-setup.exe`，大小 `8719181` bytes，SHA-256 为 `17407CEBCF4A25E2CB45F01A07A47BE7953F3159B2B7486145DD5C2A0D0A83E3`；loader 校验通过，大小 `160320` bytes，SHA-256 为 `8427B1FC58EC707813E5C0A51EB5D69397BB333250A7B891BE4D3B123F1E0F1C`。
+
+#### 性能基线
+
+- 使用 Mammoth `1.12.2` 自带的无敏感 `single-paragraph.docx`、`tables.docx` 和 `tiny-picture.docx`，以 Node 侧原实现测量原始、2 MiB、10 MiB、20 MiB 输入；2/10/20 MiB 的转换耗时分别约为：单段落 `16.94/24.77/38.21 ms`，复杂表格 `10.75/55.94/108.21 ms`，图片 `11.85/25.13/40.52 ms`。
+- 这些输入通过安全夹具尾部填充得到，主要反映资源读取和转换边界，不等同于真实复杂 DOCX；RSS 增量受 GC 影响不稳定，浏览器 WebView2 的主线程内存曲线和真实取消响应仍由 Windows 手工验收补充。
+
+#### 进行中
+
+- 无；阶段 H 代码门禁、文档同步、版本统一和 Windows x64 NSIS 候选构建已完成。不创建 Tag、Release 或推送远程。
+
+#### 阻塞与风险
+
+- 浏览器回退和开发侧命令不能替代 Windows 11/WebView2 下真实 DOCX 的 Worker 取消、超时、关闭、快速切换、输出过大、损坏/加密文档和安装后资源清理验收。
+- 安装包不签名且不内置 WebView2 Runtime；DOC 仍依赖目标机 LibreOffice。`xlsx@0.18.5` 的既有 Prototype Pollution/ReDoS 风险未消失，本阶段未扩大其解析权限。
+
+#### 下一步
+
+- 由用户安装 `0.3.24` NSIS 候选，使用无敏感 DOCX 夹具记录 Windows 11/Tauri/WebView2 的后台转换、取消、超时、关闭、快速切换和资源释放结果。
+- 桌面验收无具体阻断后，按计划进入阶段 I 的递归导入和导入策略工作。
+
+#### 涉及文件
+
+- `prototype/src/features/preview/OfficePreviewer.jsx`
+- `prototype/src/features/preview/docxWorker.js`
+- `prototype/src/features/preview/docxRenderModel.js`
+- `prototype/src/features/preview/previewSecurity.js`
+- `prototype/src/features/preview/SpreadsheetPreviewer.jsx`
+- `prototype/src/features/preview/previewTypes.js`
+- `prototype/src/lib/ipcContracts.js`、`ipcContracts.d.ts`
+- `prototype/src-tauri/src/preview/mod.rs`、`preview/loaders.rs`
+- `prototype/tests/docx-preview-model.test.mjs`
+- `README.md`、`prototype/README.md`、`PROJECT_PLAN.md`
+
+#### 验证
+
+- `npm.cmd run test:preview`：15 项通过。
+- `npm.cmd run test:contracts`：12 项通过。
+- `cargo fmt --all -- --check`：通过；`cargo test --lib`：66 项通过。
+- `npm.cmd run build`：通过，生成独立的 `docxWorker-*.js` 及 Sites 产物；`cargo check --locked`、`cargo clippy --locked --all-targets --all-features -- -D warnings`、`npm.cmd run tauri:build` 和 `npm.cmd run verify:loader`：通过。
+
+## 2026-09-02
+
 ### 阶段 G：最近打开和悬浮球连续工作流（0.3.23 代码候选）
 
 #### 已完成

@@ -33,6 +33,8 @@ test("keeps browser fallback distinct from format failures", () => {
   assert.deepEqual(getPreviewFailureActions("unsupported"), ["open-default", "reveal", "close"]);
   assert.deepEqual(getPreviewFailureActions("permission-denied"), ["retry", "open-default", "reveal", "close"]);
   assert.deepEqual(getPreviewFailureActions("cancelled"), ["retry", "open-default", "reveal", "close"]);
+  assert.equal(getPreviewStatusLabel("timed-out"), "预览超时");
+  assert.deepEqual(getPreviewFailureActions("timed-out"), ["retry", "open-default", "reveal", "close"]);
   assert.deepEqual(getPreviewFailureActions("parse-error"), ["retry", "open-default", "reveal", "close"]);
   assert.deepEqual(getPreviewFailureActions("parse-error", { isDirectoryEntry: true }), ["retry", "reveal", "close"]);
   assert.deepEqual(getPreviewFailureActions("unsupported", { demoOnly: true }), ["close"]);

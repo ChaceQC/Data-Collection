@@ -22,6 +22,7 @@ export const PREVIEW_STATUS_LABELS = Object.freeze({
   "converter-missing": "缺少 DOC 转换器",
   "parse-error": "解析失败",
   cancelled: "已取消预览",
+  "timed-out": "预览超时",
 });
 
 export function getPreviewStatusLabel(status, { demoOnly = false } = {}) {
@@ -43,7 +44,7 @@ export function getPreviewFailureActions(status, { demoOnly = false, isDirectory
   if (demoOnly) return ["close"];
   if (isDirectoryEntry) {
     const actions = [];
-    if (["permission-denied", "parse-error", "cancelled"].includes(status)) actions.push("retry");
+    if (["permission-denied", "parse-error", "cancelled", "timed-out"].includes(status)) actions.push("retry");
     if (status !== "missing") actions.push("reveal");
     actions.push("close");
     return actions;
@@ -51,7 +52,7 @@ export function getPreviewFailureActions(status, { demoOnly = false, isDirectory
   if (status === "missing") return ["reposition", "close"];
   if (status === "too-large" || status === "converter-missing") return ["open-default", "close"];
   if (status === "unsupported") return ["open-default", "reveal", "close"];
-  if (["permission-denied", "parse-error", "cancelled"].includes(status)) {
+  if (["permission-denied", "parse-error", "cancelled", "timed-out"].includes(status)) {
     return ["retry", "open-default", "reveal", "close"];
   }
   return ["close"];

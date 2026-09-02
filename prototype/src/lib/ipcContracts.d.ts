@@ -1,5 +1,5 @@
 export type EntryKind = "folder" | "other" | "markdown" | "text" | "doc" | "docx" | "xlsx" | "pdf" | "image" | "video";
-export type PreviewStatus = "idle" | "loading" | "ready" | "unsupported" | "missing" | "permission-denied" | "too-large" | "converter-missing" | "parse-error" | "cancelled";
+export type PreviewStatus = "idle" | "loading" | "ready" | "unsupported" | "missing" | "permission-denied" | "too-large" | "converter-missing" | "parse-error" | "cancelled" | "timed-out";
 export type IpcCommand =
   | "load_file_index" | "list_directory" | "reveal_directory_child" | "index_paths" | "refresh_index" | "get_index_recovery"
   | "reset_index_recovery" | "export_index_diagnostic" | "reposition_file" | "set_favorite"

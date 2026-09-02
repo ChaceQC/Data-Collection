@@ -2,10 +2,10 @@
 
 > 计划状态：执行中
 > 编制日期：2026-09-01
-> 当前工作分支：dev
+> 当前工作分支：codex/phase-h-docx-performance
 > 当前发布基线：0.3.16
-> 当前代码候选：0.3.23
-> 下一阶段版本：0.3.24
+> 当前代码候选：0.3.24
+> 下一阶段版本：0.3.25
 > 适用平台：Windows 11 x64、Tauri 2、Rust stable、React 19、Vite 6
 > 计划目的：在已完成的资料登记、目录浏览、预览、收藏、标签、分组、批量索引操作、悬浮球和托盘能力之上，继续改善日常整理效率、错误恢复、窄窗口使用和本地检索能力。
 
@@ -31,7 +31,7 @@
 | U-06 | P2 | 已有资料时导入区仍占据首屏较大空间，窄窗口下资料表下沉 | prototype/src/App.jsx、prototype/src/styles.css | 0.3.18 |
 | U-07 | P2 | 活动筛选只在弹出菜单内显示，资料总数和当前结果数不够直观 | prototype/src/features/library/LibraryPanel.jsx | 0.3.18 |
 | U-08 | P2 | 设置弹窗 draft 只在首次挂载时读取，外部设置变化后可能覆盖新状态 | prototype/src/features/settings/SettingsPanel.jsx、useSettingsController.js | 0.3.21 |
-| U-09 | P2 | DOCX 的 Mammoth 转换在前端主线程执行，取消只覆盖下载阶段 | prototype/src/features/preview/OfficePreviewer.jsx | 0.3.24 |
+| U-09 | P2 | DOCX 的 Mammoth 转换在前端主线程执行，取消只覆盖下载阶段（阶段 H 已解决） | prototype/src/features/preview/OfficePreviewer.jsx | 0.3.24 |
 | U-10 | P2/P3 | 当前没有最近打开、递归导入和全文检索 | prototype/src/features/library、prototype/src-tauri/src/storage、README.md | 0.3.23、0.3.25、0.3.26 |
 
 ### 1.3 当前基线中必须保持的能力
@@ -462,21 +462,21 @@
 
 ### 11.3 实现清单
 
-- [ ] 先用 2 MiB、10 MiB、20 MiB、复杂表格/图片/目录测试夹具测量当前转换耗时、内存和取消行为。
-- [ ] 评估 Mammoth 在 Worker 中运行的兼容性；可行时使用可终止的 DOCX Worker，不可行时将转换移至 Rust 受控任务。
-- [ ] 取消覆盖下载、解析、转换、HTML 清理和资源释放，而不是只取消 fetch。
-- [ ] 对转换输出增加二次大小和节点数量限制，超过限制显示明确状态。
-- [ ] 显示解析阶段、耗时过长、取消和超时状态；关闭预览时确保 Worker/子进程退出。
-- [ ] 保持 HTML sanitization、脚本/外链/嵌入对象禁止和 DOCX 只读语义。
-- [ ] 与 XLSX Worker、PDF.js 任务和预览资源 TTL 统一任务 ID、取消和 dispose 处理。
-- [ ] 依赖升级必须检查许可证、维护状态、锁文件和 WebView2 兼容性，不为了性能绕过成熟解析器。
+- [x] 使用 Mammoth 自带无敏感夹具测量原实现在原始、2 MiB、10 MiB、20 MiB 输入及复杂表格/图片下的转换耗时；记录了当前实现没有可中断转换和浏览器主线程内存基线的限制。
+- [x] 评估 Mammoth 在 Worker 中运行的兼容性并采用可终止的 DOCX Worker；未引入 Rust DOCX 解析器或新的运行时依赖。
+- [x] 取消覆盖下载、解析、转换、分批 HTML 清理和资源释放，而不是只取消 fetch。
+- [x] 对转换输出增加 8 MiB 和 50,000 个元素的二次限制，超过限制显示 `too-large` 和默认程序打开入口。
+- [x] 显示读取、后台转换、HTML 清理和耗时较长状态；关闭/取消/切换时终止 Worker，30 秒后返回 `timed-out`。
+- [x] 保持 DOMPurify HTML sanitization、脚本/外链/嵌入对象禁止和 DOCX 只读语义。
+- [x] DOCX 复用现有 PreviewPane 的 task/dispose 生命周期；XLSX 超时与 DOC/DOCX 超时统一使用 `timed-out`，PDF.js 和资源 TTL 既有清理路径保持不变。
+- [x] 依赖评估确认 Mammoth、DOMPurify、Vite、Tauri 和 WebView2 使用现有锁定版本；没有新增安装条件或未记录系统依赖。
 
 ### 11.4 验证
 
-- [ ] 大型 DOCX 转换时主界面仍能关闭、切换资料和响应取消。
-- [ ] 快速切换多个 DOCX，旧结果不会渲染到新资料。
-- [ ] 超时、输出过大、损坏文档和加密文档均有可执行下一步。
-- [ ] 运行 npm.cmd run test:preview、npm.cmd run build；如修改 Rust 则运行 cargo test、cargo check、cargo clippy。
+- [x] 代码级确认大型 DOCX 转换的关闭、切换和取消都会触发 AbortSignal/Worker terminate；真实桌面响应仍保留 Windows 手工验收。
+- [x] 代码级确认资源 URL 变化会清理旧 Worker，旧结果不会写入新资料状态。
+- [x] 超时、输出过大、损坏文档和加密文档均映射到带重试/默认程序打开等可执行下一步的状态。
+- [x] 运行 `npm.cmd run test:preview`、`npm.cmd run build`；Rust 变更运行 `cargo test`、`cargo check` 和 `cargo clippy`。
 - [ ] 使用无敏感测试夹具做 Windows WebView2 手工验证，不读取用户真实文档。
 
 ### 11.5 阶段版本门禁
@@ -642,12 +642,12 @@
 
 当前未完成：
 
-- 阶段 H-J 尚未实现；当前版本入口为阶段 G 的 `0.3.23` 代码候选，正式发布基线仍为 `v0.3.16`。
-- 阶段 A-F 的 Windows 11/Tauri/WebView2 原生窗口、真实文件预览、外部操作、多 DPI、元数据持久化、操作历史、设置冲突和本阶段无边框窗口快捷键验收仍需单独执行。
-- 阶段 D、E、F 和阶段 G 的 `0.3.23` Windows x64 NSIS 候选已构建，尚未创建新的 Tag 或 Release。
+- 阶段 I-J 尚未实现；当前版本入口为阶段 H 的 `0.3.24` 代码候选，正式发布基线仍为 `v0.3.16`。
+- 阶段 A-H 的 Windows 11/Tauri/WebView2 原生窗口、真实文件预览、外部操作、多 DPI、元数据持久化、操作历史、设置冲突、最近打开和 DOCX 后台转换验收仍需单独执行。
+- 阶段 D、E、F、G 的 `0.3.23` 和阶段 H 的 `0.3.24` Windows x64 NSIS 候选均只作为未发布候选，尚未创建新的 Tag 或 Release。
 
 下一步：
 
-1. 由用户安装并核对 `0.3.23` NSIS 候选，单独记录 Windows 11/Tauri/WebView2 下阶段 G 的迁移备份、最近打开排序、默认程序打开、预览焦点和悬浮球连续工作流结果。
-2. 收到桌面验收结果后只修复具体阻断项，再按计划进入阶段 H 的 DOCX 和大型预览任务性能工作。
+1. 由用户安装并核对 `0.3.24` NSIS 候选，单独记录 Windows 11/Tauri/WebView2 下阶段 H 的 DOCX Worker 取消、超时、输出限制、关闭和快速切换结果。
+2. 收到桌面验收结果后只修复具体阻断项，再按计划进入阶段 I 的递归导入和导入策略工作。
 3. 保持阶段 C 的预览任务、资源释放、可见列表快照和浏览器演示限制作为后续阶段的兼容基线。

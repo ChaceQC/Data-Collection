@@ -188,7 +188,7 @@ pub(super) fn load_doc(
                 preview_id,
                 kind,
                 PreviewFailure {
-                    status: super::STATUS_PARSE_ERROR,
+                    status: super::STATUS_TIMED_OUT,
                     reason: "DOC 转换超时，临时文件已清理，请重试",
                 },
             )
