@@ -935,7 +935,7 @@ fn resolve_preview_target(
             Ok((PathBuf::from(entry.path), entry.kind))
         }
         (None, Some(directory_id)) => {
-            let (_, path) = resolve_directory_target(
+            let (_, path) = resolve_registered_directory_child(
                 state,
                 &DirectoryTarget {
                     directory_id: directory_id.to_string(),

@@ -2,6 +2,34 @@
 
 ## 2026-09-02
 
+### 文件夹子项预览解析修复（0.3.25 修订候选）
+
+#### 已完成
+
+- 修复登记文件夹内普通文件无法预览的问题：目录子项预览目标仍使用不透明 `directoryId` 和受控 `relativePath`，但 Rust `resolve_preview_target` 误调用了只允许目录的解析函数，导致文件子项在预览前被拒绝。
+- 目录子项预览现在复用已登记目录子项的通用安全解析，并继续由文件类型注册表确认预览类型；目录浏览解析仍保持只接受文件夹的原有行为。
+- `can_preview` 和 `load_preview` 共享该修复路径，覆盖预览检查与实际加载；未开放任意本地路径访问。
+- 已重新构建 `0.3.25` Windows x64 NSIS 安装包 `prototype/src-tauri/target/release/bundle/nsis/本地资料工作台_0.3.25_x64-setup.exe`，大小 `8738373` bytes，SHA-256 为 `6F57EA4035B963EE35674ED9DFDEE2524016B6BA26965B87E86F853507EFB39A`；loader 校验通过，大小 `160320` bytes，SHA-256 为 `8427B1FC58EC707813E5C0A51EB5D69397BB333250A7B891BE4D3B123F1E0F1C`。
+
+#### 进行中
+
+- 代码回归、契约/预览测试、Rust 编译检查、clippy、前端构建和安装包构建已完成；等待用户在 Windows 11/Tauri/WebView2 环境安装修订候选，实际打开已登记文件夹中的文件确认预览。
+
+#### 阻塞与风险
+
+- 浏览器回退不会执行真实 Tauri 目录子项解析、文件读取或 WebView2 预览；本次修复未由浏览器回退代替 Windows 原生验收。
+- 安装包未签名且不内置 WebView2 Runtime；DOC 预览仍依赖 LibreOffice，其他既有外部依赖边界不变。
+
+#### 下一步
+
+- 用户安装新的 `0.3.25` NSIS 包，选择一个已登记文件夹，进入子目录并分别打开 TXT、Markdown、图片、PDF 或 Office 文件，确认预览、切换和关闭行为；记录失败样本后再决定是否需要下一轮修复。
+
+#### 验证
+
+- `npm.cmd run test:contracts`：14 项通过，包含目录子项预览目标回归测试；`npm.cmd run test:preview`：15 项通过。
+- `cargo fmt --all -- --check`、`cargo check --locked`、`cargo clippy --locked --all-targets --all-features -- -D warnings`：通过。
+- `npm.cmd run tauri:build` 和 `verify:loader`：通过，生成并校验上述修订版安装包。
+
 ### 阶段 I：递归导入和导入策略（0.3.25 代码候选）
 
 #### 已完成

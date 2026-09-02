@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   IpcContractError,
   getOperationError,
+  getPreviewTarget,
   makeDirectoryTarget,
   parseBatchMutationResult,
   parseIndexChangedEvent,
@@ -85,6 +86,17 @@ test("validates single-entry mutation responses used by tag and group editors", 
   assert.equal(result.entry.tags[0], "重点");
   assert.equal(result.entry.groupId, "group-a");
   assert.throws(() => parseMutationResult({ revision: 7, changedIds: ["C:\\secret"], entry: null }, "set_entry_group"), IpcContractError);
+});
+
+test("keeps directory child preview targets relative to the registered folder", () => {
+  assert.deepEqual(getPreviewTarget({
+    id: "child-file",
+    directoryId: "folder-1",
+    relativePath: ["项目", "研究.txt"],
+  }), {
+    directoryId: "folder-1",
+    relativePath: ["项目", "研究.txt"],
+  });
 });
 
 test("validates recursive import results and progress without accepting paths", () => {
