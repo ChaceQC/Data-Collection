@@ -1,5 +1,9 @@
 import DOMPurify from "dompurify";
 import { marked } from "marked";
+import {
+  DOCX_SANITIZE_BATCH_SIZE,
+  getDocxOutputLimitReason,
+} from "./docxRenderModel.js";
 
 const FORBID_TAGS = [
   "script",
@@ -103,4 +107,59 @@ export function renderMarkdown(value) {
 
 export function sanitizeDocxHtml(html) {
   return sanitizeHtml(html, { allowEmbeddedImages: true });
+}
+
+function throwIfPreviewAborted(signal) {
+  if (signal?.aborted) {
+    const error = new Error("preview cancelled");
+    error.name = "AbortError";
+    throw error;
+  }
+}
+
+function yieldToBrowser() {
+  return new Promise((resolve) => window.setTimeout(resolve, 0));
+}
+
+function escapeText(value) {
+  return String(value || "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+export async function sanitizeDocxHtmlWithCancellation(html, { signal, batchSize = DOCX_SANITIZE_BATCH_SIZE } = {}) {
+  const source = typeof html === "string" ? html : "";
+  throwIfPreviewAborted(signal);
+  const sourceLimitReason = getDocxOutputLimitReason(source);
+  if (sourceLimitReason) {
+    const error = new Error(sourceLimitReason);
+    error.code = "output-too-large";
+    throw error;
+  }
+
+  const template = document.createElement("template");
+  template.innerHTML = source;
+  const nodes = Array.from(template.content.childNodes);
+  const chunks = [];
+  const safeBatchSize = Number.isInteger(batchSize) && batchSize > 0 ? batchSize : DOCX_SANITIZE_BATCH_SIZE;
+  for (let index = 0; index < nodes.length; index += 1) {
+    throwIfPreviewAborted(signal);
+    const node = nodes[index];
+    if (node.nodeType === 8 || node.nodeType === 10) continue;
+    const serialized = node.nodeType === 3 ? escapeText(node.nodeValue) : node.outerHTML;
+    chunks.push(sanitizeDocxHtml(serialized || ""));
+    if ((index + 1) % safeBatchSize === 0) await yieldToBrowser();
+  }
+  throwIfPreviewAborted(signal);
+  const sanitized = chunks.join("");
+  const outputLimitReason = getDocxOutputLimitReason(sanitized);
+  if (outputLimitReason) {
+    const error = new Error(outputLimitReason);
+    error.code = "output-too-large";
+    throw error;
+  }
+  return sanitized;
 }

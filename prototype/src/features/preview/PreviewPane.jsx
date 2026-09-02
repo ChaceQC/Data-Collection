@@ -21,6 +21,7 @@ import {
   getAdjacentPreviewEntries,
   getPreviewStatusLabel,
 } from "./previewTypes";
+import { isTextEntryTarget } from "../../lib/keyboardModel.js";
 import { TextPreviewer } from "./TextPreviewer";
 import { MarkdownPreviewer } from "./MarkdownPreviewer";
 import { UnsupportedPreviewer } from "./UnsupportedPreviewer";
@@ -197,6 +198,17 @@ export function PreviewPane({
     onFailure: reportContentFailure,
   };
 
+  const handlePreviewKeyDown = useCallback((event) => {
+    if (event.defaultPrevented || event.isComposing || isTextEntryTarget(event.target)) return;
+    if (event.key === "ArrowLeft" && adjacent.previous && onNavigate) {
+      event.preventDefault();
+      onNavigate(adjacent.previous);
+    } else if (event.key === "ArrowRight" && adjacent.next && onNavigate) {
+      event.preventDefault();
+      onNavigate(adjacent.next);
+    }
+  }, [adjacent.next, adjacent.previous, onNavigate]);
+
   return (
     <Dialog
       title={entry.name}
@@ -206,7 +218,7 @@ export function PreviewPane({
       bodyClassName={`preview-dialog-body ${isReady ? "is-ready" : ""}`}
       bodyProps={{ "aria-busy": result.status === "loading" }}
       onClose={onClose}
-      dialogProps={{ "data-testid": "preview-dialog" }}
+      dialogProps={{ "data-testid": "preview-dialog", onKeyDown: handlePreviewKeyDown }}
       header={({ titleId }) => (
         <header className="preview-dialog-header">
           <div className="preview-dialog-heading">

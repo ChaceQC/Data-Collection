@@ -3,8 +3,12 @@ import {
   makeDirectoryTarget,
   parseDirectoryEntries,
   parseBatchMutationResult,
+  parseContentIndexRebuildResult,
+  parseContentIndexStatus,
+  parseContentSearchResponse,
   parseGroupMutationResult,
   parseIndexImportResult,
+  parseRecursiveImportResult,
   parseIndexRefreshResult,
   parseIndexSnapshot,
   parseMutationResult,
@@ -23,8 +27,26 @@ export const libraryRepository = Object.freeze({
   indexPaths(paths) {
     return invokeCommand("index_paths", { paths }, parseIndexImportResult);
   },
+  importFoldersRecursive(paths, operationId, policy) {
+    return invokeCommand("import_folders_recursive", { paths, operationId, policy }, parseRecursiveImportResult);
+  },
   refreshIndex() {
     return invokeCommand("refresh_index", undefined, parseIndexRefreshResult);
+  },
+  contentIndexStatus() {
+    return invokeCommand("content_index_status", undefined, parseContentIndexStatus);
+  },
+  searchContent(query, useRegex = false) {
+    return invokeCommand("search_content", { query, useRegex }, parseContentSearchResponse);
+  },
+  rebuildContentIndex(operationId) {
+    return invokeCommand("rebuild_content_index", { operationId }, parseContentIndexRebuildResult);
+  },
+  clearContentIndex() {
+    return invokeCommand("clear_content_index", undefined, parseContentIndexStatus);
+  },
+  cancelContentIndex(operationId) {
+    return invokeCommand("cancel_content_index", { operationId });
   },
   resetIndexRecovery() {
     return invokeCommand("reset_index_recovery", undefined, parseIndexSnapshot);

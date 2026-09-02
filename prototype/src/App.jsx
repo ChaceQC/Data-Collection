@@ -13,23 +13,34 @@ import {
   EditTagsDialog,
   EntryDetailsDialog,
 } from "./features/library/LibraryEntryDialogs.jsx";
+import { ImportFolderDialog } from "./features/library/ImportFolderDialog.jsx";
 import { LibraryPanel } from "./features/library/LibraryPanel";
 import { useIndexController } from "./features/library/useIndexController";
 import { useLibraryActions } from "./features/library/useLibraryActions";
 import { useLibraryNavigation } from "./features/library/useLibraryNavigation";
+import { useContentIndexController } from "./features/library/useContentIndexController.js";
 import { SettingsPanel } from "./features/settings/SettingsPanel";
 import { DEFAULT_SETTINGS } from "./features/settings/settingsModel";
 import { useSettingsController } from "./features/settings/useSettingsController";
 import { useWindowController } from "./features/window/useWindowController";
+import { OperationCenter } from "./features/operations/OperationCenter.jsx";
+import { useOperationController } from "./features/operations/useOperationController.js";
 import {
   clearSelectionOnContextChange,
   getNavigationCount,
   retainExistingSelection,
+  SEARCH_MODES,
 } from "./features/library/libraryModel";
 import { isMainIndexEntry } from "./features/library/libraryControllerModel.js";
 import {
+  KEYBOARD_ACTIONS,
+  getKeyboardAction,
+  isLayerTarget,
+} from "./lib/keyboardModel.js";
+import {
   ArrowClockwise,
   CheckCircle,
+  ClockCounterClockwise,
   Clock,
   DotsThree,
   FolderOpen,
@@ -54,6 +65,7 @@ const INITIAL_FILES = [
     modified: "2026-08-28 10:24",
     modifiedAt: 1787883840,
     addedAt: 1787883840,
+    lastOpenedAt: 1787883900000,
     size: 2048,
     favorite: true,
     tags: ["研究"],
@@ -69,6 +81,7 @@ const INITIAL_FILES = [
     modified: "2026-08-28 09:41",
     modifiedAt: 1787881260,
     addedAt: 1787881260,
+    lastOpenedAt: 1787883960000,
     size: 8192,
     favorite: false,
     tags: ["访谈"],
@@ -110,6 +123,7 @@ const INITIAL_FILES = [
 const NAV_ITEMS = [
   { key: "library", label: "资料库", icon: FolderSimple },
   { key: "recent", label: "最近添加", icon: Clock },
+  { key: "recent-opened", label: "最近打开", icon: ClockCounterClockwise },
   { key: "favorites", label: "收藏", icon: Star },
   { key: "invalid", label: "失效路径", icon: WarningCircle },
 ];
@@ -121,11 +135,16 @@ function App() {
   const [sort, setSort] = useState({ key: "addedAt", direction: "desc" });
   const [pageSize, setPageSize] = useState(DEFAULT_SETTINGS.pageSize);
   const [selectedIds, setSelectedIds] = useState([]);
+  const [searchMode, setSearchMode] = useState(SEARCH_MODES.metadata);
+  const [useRegex, setUseRegex] = useState(false);
   const [groupManagerOpen, setGroupManagerOpen] = useState(false);
   const [detailsEntryId, setDetailsEntryId] = useState("");
   const [tagFilterRequest, setTagFilterRequest] = useState(null);
   const [previewEntries, setPreviewEntries] = useState([]);
   const [previewRetryNonce, setPreviewRetryNonce] = useState(0);
+  const appShellRef = useRef(null);
+  const searchInputRef = useRef(null);
+  const keyboardStateRef = useRef(null);
   const showToast = useCallback((message) => setToast(message), []);
   const filesRef = useRef([]);
   const previewEntriesRef = useRef([]);
@@ -137,6 +156,15 @@ function App() {
     initialSelectedId: IS_TAURI_RUNTIME ? "" : "research-plan",
     showToast,
     clearSelection: clearBatchSelection,
+  });
+  const operations = useOperationController({ isTauriRuntime: IS_TAURI_RUNTIME, showToast });
+  const contentIndex = useContentIndexController({
+    isTauriRuntime: IS_TAURI_RUNTIME,
+    searchMode,
+    searchQuery: navigation.searchQuery,
+    useRegex,
+    showToast,
+    operationReporter: operations,
   });
   const handleLibraryContextChange = useCallback((nextContextKey) => {
     const previousContextKey = libraryContextKeyRef.current;
@@ -160,6 +188,7 @@ function App() {
     setPreviewEntryId: navigation.setPreviewEntryId,
     setDirectoryView: navigation.setDirectoryView,
     showToast,
+    operationReporter: operations,
   });
   filesRef.current = index.files;
   const settingsController = useSettingsController({
@@ -185,6 +214,7 @@ function App() {
     setSelectedIds,
     setIndexing: index.setIndexing,
     showToast,
+    operationReporter: operations,
   });
   const {
     applySettings,
@@ -210,7 +240,7 @@ function App() {
   });
   const { files, groups, indexReady, indexRecovery, indexing, refreshing, refreshError, diagnosticExporting, undoStatus } = index;
   const { activeNav, directoryLoading, directoryView, handleRowClick, handleRowKeyDown, openBreadcrumb, previewEntryId, searchQuery, selectNav, selectedId, setSearchQuery } = navigation;
-  const { addTag, batchBusy, busyFileId, choosePaths, closePendingAction, confirmBatchRemove, confirmDelete, confirmGroup, confirmRemove, confirmRename, confirmTags, createGroup, deleteGroup, dragActive, fileInputRef, folderInputRef, groupBusy, groupDraft, handleBatchFavorite, handleBatchGroup, handleBatchTags, handleCancelBatch, handleCopy, handleCopyLocation, handleDragLeave, handleDragOver, handleDrop, handleFavorite, handleOpenDefault, handleReveal, handleRetryBatch, handleUndo, openRepositionPicker, pendingAction, repositionInputRef, repositionInvalidPath, removeTag, renameName, renameGroup, renameValidation, requestBatchRemove, requestDelete, requestEditTags, requestRemove, requestRename, requestSetGroup, retryBatch, setGroupDraft, setRenameName, setTagInput, tagDraft, tagInput } = actions;
+  const { addTag, batchBusy, busyFileId, canRetryOperation, choosePaths, closePendingAction, confirmBatchRemove, confirmDelete, confirmFolderImport, confirmGroup, confirmRemove, confirmRename, confirmTags, createGroup, deleteGroup, dragActive, fileInputRef, folderInputRef, groupBusy, groupDraft, handleBatchFavorite, handleBatchGroup, handleBatchTags, handleCancelBatch, handleCancelImport, handleCopy, handleCopyLocation, handleDragLeave, handleDragOver, handleDrop, handleFavorite, handleOpenDefault, handleReveal, handleRetryBatch, handleUndo, openRepositionPicker, pendingAction, recursiveImportProgress, repositionInputRef, repositionInvalidPath, removeTag, renameName, renameGroup, renameValidation, requestBatchRemove, requestDelete, requestEditTags, requestRemove, requestRename, requestSetGroup, retryBatch, retryOperation, setGroupDraft, setRenameName, setTagInput, tagDraft, tagInput } = actions;
   const { floatingWindowError, floatingWindowRetrying, handleWindowAction, retryFloatingBall } = windowController;
 
   const handlePreviewNavigate = useCallback((nextEntry) => {
@@ -266,6 +296,10 @@ function App() {
     setSelectedIds((current) => current.includes(fileId) ? current.filter((id) => id !== fileId) : [...current, fileId]);
   }, []);
 
+  const selectRange = useCallback((rangeIds) => {
+    setSelectedIds((current) => [...new Set([...current, ...rangeIds])]);
+  }, []);
+
   const selectPage = useCallback((pageIds, selected) => {
     setSelectedIds((current) => {
       const next = new Set(current);
@@ -274,6 +308,75 @@ function App() {
     });
   }, []);
 
+  keyboardStateRef.current = {
+    closePendingAction,
+    detailsEntryId,
+    groupManagerOpen,
+    handlePreviewClose,
+    modalOpen: Boolean(settingsOpen || detailsEntryId || previewEntryId || pendingAction || groupManagerOpen),
+    refreshIndex: index.handleRefreshIndex,
+    settingsOpen,
+    undoStatus,
+    choosePaths,
+    handleUndo,
+  };
+
+  useEffect(() => {
+    function isInsideApp(target, shell) {
+      return target === document.body
+        || target === document.documentElement
+        || Boolean(shell?.contains(target));
+    }
+
+    function closeTopLayer(state) {
+      if (state.pendingAction) {
+        state.closePendingAction();
+        return true;
+      }
+      if (state.groupManagerOpen) {
+        setGroupManagerOpen(false);
+        return true;
+      }
+      if (state.detailsEntryId) {
+        setDetailsEntryId("");
+        return true;
+      }
+      if (navigation.previewEntryId) {
+        state.handlePreviewClose();
+        return true;
+      }
+      if (state.settingsOpen) {
+        setSettingsOpen(false);
+        return true;
+      }
+      return false;
+    }
+
+    function handleKeyDown(event) {
+      const shell = appShellRef.current;
+      if (!isInsideApp(event.target, shell)) return;
+      if (event.key === "Escape") {
+        if (event.defaultPrevented || isLayerTarget(event.target)) return;
+        const state = keyboardStateRef.current;
+        if (state && closeTopLayer(state)) event.preventDefault();
+        return;
+      }
+      const action = getKeyboardAction(event);
+      if (!action || isLayerTarget(event.target)) return;
+      const state = keyboardStateRef.current;
+      if (!state || state.modalOpen) return;
+      event.preventDefault();
+      if (action === KEYBOARD_ACTIONS.FOCUS_SEARCH) searchInputRef.current?.focus();
+      if (action === KEYBOARD_ACTIONS.REFRESH_INDEX) void state.refreshIndex?.();
+      if (action === KEYBOARD_ACTIONS.CHOOSE_FILE) void state.choosePaths?.("file");
+      if (action === KEYBOARD_ACTIONS.CHOOSE_FOLDER) void state.choosePaths?.("folder");
+      if (action === KEYBOARD_ACTIONS.UNDO && state.undoStatus) void state.handleUndo?.();
+    }
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [navigation.previewEntryId, setSettingsOpen]);
+
   useEffect(() => {
     if (!toast) return undefined;
     const timeoutId = window.setTimeout(() => setToast(""), 3600);
@@ -281,7 +384,7 @@ function App() {
   }, [toast]);
 
   return (
-    <div className="app-shell">
+    <div ref={appShellRef} className="app-shell">
       <div className="window-drag-strip" aria-hidden="true" data-tauri-drag-region="deep" />
       <div className="window-controls" aria-label="窗口控制" data-tauri-drag-region="false">
         <button type="button" data-tauri-drag-region="false" aria-label="最小化" title="最小化" onClick={() => void handleWindowAction("minimize")}>
@@ -329,7 +432,10 @@ function App() {
 
       <main className="main-content">
         <header className="page-header" data-tauri-drag-region="deep">
-          <h1>把资料放进一个可检索的本地库</h1>
+          <div className="page-header-row" data-tauri-drag-region="deep">
+            <h1>把资料放进一个可检索的本地库</h1>
+            <OperationCenter records={operations.records} files={files} loading={operations.historyLoading} warning={operations.historyWarning} onClear={operations.clearHistory} onRetry={retryOperation} canRetry={canRetryOperation} />
+          </div>
         </header>
 
         {floatingWindowError && (
@@ -363,12 +469,19 @@ function App() {
 
         <section className={`drop-zone ${files.length ? "has-library-files" : ""} ${dragActive ? "is-dragging" : ""}`} data-tauri-drag-region="false" data-testid="drop-zone" onDrop={handleDrop} onDragOver={handleDragOver} onDragLeave={handleDragLeave}>
           <div className="drop-zone-icon" aria-hidden="true"><FolderOpen size={42} weight="regular" /></div>
-          <h2>{indexing ? "正在建立本地索引..." : dragActive ? "松开鼠标即可登记资料" : files.length ? "继续添加资料或拖放到这里" : "将文件或文件夹拖到这里"}</h2>
+          <h2>{recursiveImportProgress ? "正在扫描文件夹..." : indexing ? "正在建立本地索引..." : dragActive ? "松开鼠标即可登记资料" : files.length ? "继续添加资料或拖放到这里" : "将文件或文件夹拖到这里"}</h2>
+          {recursiveImportProgress && (
+            <div className="recursive-import-progress" role="status" aria-live="polite">
+              <progress aria-label="递归导入进度" />
+              <span>已检查 {recursiveImportProgress.scannedCount} 项，发现 {recursiveImportProgress.candidateCount} 个文件，已准备 {recursiveImportProgress.acceptedCount} 项，跳过 {recursiveImportProgress.skippedCount} 项{recursiveImportProgress.currentName ? `：${recursiveImportProgress.currentName}` : ""}</span>
+              <button type="button" className="text-button" onClick={() => void handleCancelImport()}>取消扫描</button>
+            </div>
+          )}
           <div className="drop-actions">
-            <button type="button" className="button button-primary" data-testid="import-folder" onClick={() => void choosePaths("folder")} disabled={indexing}>
+            <button type="button" className="button button-primary" data-testid="import-folder" aria-keyshortcuts="Control+Shift+O" onClick={() => void choosePaths("folder")} disabled={indexing}>
               <FolderOpen size={19} weight="regular" aria-hidden="true" /><span>导入文件夹</span>
             </button>
-            <button type="button" className="button button-secondary" data-testid="choose-file" onClick={() => void choosePaths("file")} disabled={indexing}>
+            <button type="button" className="button button-secondary" data-testid="choose-file" aria-keyshortcuts="Control+O" onClick={() => void choosePaths("file")} disabled={indexing}>
               <UploadSimple size={19} weight="regular" aria-hidden="true" /><span>选择文件</span>
             </button>
           </div>
@@ -380,15 +493,25 @@ function App() {
           activeNav={activeNav}
           searchQuery={searchQuery}
           onSearchQueryChange={setSearchQuery}
+          searchMode={searchMode}
+          onSearchModeChange={setSearchMode}
+          useRegex={useRegex}
+          onUseRegexChange={setUseRegex}
+          contentSearchResults={contentIndex.searchResults}
+          contentSearchLoading={contentIndex.searchLoading}
+          contentSearchError={contentIndex.searchError}
+          contentIndexStatus={contentIndex.status}
           sort={sort}
           onSortChange={setSort}
           pageSize={pageSize}
           selectedId={selectedId}
           selectedIds={selectedIds}
+          searchInputRef={searchInputRef}
           onContextChange={handleLibraryContextChange}
           onVisibleEntriesChange={handleVisibleEntriesChange}
           onSelectionChange={navigation.setSelectedId}
           onToggleSelection={toggleSelection}
+          onSelectRange={selectRange}
           onSelectPage={selectPage}
           directoryView={directoryView}
           directoryLoading={directoryLoading}
@@ -454,9 +577,10 @@ function App() {
 
       {detailsEntry && <EntryDetailsDialog file={detailsEntry} groups={groups} busy={busyFileId === detailsEntry.id} onClose={() => setDetailsEntryId("")} onFavorite={handleFavorite} onPreview={handleDetailsPreview} onCopyLocation={handleCopyLocation} onReveal={handleReveal} onOpenDefault={handleOpenDefault} onEditTags={handleOpenEditTags} onSetGroup={handleOpenSetGroup} onTagClick={handleTagFilter} />}
 
-      {settingsOpen && <SettingsPanel settings={settings} saving={settingsSaving} onCancel={() => setSettingsOpen(false)} onSave={handleSettingsSave} />}
+      {settingsOpen && <SettingsPanel settings={settings} saving={settingsSaving} onCancel={() => setSettingsOpen(false)} onSave={handleSettingsSave} contentIndexStatus={contentIndex.status} contentIndexRebuilding={contentIndex.rebuilding} contentIndexClearing={contentIndex.clearing} onRebuildContentIndex={contentIndex.rebuild} onClearContentIndex={contentIndex.clear} onCancelContentIndex={contentIndex.cancelRebuild} />}
       {pendingAction?.type === "remove" && <RemoveIndexDialog file={pendingAction.file} busy={busyFileId === pendingAction.file.id} onCancel={closePendingAction} onConfirm={() => void confirmRemove()} />}
       {pendingAction?.type === "batch-remove" && <BatchRemoveDialog files={pendingAction.files} busy={batchBusy} onCancel={closePendingAction} onConfirm={() => void confirmBatchRemove()} />}
+      {pendingAction?.type === "folder-import" && <ImportFolderDialog folderName={pendingAction.folderName} onCancel={closePendingAction} onConfirm={(mode, policy) => void confirmFolderImport(mode, policy)} />}
       {pendingAction?.type === "rename" && <RenameDialog file={pendingAction.file} value={renameName} validation={renameValidation} busy={busyFileId === pendingAction.file.id} onChange={setRenameName} onCancel={closePendingAction} onConfirm={() => void confirmRename()} />}
       {pendingAction?.type === "edit-tags" && <EditTagsDialog file={pendingAction.file} tags={tagDraft} tagInput={tagInput} busy={busyFileId === pendingAction.file.id} onInputChange={setTagInput} onAdd={addTag} onRemove={removeTag} onCancel={closePendingAction} onConfirm={() => void confirmTags()} />}
       {pendingAction?.type === "set-group" && <EditGroupDialog file={pendingAction.file} groups={groups} value={groupDraft} busy={busyFileId === pendingAction.file.id} onChange={setGroupDraft} onCancel={closePendingAction} onConfirm={() => void confirmGroup()} />}

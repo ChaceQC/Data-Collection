@@ -33,7 +33,9 @@ pub fn run() {
             state.resource_response(&request)
         })
         .manage(storage::AppState::default())
+        .manage(storage::content_index::ContentIndexState::default())
         .manage(commands::BatchState::default())
+        .manage(storage::operation_history::OperationHistoryState::default())
         .manage(storage::settings::SettingsState::default())
         .manage({
             let state = preview::PreviewState::default();
@@ -51,8 +53,22 @@ pub fn run() {
             app.state::<storage::AppState>()
                 .initialize(data_dir.join("index.json"))
                 .map_err(|error| Error::other(error.to_string()))?;
+            let content_state = app.state::<storage::content_index::ContentIndexState>();
+            content_state.initialize(data_dir.join("content-index.json"));
+            let entries = app
+                .state::<storage::AppState>()
+                .snapshot()
+                .map_err(|error| Error::other(error.to_string()))?;
+            commands::schedule_content_index_sync(
+                app.handle(),
+                app.state::<storage::AppState>().revision(),
+                entries,
+            );
             app.state::<storage::settings::SettingsState>()
                 .initialize(data_dir.join("settings.json"))
+                .map_err(|error| Error::other(error.to_string()))?;
+            app.state::<storage::operation_history::OperationHistoryState>()
+                .initialize(data_dir.join("operation-history.json"))
                 .map_err(|error| Error::other(error.to_string()))?;
             let settings = app
                 .state::<storage::settings::SettingsState>()
@@ -91,7 +107,13 @@ pub fn run() {
             commands::list_directory,
             commands::reveal_directory_child,
             commands::index_paths,
+            commands::import_folders_recursive,
             commands::refresh_index,
+            commands::content_index_status,
+            commands::search_content,
+            commands::rebuild_content_index,
+            commands::clear_content_index,
+            commands::cancel_content_index,
             commands::get_index_recovery,
             commands::reset_index_recovery,
             commands::export_index_diagnostic,
@@ -121,6 +143,9 @@ pub fn run() {
             commands::library::batch_set_group,
             commands::library::cancel_batch_operation,
             commands::library::undo_last,
+            commands::operation_history::load_operation_history,
+            commands::operation_history::save_operation_record,
+            commands::operation_history::clear_operation_history,
             commands::settings::load_settings,
             commands::settings::update_settings,
             commands::window::set_floating_window_visible,

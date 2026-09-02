@@ -5,7 +5,12 @@ import {
   Funnel,
   X,
 } from "@phosphor-icons/react";
-import { getDisplayType, getEntryLocation } from "./libraryModel";
+import {
+  getDisplayType,
+  getEntryLocation,
+  getMetadataSearchHit,
+  getSearchTextRanges,
+} from "./libraryModel";
 
 const MODIFIED_FORMATTER = new Intl.DateTimeFormat("zh-CN", {
   year: "numeric",
@@ -17,18 +22,26 @@ const MODIFIED_FORMATTER = new Intl.DateTimeFormat("zh-CN", {
 
 export function LibraryFilterMenu({ files, groups, filters, onChange, onManageGroups }) {
   const menuRef = useRef(null);
+  const triggerRef = useRef(null);
   const types = [...new Set((files || []).map(getDisplayType).filter(Boolean))].sort((left, right) => left.localeCompare(right, "zh-CN"));
   const tags = [...new Set((files || []).flatMap((file) => Array.isArray(file.tags) ? file.tags : []))].sort((left, right) => left.localeCompare(right, "zh-CN"));
   const count = Number(Boolean(filters.type)) + filters.tags.length + filters.groupIds.length;
 
+  function closeMenu(restoreFocus = false) {
+    if (!menuRef.current?.open) return;
+    menuRef.current.open = false;
+    if (restoreFocus) window.requestAnimationFrame(() => triggerRef.current?.focus());
+  }
+
   useEffect(() => {
     function closeOnOutsidePointer(event) {
-      if (!menuRef.current?.contains(event.target)) menuRef.current.open = false;
+      if (!menuRef.current?.contains(event.target)) closeMenu();
     }
     function closeOnEscape(event) {
       if (event.key === "Escape" && menuRef.current?.open) {
         event.preventDefault();
-        menuRef.current.open = false;
+        event.stopPropagation();
+        closeMenu(true);
       }
     }
     document.addEventListener("pointerdown", closeOnOutsidePointer, true);
@@ -46,14 +59,14 @@ export function LibraryFilterMenu({ files, groups, filters, onChange, onManageGr
 
   return (
     <details ref={menuRef} className="library-filter-menu">
-      <summary className="filter-menu-trigger"><Funnel size={16} weight="regular" aria-hidden="true" /><span>筛选</span>{count > 0 && <strong>{count}</strong>}</summary>
+      <summary ref={triggerRef} className="filter-menu-trigger"><Funnel size={16} weight="regular" aria-hidden="true" /><span>筛选</span>{count > 0 && <strong>{count}</strong>}</summary>
       <div className="filter-menu-content" role="group" aria-label="组合筛选">
         <label className="filter-type-control"><span>类型</span><select value={filters.type} onChange={(event) => onChange({ ...filters, type: event.target.value })}><option value="">全部类型</option>{types.map((type) => <option value={type} key={type}>{type}</option>)}</select></label>
         <FilterCheckboxes legend="分组" values={groups.map((group) => ({ value: group.id, label: group.name }))} selected={filters.groupIds} onToggle={(value) => toggle("groupIds", value)} emptyLabel="还没有分组" />
         <FilterCheckboxes legend="标签" values={tags.map((tag) => ({ value: tag, label: tag }))} selected={filters.tags} onToggle={(value) => toggle("tags", value)} emptyLabel="还没有标签" />
         <div className="filter-menu-actions">
           <button type="button" className="text-button" disabled={!count} onClick={() => onChange({ type: "", tags: [], groupIds: [] })}>清除筛选</button>
-          <button type="button" className="text-button" onClick={onManageGroups}>管理分组</button>
+          <button type="button" className="text-button" onClick={() => { closeMenu(); onManageGroups?.(); }}>管理分组</button>
         </div>
       </div>
     </details>
@@ -121,7 +134,48 @@ export function getModifiedLabel(file) {
 }
 
 export function getNavigationLabel(activeNav) {
-  return { recent: "最近添加", favorites: "收藏", invalid: "失效路径" }[activeNav] || "资料库";
+  return { recent: "最近添加", "recent-opened": "最近打开", favorites: "收藏", invalid: "失效路径" }[activeNav] || "资料库";
+}
+
+export function SearchHitSummary({ entry, searchMode, searchResult, searchQuery, useRegex, directoryView, groups = [] }) {
+  if (!searchQuery) return null;
+  if (searchMode === "content") {
+    if (!searchResult) return null;
+    const snippet = searchResult.snippets?.[0];
+    return (
+      <div className="search-hit-summary" aria-label="正文搜索命中">
+        <span className="search-hit-field">命中正文 · {searchResult.matchCount}{searchResult.matchesTruncated ? "+" : ""} 处</span>
+        {snippet && <HighlightedText text={snippet.text} ranges={snippet.ranges} characterRanges />}
+      </div>
+    );
+  }
+  const hit = getMetadataSearchHit(entry, searchQuery, { useRegex, directoryView, groups });
+  if (!hit) return null;
+  const ranges = hit.key === "name" ? getSearchTextRanges(hit.value, searchQuery, useRegex) : [];
+  return (
+    <div className="search-hit-summary" aria-label={`命中${hit.label}`}>
+      <span className="search-hit-field">命中{hit.label}</span>
+      {ranges.length > 0 && <HighlightedText text={hit.value} ranges={ranges} />}
+    </div>
+  );
+}
+
+function HighlightedText({ text, ranges, characterRanges = false }) {
+  const value = String(text ?? "");
+  const segments = [];
+  let cursor = 0;
+  for (const range of ranges || []) {
+    const start = Math.max(cursor, Number(range.start) || 0);
+    const end = Math.max(start, Number(range.end) || 0);
+    const before = characterRanges ? Array.from(value).slice(cursor, start).join("") : value.slice(cursor, start);
+    const matched = characterRanges ? Array.from(value).slice(start, end).join("") : value.slice(start, end);
+    if (before) segments.push(<span key={`before-${cursor}`}>{before}</span>);
+    if (matched) segments.push(<mark key={`match-${start}-${end}`}>{matched}</mark>);
+    cursor = end;
+  }
+  const tail = characterRanges ? Array.from(value).slice(cursor).join("") : value.slice(cursor);
+  if (tail) segments.push(<span key={`tail-${cursor}`}>{tail}</span>);
+  return <span className="search-hit-snippet">{segments.length ? segments : value}</span>;
 }
 
 export function getEmptyTitle({ activeNav, directoryView, searchQuery, filters }) {
@@ -131,6 +185,7 @@ export function getEmptyTitle({ activeNav, directoryView, searchQuery, filters }
   if (activeNav === "favorites") return "还没有收藏的资料";
   if (activeNav === "invalid") return "没有失效路径";
   if (activeNav === "recent") return "还没有最近添加的资料";
+  if (activeNav === "recent-opened") return "还没有最近打开的资料";
   return "还没有登记资料";
 }
 
@@ -140,6 +195,7 @@ export function getEmptyDescription({ activeNav, directoryView, searchQuery, fil
   if (directoryView) return "返回上一级，或选择其他文件夹继续浏览。";
   if (activeNav === "favorites") return "在资料行操作中添加收藏。";
   if (activeNav === "invalid") return "失效记录会在原路径不可用时显示。";
+  if (activeNav === "recent-opened") return "成功预览或用默认程序打开的资料会显示在这里。";
   return "从上方选择文件或文件夹开始建立索引。";
 }
 
@@ -147,7 +203,7 @@ export function getEmptyActions({ activeNav, directoryView, searchQuery, filters
   if (searchQuery) return <button type="button" className="text-button" onClick={onClearSearch}>清空搜索</button>;
   if (filters.type || filters.tags.length || filters.groupIds.length) return <button type="button" className="text-button" onClick={onClearFilters}>清除筛选</button>;
   if (directoryView) return <button type="button" className="text-button" onClick={() => onOpenBreadcrumb(-1)}>返回资料库</button>;
-  if (activeNav === "library" || activeNav === "favorites" || activeNav === "invalid") return <button type="button" className="text-button" onClick={onImport}>导入资料</button>;
+  if (activeNav === "library" || activeNav === "recent" || activeNav === "recent-opened" || activeNav === "favorites" || activeNav === "invalid") return <button type="button" className="text-button" onClick={onImport}>导入资料</button>;
   if (onManageGroups) return <button type="button" className="text-button" onClick={onManageGroups}>管理分组</button>;
   return null;
 }

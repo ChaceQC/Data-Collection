@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
-import { getOperationError } from "../../lib/ipcContracts.js";
+import { getOperationError, parseRecursiveImportProgress } from "../../lib/ipcContracts.js";
 import { getFileKind, getFileType } from "../../lib/fileTypes.js";
+import { createOperationId } from "../operations/operationModel.js";
 import { libraryRepository } from "./libraryRepository.js";
 import {
   addTagToList,
@@ -18,6 +19,12 @@ import {
   validateTagInput,
 } from "./libraryControllerModel.js";
 import { getEntryLocation } from "./libraryModel.js";
+import {
+  DEFAULT_RECURSIVE_IMPORT_POLICY,
+  describeRecursiveImportPolicy,
+  getRecursiveImportFolderName,
+  normalizeRecursiveImportPolicy,
+} from "./recursiveImportModel.js";
 
 export function useLibraryActions({
   isTauriRuntime,
@@ -35,6 +42,7 @@ export function useLibraryActions({
   setSelectedIds,
   setIndexing,
   showToast,
+  operationReporter,
 }) {
   const [busyFileId, setBusyFileId] = useState("");
   const [pendingAction, setPendingAction] = useState(null);
@@ -44,6 +52,7 @@ export function useLibraryActions({
   const [groupDraft, setGroupDraft] = useState("");
   const [batchBusy, setBatchBusy] = useState(false);
   const [retryBatch, setRetryBatch] = useState(null);
+  const [recursiveImportProgress, setRecursiveImportProgress] = useState(null);
   const [groupBusy, setGroupBusy] = useState(false);
   const folderInputRef = useRef(null);
   const fileInputRef = useRef(null);
@@ -52,6 +61,8 @@ export function useLibraryActions({
   const busyFileIdRef = useRef("");
   const batchBusyRef = useRef(false);
   const activeBatchOperationIdRef = useRef("");
+  const activeImportOperationIdRef = useRef("");
+  const retryImportRef = useRef(null);
   const groupBusyRef = useRef(false);
   const indexingRef = useRef(false);
   const indexRealPathsRef = useRef(null);
@@ -70,6 +81,27 @@ export function useLibraryActions({
           setDragActive(false);
           void indexRealPathsRef.current(event.payload.paths);
         }
+      })
+      .then((stopListening) => {
+        if (disposed) stopListening();
+        else unlisten = stopListening;
+      })
+      .catch(() => undefined);
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, [isTauriRuntime]);
+
+  useEffect(() => {
+    if (!isTauriRuntime) return undefined;
+    let disposed = false;
+    let unlisten;
+    getCurrentWebview()
+      .listen("recursive-import-progress", (event) => {
+        const payload = safeParse(parseRecursiveImportProgress, event.payload, "recursive-import-progress");
+        if (!payload || payload.operationId !== activeImportOperationIdRef.current) return;
+        setRecursiveImportProgress((current) => ({ ...current, ...payload }));
       })
       .then((stopListening) => {
         if (disposed) stopListening();
@@ -102,6 +134,8 @@ export function useLibraryActions({
   async function handleFavorite(file) {
     if (!file?.id || busyFileIdRef.current) return;
     const favorite = !file.favorite;
+    const operationId = createOperationId("favorite");
+    operationReporter?.startOperation({ id: operationId, operation: "favorite", totalCount: 1, request: { favorite } });
     busyFileIdRef.current = file.id;
     setBusyFileId(file.id);
     try {
@@ -112,8 +146,10 @@ export function useLibraryActions({
         setFiles((current) => current.map((item) => item.id === file.id ? { ...item, favorite } : item));
       }
       setSelectedId(file.id);
+      operationReporter?.finishOperation(operationId, { status: "success", totalCount: 1, successCount: 1, request: { favorite } });
       showToast(favorite ? "已加入收藏" : "已取消收藏");
     } catch (error) {
+      operationReporter?.failOperation(operationId, "收藏状态更新失败，请重试");
       showActionError(error, "收藏状态更新失败，请重试");
     } finally {
       finishBusy();
@@ -152,12 +188,14 @@ export function useLibraryActions({
   }
 
   function closePendingAction() {
-    if (!busyFileIdRef.current && !batchBusyRef.current) setPendingAction(null);
+    if (!busyFileIdRef.current && !batchBusyRef.current && !indexingRef.current) setPendingAction(null);
   }
 
   async function removeIndexRecord(file) {
     if (!file || busyFileIdRef.current) return;
     const fileId = file.id;
+    const operationId = createOperationId("index-remove");
+    operationReporter?.startOperation({ id: operationId, operation: "index-remove", totalCount: 1 });
     busyFileIdRef.current = fileId;
     setBusyFileId(fileId);
     await releasePreviewForAction(fileId);
@@ -168,8 +206,10 @@ export function useLibraryActions({
       setDirectoryView(null);
       setSelectedId((currentId) => currentId === fileId ? getNextSelection(updatedFiles, "") : currentId);
       setPendingAction(null);
+      operationReporter?.finishOperation(operationId, { status: "success", totalCount: 1, successCount: 1 });
       showToast("已从资料库移除，原文件未改变");
     } catch (error) {
+      operationReporter?.failOperation(operationId, "移除记录失败，原文件未改变");
       showActionError(error, "移除记录失败，原文件未改变");
     } finally {
       finishBusy();
@@ -184,6 +224,8 @@ export function useLibraryActions({
     if (pendingAction?.type !== "rename" || busyFileIdRef.current || !renameValidation.valid) return;
     const file = pendingAction.file;
     const fileId = file.id;
+    const operationId = createOperationId("rename");
+    operationReporter?.startOperation({ id: operationId, operation: "rename", totalCount: 1 });
     busyFileIdRef.current = fileId;
     setBusyFileId(fileId);
     await releasePreviewForAction(fileId);
@@ -200,8 +242,10 @@ export function useLibraryActions({
       }
       setSelectedId(fileId);
       setPendingAction(null);
+      operationReporter?.finishOperation(operationId, { status: "success", totalCount: 1, successCount: 1 });
       showToast("文件已重命名");
     } catch (error) {
+      operationReporter?.failOperation(operationId, "重命名失败，原文件未改变");
       showActionError(error, "重命名失败，原文件未改变");
     } finally {
       finishBusy();
@@ -232,6 +276,8 @@ export function useLibraryActions({
     }
     const file = pendingAction.file;
     const fileId = file.id;
+    const operationId = createOperationId("tags");
+    operationReporter?.startOperation({ id: operationId, operation: "tags", totalCount: 1 });
     const tags = normalizeTagList(tagDraft);
     if (tags.length > MAX_TAGS_PER_ENTRY) {
       showToast(`每条资料最多 ${MAX_TAGS_PER_ENTRY} 个标签`);
@@ -249,8 +295,10 @@ export function useLibraryActions({
       }
       setSelectedId(fileId);
       setPendingAction(null);
+      operationReporter?.finishOperation(operationId, { status: "success", totalCount: 1, successCount: 1 });
       showToast("标签已更新");
     } catch (error) {
+      operationReporter?.failOperation(operationId, "更新标签失败，请重试");
       showActionError(error, "更新标签失败，请重试");
     } finally {
       finishBusy();
@@ -261,6 +309,8 @@ export function useLibraryActions({
     if (pendingAction?.type !== "set-group" || busyFileIdRef.current) return;
     const file = pendingAction.file;
     const fileId = file.id;
+    const operationId = createOperationId("group");
+    operationReporter?.startOperation({ id: operationId, operation: "group", totalCount: 1 });
     busyFileIdRef.current = fileId;
     setBusyFileId(fileId);
     try {
@@ -273,8 +323,10 @@ export function useLibraryActions({
       }
       setSelectedId(fileId);
       setPendingAction(null);
+      operationReporter?.finishOperation(operationId, { status: "success", totalCount: 1, successCount: 1 });
       showToast(groupDraft ? "资料已设置分组" : "资料已解除分组归属");
     } catch (error) {
+      operationReporter?.failOperation(operationId, "更新分组失败，请重试");
       showActionError(error, "更新分组失败，请重试");
     } finally {
       finishBusy();
@@ -363,22 +415,25 @@ export function useLibraryActions({
     if (pendingAction?.type !== "batch-remove" || !pendingAction.fileIds?.length) return;
     const fileIds = [...pendingAction.fileIds];
     setPendingAction(null);
-    await runBatchAction(
+    await runBatchAction({
       fileIds,
-      (ids, operationId) => libraryRepository.batchRemoveIndexEntries(ids, operationId),
-      "批量移除完成",
-      "批量移除失败，请刷新索引确认状态",
-      true,
-    );
+      action: (ids, operationId) => libraryRepository.batchRemoveIndexEntries(ids, operationId),
+      successPrefix: "批量移除完成",
+      fallback: "批量移除失败，请刷新索引确认状态",
+      removeSuccessful: true,
+      operation: "batch-remove-index",
+    });
   }
 
   async function handleBatchFavorite(fileIds, favorite) {
-    await runBatchAction(
+    await runBatchAction({
       fileIds,
-      (ids, operationId) => libraryRepository.batchSetFavorite(ids, favorite, operationId),
-      favorite ? "批量收藏完成" : "批量取消收藏完成",
-      "批量更新收藏失败，请重试",
-    );
+      action: (ids, operationId) => libraryRepository.batchSetFavorite(ids, favorite, operationId),
+      successPrefix: favorite ? "批量收藏完成" : "批量取消收藏完成",
+      fallback: "批量更新收藏失败，请重试",
+      operation: "batch-favorite",
+      request: { favorite },
+    });
   }
 
   async function handleBatchTags(fileIds, value, add) {
@@ -387,31 +442,40 @@ export function useLibraryActions({
       showToast(validation.message);
       return;
     }
-    await runBatchAction(
+    await runBatchAction({
       fileIds,
-      (ids, operationId) => libraryRepository.batchUpdateTags(ids, [validation.value], add, operationId),
-      add ? "批量添加标签完成" : "批量移除标签完成",
-      "批量更新标签失败，请重试",
-    );
+      action: (ids, operationId) => libraryRepository.batchUpdateTags(ids, [validation.value], add, operationId),
+      successPrefix: add ? "批量添加标签完成" : "批量移除标签完成",
+      fallback: "批量更新标签失败，请重试",
+      operation: "batch-tags",
+      request: { tags: [validation.value], add },
+    });
   }
 
   async function handleBatchGroup(fileIds, groupId) {
-    await runBatchAction(
+    await runBatchAction({
       fileIds,
-      (ids, operationId) => libraryRepository.batchSetGroup(ids, groupId || null, operationId),
-      groupId ? "批量分组完成" : "已解除所选资料的分组归属",
-      "批量更新分组失败，请重试",
-    );
+      action: (ids, operationId) => libraryRepository.batchSetGroup(ids, groupId || null, operationId),
+      successPrefix: groupId ? "批量分组完成" : "已解除所选资料的分组归属",
+      fallback: "批量更新分组失败，请重试",
+      operation: "batch-group",
+      request: { groupId: groupId || null },
+    });
   }
 
-  async function runBatchAction(fileIds, action, successPrefix, fallback, removeSuccessful = false) {
+  async function runBatchAction({ fileIds, action, successPrefix, fallback, removeSuccessful = false, operation, request = null }) {
     if (!isTauriRuntime) {
       showToast("批量操作请在桌面应用中执行");
       return;
     }
+    if (indexingRef.current) {
+      showToast("递归导入进行中，请先等待扫描完成");
+      return;
+    }
     const stableIds = [...new Set(fileIds || [])].filter(Boolean);
     if (!stableIds.length || batchBusyRef.current) return;
-    const operationId = createOperationId();
+    const operationId = createOperationId("batch");
+    operationReporter?.startOperation({ id: operationId, operation, totalCount: stableIds.length, request });
     activeBatchOperationIdRef.current = operationId;
     setRetryBatch(null);
     batchBusyRef.current = true;
@@ -420,15 +484,27 @@ export function useLibraryActions({
       const result = await action(stableIds, operationId);
       const successIds = (result.results || []).filter((item) => item.status === "success").map((item) => item.id);
       const retryIds = (result.results || []).filter(isRetryableBatchItem).map((item) => item.id);
-      setRetryBatch(retryIds.length ? { fileIds: retryIds, action, successPrefix, fallback, removeSuccessful } : null);
+      setRetryBatch(retryIds.length ? { operationId, operation, request, fileIds: retryIds, action, successPrefix, fallback, removeSuccessful } : null);
       if (result.changedIds?.length || result.revision > 0) await reloadIndexPreservingState(result.revision);
       if (removeSuccessful) setSelectedIds((current) => current.filter((id) => !successIds.includes(id)));
       const summary = summarizeBatchResult(result);
       const details = [`成功 ${summary.success} 项`];
       if (summary.skipped) details.push(`跳过 ${summary.skipped} 项`);
       if (summary.failed) details.push(`失败 ${summary.failed} 项`);
+      operationReporter?.finishOperation(operationId, {
+        totalCount: result.results.length || stableIds.length,
+        successCount: summary.success,
+        skippedCount: summary.skipped,
+        failedCount: summary.failed,
+        results: result.results,
+        retryableIds: retryIds,
+        cancelled: result.cancelled,
+        timedOut: result.timedOut,
+        request,
+      });
       showToast(`${successPrefix}：${details.join("，")}`);
     } catch (error) {
+      operationReporter?.failOperation(operationId, fallback);
       showActionError(error, fallback);
     } finally {
       activeBatchOperationIdRef.current = "";
@@ -439,8 +515,65 @@ export function useLibraryActions({
 
   async function handleRetryBatch() {
     if (!retryBatch || batchBusyRef.current) return;
-    const { fileIds, action, successPrefix, fallback, removeSuccessful } = retryBatch;
-    await runBatchAction(fileIds, action, successPrefix, fallback, removeSuccessful);
+    const { fileIds, action, successPrefix, fallback, removeSuccessful, operation, request } = retryBatch;
+    await runBatchAction({ fileIds, action, successPrefix, fallback, removeSuccessful, operation, request });
+  }
+
+  async function handleRetryOperation(record) {
+    if (!record?.retryableIds?.length || batchBusyRef.current) return;
+    if (record.operation === "recursive-import") {
+      const retry = retryImportRef.current;
+      if (!retry || retry.operationId !== record.id) {
+        showToast("该导入任务只保留了摘要，请重新选择文件夹");
+        return;
+      }
+      await importFoldersRecursive(retry.paths, retry.policy, retry.operationId);
+      return;
+    }
+    if (retryBatch?.operationId === record.id) {
+      await handleRetryBatch();
+      return;
+    }
+    const request = record.request || {};
+    if (record.operation === "batch-favorite" && typeof request.favorite === "boolean") {
+      await runBatchAction({
+        fileIds: record.retryableIds,
+        action: (ids, operationId) => libraryRepository.batchSetFavorite(ids, request.favorite, operationId),
+        successPrefix: request.favorite ? "批量收藏完成" : "批量取消收藏完成",
+        fallback: "批量更新收藏失败，请重试",
+        operation: record.operation,
+        request: { favorite: request.favorite },
+      });
+    } else if (record.operation === "batch-tags" && Array.isArray(request.tags) && typeof request.add === "boolean") {
+      await runBatchAction({
+        fileIds: record.retryableIds,
+        action: (ids, operationId) => libraryRepository.batchUpdateTags(ids, request.tags, request.add, operationId),
+        successPrefix: request.add ? "批量添加标签完成" : "批量移除标签完成",
+        fallback: "批量更新标签失败，请重试",
+        operation: record.operation,
+        request: { tags: request.tags, add: request.add },
+      });
+    } else if (record.operation === "batch-group" && (request.groupId == null || typeof request.groupId === "string")) {
+      await runBatchAction({
+        fileIds: record.retryableIds,
+        action: (ids, operationId) => libraryRepository.batchSetGroup(ids, request.groupId, operationId),
+        successPrefix: request.groupId ? "批量分组完成" : "已解除所选资料的分组归属",
+        fallback: "批量更新分组失败，请重试",
+        operation: record.operation,
+        request: { groupId: request.groupId || null },
+      });
+    } else if (record.operation === "batch-remove-index") {
+      await runBatchAction({
+        fileIds: record.retryableIds,
+        action: (ids, operationId) => libraryRepository.batchRemoveIndexEntries(ids, operationId),
+        successPrefix: "批量移除完成",
+        fallback: "批量移除失败，请刷新索引确认状态",
+        removeSuccessful: true,
+        operation: record.operation,
+      });
+    } else {
+      showToast("该操作缺少可重试参数，请重新执行");
+    }
   }
 
   async function handleCancelBatch() {
@@ -456,14 +589,22 @@ export function useLibraryActions({
 
   async function handleUndo() {
     if (!isTauriRuntime || batchBusyRef.current) return;
+    const operationId = createOperationId("undo");
+    operationReporter?.startOperation({ id: operationId, operation: "undo" });
     batchBusyRef.current = true;
     setBatchBusy(true);
     try {
       const result = await libraryRepository.undoLast();
       await reloadIndexPreservingState(result.revision);
+      operationReporter?.finishOperation(operationId, {
+        status: "success",
+        totalCount: result.changedIds.length,
+        successCount: result.changedIds.length,
+      });
       showToast("已撤销上一项可撤销的索引操作");
       setSelectedIds([]);
     } catch (error) {
+      operationReporter?.failOperation(operationId, "撤销不可用，索引可能已经发生变化");
       showActionError(error, "撤销不可用，索引可能已经发生变化");
     } finally {
       batchBusyRef.current = false;
@@ -482,14 +623,18 @@ export function useLibraryActions({
       return false;
     }
     if (groupBusyRef.current) return false;
+    const operationId = createOperationId("group");
+    operationReporter?.startOperation({ id: operationId, operation: "group", totalCount: 1 });
     groupBusyRef.current = true;
     setGroupBusy(true);
     try {
       const result = await libraryRepository.createGroup(normalized);
       await reloadIndexPreservingState(result.revision);
+      operationReporter?.finishOperation(operationId, { status: "success", totalCount: 1, successCount: 1 });
       showToast(`已创建分组“${normalized}”`);
       return true;
     } catch (error) {
+      operationReporter?.failOperation(operationId, "创建分组失败，请重试");
       showActionError(error, "创建分组失败，请重试");
       return false;
     } finally {
@@ -505,14 +650,18 @@ export function useLibraryActions({
       return false;
     }
     if (!isTauriRuntime || groupBusyRef.current) return false;
+    const operationId = createOperationId("group");
+    operationReporter?.startOperation({ id: operationId, operation: "group", totalCount: 1 });
     groupBusyRef.current = true;
     setGroupBusy(true);
     try {
       const result = await libraryRepository.renameGroup(groupId, normalized);
       await reloadIndexPreservingState(result.revision);
+      operationReporter?.finishOperation(operationId, { status: "success", totalCount: 1, successCount: 1 });
       showToast(`分组已重命名为“${normalized}”`);
       return true;
     } catch (error) {
+      operationReporter?.failOperation(operationId, "重命名分组失败，请重试");
       showActionError(error, "重命名分组失败，请重试");
       return false;
     } finally {
@@ -523,14 +672,18 @@ export function useLibraryActions({
 
   async function deleteGroup(groupId) {
     if (!isTauriRuntime || groupBusyRef.current) return false;
+    const operationId = createOperationId("group");
+    operationReporter?.startOperation({ id: operationId, operation: "group", totalCount: 1 });
     groupBusyRef.current = true;
     setGroupBusy(true);
     try {
       const result = await libraryRepository.deleteGroup(groupId);
       await reloadIndexPreservingState(result.revision);
+      operationReporter?.finishOperation(operationId, { status: "success", totalCount: 1, successCount: 1 });
       showToast("分组已删除，资料记录和原文件未改变");
       return true;
     } catch (error) {
+      operationReporter?.failOperation(operationId, "删除分组失败，请重试");
       showActionError(error, "删除分组失败，请重试");
       return false;
     } finally {
@@ -555,7 +708,9 @@ export function useLibraryActions({
   }
 
   async function indexRealPaths(paths) {
-    if (!isTauriRuntime || !paths?.length || indexingRef.current) return;
+    if (!isTauriRuntime || !paths?.length || indexingRef.current || batchBusyRef.current) return;
+    const operationId = createOperationId("import");
+    operationReporter?.startOperation({ id: operationId, operation: "import", totalCount: paths.length });
     indexingRef.current = true;
     setIndexing(true);
     try {
@@ -571,8 +726,20 @@ export function useLibraryActions({
       if (result.refreshedCount) messages.push(`更新 ${result.refreshedCount} 项`);
       if (result.skippedCount) messages.push(`跳过 ${result.skippedCount} 项${result.skippedReasons.length ? `（${result.skippedReasons.join("、")}）` : ""}`);
       if (result.truncated) messages.push("已达到本次索引上限");
+      const acceptedCount = result.indexedCount + result.refreshedCount;
+      operationReporter?.finishOperation(operationId, {
+        status: acceptedCount || !result.skippedCount ? (result.skippedCount || result.truncated ? "partial-success" : "success") : "failed",
+        totalCount: acceptedCount + result.skippedCount,
+        addedCount: result.indexedCount,
+        updatedCount: result.refreshedCount,
+        successCount: acceptedCount,
+        skippedCount: result.skippedCount,
+        skippedReasons: result.skippedReasons,
+        truncated: result.truncated,
+      });
       showToast(messages.join("，") || "没有找到可索引的文件");
     } catch (error) {
+      operationReporter?.failOperation(operationId, "索引失败，请检查路径和访问权限");
       showActionError(error, "索引失败，请检查路径和访问权限");
     } finally {
       indexingRef.current = false;
@@ -580,17 +747,134 @@ export function useLibraryActions({
     }
   }
 
+  async function handleCancelImport() {
+    const operationId = activeImportOperationIdRef.current;
+    if (!isTauriRuntime || !operationId) return;
+    try {
+      await libraryRepository.cancelBatchOperation(operationId);
+      showToast("已请求取消扫描，正在整理已完成项");
+    } catch (error) {
+      showActionError(error, "无法取消扫描，请稍候查看操作中心");
+    }
+  }
+
+  function canRetryOperation(record) {
+    if (record?.operation !== "recursive-import") return true;
+    return Boolean(record.retryableIds?.length && retryImportRef.current?.operationId === record.id);
+  }
+
+  function requestFolderImport(paths) {
+    if (!paths?.length || indexingRef.current || batchBusyRef.current) return;
+    setPendingAction({
+      type: "folder-import",
+      paths: [...paths],
+      folderName: paths.length === 1
+        ? getRecursiveImportFolderName(paths[0])
+        : `已选择 ${paths.length} 个文件夹`,
+    });
+  }
+
+  async function importFoldersRecursive(paths, policy, retryOperationId = "") {
+    if (!isTauriRuntime || !paths?.length || indexingRef.current || batchBusyRef.current) return;
+    const normalizedPolicy = normalizeRecursiveImportPolicy(policy || DEFAULT_RECURSIVE_IMPORT_POLICY);
+    const operationId = retryOperationId || createOperationId("recursive-import");
+    const policyDescription = describeRecursiveImportPolicy(normalizedPolicy);
+    operationReporter?.startOperation({ id: operationId, operation: "recursive-import" });
+    activeImportOperationIdRef.current = operationId;
+    retryImportRef.current = { operationId, paths: [...paths], policy: normalizedPolicy };
+    setRecursiveImportProgress({
+      operationId,
+      phase: "scanning",
+      scannedCount: 0,
+      candidateCount: 0,
+      acceptedCount: 0,
+      skippedCount: 0,
+      currentName: null,
+      truncated: false,
+      cancelled: false,
+      timedOut: false,
+    });
+    indexingRef.current = true;
+    setIndexing(true);
+    try {
+      const result = await libraryRepository.importFoldersRecursive(paths, operationId, normalizedPolicy);
+      const snapshot = await libraryRepository.loadIndex();
+      applyIndexSnapshot(snapshot);
+      setDirectoryView(null);
+      setPreviewEntryId(null);
+      setActiveNav("library");
+      setSelectedId(result.addedIds[0] || snapshot.entries[0]?.id || "");
+
+      const acceptedCount = result.indexedCount + result.refreshedCount;
+      const retryable = result.cancelled || result.timedOut || result.truncated || result.skippedCount > 0;
+      if (!retryable) retryImportRef.current = null;
+      const messages = [`扫描 ${result.scannedCount} 项，发现 ${result.candidateCount} 个普通文件`];
+      if (result.indexedCount) messages.push(`新增 ${result.indexedCount} 项`);
+      if (result.refreshedCount) messages.push(`更新 ${result.refreshedCount} 项`);
+      if (result.skippedCount) messages.push(`跳过 ${result.skippedCount} 项（${result.skippedReasons.join("、") || "原因未提供"}）`);
+      if (result.truncated) messages.push("已达到扫描或导入上限");
+      if (result.cancelled) messages.push("已取消，已保留完成部分");
+      if (result.timedOut) messages.push("扫描超时，已保留完成部分");
+      const operationSkippedCount = Math.min(result.skippedCount, Math.max(0, 20_000 - acceptedCount));
+      const totalCount = acceptedCount + operationSkippedCount;
+      operationReporter?.finishOperation(operationId, {
+        status: result.timedOut ? "timed-out" : result.cancelled ? "cancelled" : retryable ? "partial-success" : acceptedCount ? "success" : "failed",
+        totalCount,
+        addedCount: result.indexedCount,
+        updatedCount: result.refreshedCount,
+        successCount: acceptedCount,
+        skippedCount: operationSkippedCount,
+        skippedReasons: result.skippedReasons,
+        truncated: result.truncated,
+        cancelled: result.cancelled,
+        timedOut: result.timedOut,
+        retryableIds: retryable ? [operationId] : [],
+        message: `策略：${policyDescription}；扫描 ${result.scannedCount} 项，发现 ${result.candidateCount} 个普通文件。`,
+      });
+      showToast(messages.join("，") || "没有找到可导入的文件");
+    } catch (error) {
+      retryImportRef.current = null;
+      operationReporter?.failOperation(operationId, "递归导入失败，请检查文件夹和访问权限");
+      showActionError(error, "递归导入失败，请检查文件夹和访问权限");
+    } finally {
+      activeImportOperationIdRef.current = "";
+      setRecursiveImportProgress(null);
+      indexingRef.current = false;
+      setIndexing(false);
+    }
+  }
+
+  async function confirmFolderImport(mode, policy) {
+    if (pendingAction?.type !== "folder-import") return;
+    const { paths } = pendingAction;
+    setPendingAction(null);
+    if (mode === "recursive") await importFoldersRecursive(paths, policy);
+    else await indexRealPaths(paths);
+  }
+
   function addBrowserFiles(fileList) {
     const additions = createBrowserEntries(fileList);
     if (!additions.length) return;
+    const operationId = createOperationId("import");
+    operationReporter?.startOperation({ id: operationId, operation: "import", totalCount: additions.length });
     setFiles((current) => [...additions, ...current]);
     setSelectedId(additions[0].id);
     setPreviewEntryId(null);
     setActiveNav("library");
+    operationReporter?.finishOperation(operationId, {
+      status: "success",
+      totalCount: additions.length,
+      addedCount: additions.length,
+      successCount: additions.length,
+    });
     showToast(`已登记 ${additions.length} 项`);
   }
 
   async function choosePaths(mode) {
+    if (indexingRef.current || batchBusyRef.current) {
+      showToast("已有导入或批量操作进行中，请先等待完成");
+      return;
+    }
     if (!isTauriRuntime) {
       if (mode === "folder") folderInputRef.current?.click();
       if (mode === "file") fileInputRef.current?.click();
@@ -601,6 +885,7 @@ export function useLibraryActions({
       const paths = selected ? (Array.isArray(selected) ? selected : [selected]) : [];
       if (!paths.length) return;
       if (mode === "reposition") await repositionRealPath(paths[0]);
+      else if (mode === "folder") requestFolderImport(paths);
       else await indexRealPaths(paths);
     } catch (error) {
       showActionError(error, "无法打开文件选择器，请重试");
@@ -690,6 +975,7 @@ export function useLibraryActions({
     confirmTags,
     confirmGroup,
     confirmBatchRemove,
+    confirmFolderImport,
     batchBusy,
     dragActive,
     fileInputRef,
@@ -705,8 +991,12 @@ export function useLibraryActions({
     handleBatchGroup,
     handleBatchTags,
     handleCancelBatch,
+    handleCancelImport,
     handleCopyLocation,
     handleRetryBatch,
+    retryOperation: handleRetryOperation,
+    canRetryOperation,
+    recursiveImportProgress,
     handleUndo,
     indexRealPaths,
     openFromFloating,
@@ -738,15 +1028,18 @@ export function useLibraryActions({
   };
 }
 
+function safeParse(parser, value, command) {
+  try {
+    return parser(value, command);
+  } catch {
+    return null;
+  }
+}
+
 function validateGroupName(value) {
   const normalized = String(value ?? "").trim();
   if (!normalized || normalized.length > 64 || /[\u0000-\u001f\u007f-\u009f]/.test(normalized)) return "";
   return normalized;
-}
-
-function createOperationId() {
-  if (globalThis.crypto?.randomUUID) return `batch-${globalThis.crypto.randomUUID()}`;
-  return `batch-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
 function isRetryableBatchItem(item) {

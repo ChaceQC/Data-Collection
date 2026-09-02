@@ -1,5 +1,338 @@
 # 项目进度
 
+## 2026-09-02
+
+### 阶段 J：本地全文检索与正则（0.3.26 已验收）
+
+#### 已完成
+
+- 按 `AGENT.md` 和 `PROJECT_PLAN.md` 完成阶段 J：新增独立的 `content-index.json` 正文索引，不改变 `index.json` 元数据格式；启动、导入、刷新和索引 revision 变化后由后台任务按文件路径、大小和修改时间增量同步。
+- 正文范围按共享 `file-types.json` 的 `kind` 判断，覆盖 `text` 和 `markdown` 纯文本内容，包括代码、JSON、配置和 Markdown，不把能力限定为 `.txt`；DOCX、PDF、XLSX、图片和视频不抽取正文。
+- 新增 Rust `content_index`/`content_search` 存储模块和 `regex` 依赖：采用原子 JSON 写入、2 MiB 单文件、64 MiB 总正文、1,000,000 字符、20,000 条记录和 60 秒重建限制；损坏索引独立进入恢复状态并保留备份，不阻塞元数据索引启动。
+- 新增元数据/正文搜索范围切换和正则开关；正文搜索由 Rust `regex` 线性时间引擎执行，限制表达式长度、正则程序大小、单文件命中数和摘要长度，结果只返回不透明资料 ID、命中数、短摘要和高亮范围。
+- 搜索结果继续叠加现有导航、收藏、失效路径、类型、标签、分组和目录上下文；正文命中显示命中字段、摘要和安全 React 文本高亮，不写入日志、toast、URL、操作历史或诊断导出。
+- 设置面板新增正文索引状态、条目数、占用大小、失败数、重建、取消和清除入口；重建使用现有批量取消机制，失败后可再次重建。
+- 新增正文 IPC command、前端契约、Tauri capability 和自动生成权限/schema，版本入口已统一到 `0.3.26`；未创建 Tag、Release 或修改远程仓库。
+
+#### 进行中
+
+- 无；代码实现、自动测试、前端构建、Windows x64 NSIS 候选构建和用户 Windows 11/Tauri/WebView2 原生验收均已完成。
+
+#### 用户验收
+
+- 2026-09-02，用户确认当前 `PROJECT_PLAN.md` 的阶段 A-J 已全部实现并完成 Windows 11/Tauri/WebView2 原生验收，覆盖真实文件导入与预览、重启恢复、长路径、正文检索、正则、清除/重建、取消和大规模使用场景，以及各阶段列出的窗口、托盘、悬浮球、外部操作、元数据、操作历史、DOCX 和递归导入流程。
+
+#### 阻塞与风险
+
+- 浏览器回退模式不调用正文索引 command，只能验证元数据搜索控件和前端空状态；它仍不能替代桌面端真实文件读取、app data 持久化和 WebView2 验收，本轮原生验收已由用户单独完成。
+- 正文索引会为已登记的纯文本和 Markdown 生成本地内容缓存，仍受单文件/总大小限制；解析失败、编码无法识别、权限拒绝和超限文件会计入失败状态并从可搜索正文中排除。
+- 当前未对 DOCX、PDF、XLSX 做正文抽取；安装包仍未签名、不内置 WebView2 Runtime，DOC 预览仍依赖目标机 LibreOffice，`xlsx@0.18.5` 既有依赖风险不变。
+
+#### 下一步
+
+- 当前计划没有待执行阶段；如后续出现具体问题，按新的 0.3.x 修复版本记录和验证。
+- 在获得明确授权前不创建新的 Tag、Release 或推送远程；`0.3.26` 仍是已验收但未发布的新候选。
+
+#### 涉及文件
+
+- `prototype/src-tauri/src/storage/content_index.rs`、`content_search.rs`、`commands/mod.rs`、`lib.rs`、`build.rs`、`capabilities/default.json`
+- `prototype/src/features/library/useContentIndexController.js`、`LibraryPanel.jsx`、`LibraryPanelParts.jsx`、`libraryModel.js`、`libraryRepository.js`
+- `prototype/src/features/settings/SettingsPanel.jsx`、`prototype/src/styles.css`
+- `prototype/src/lib/ipcContracts.js`、`ipcContracts.d.ts`、`prototype/tests/content-search-model.test.mjs`、`content-index-contracts.test.mjs`
+- `prototype/package.json`、`package-lock.json`、`src-tauri/Cargo.toml`、`Cargo.lock`、`PROJECT_PLAN.md`、`README.md`、`prototype/README.md`
+
+#### 验证
+
+- `npm.cmd run test:content`：5 项通过；`npm.cmd run test:library`：21 项通过；`npm.cmd run test:contracts`：14 项通过。
+- `cargo test content`：5 项正文索引/正则测试通过；完整 `cargo test --locked --lib`：75 项通过；`cargo fmt --check` 和 `cargo clippy --locked --all-targets --all-features -- -D warnings` 通过。
+- `npm.cmd run build` 通过并生成 Sites 产物；Tauri 自定义 command 权限/schema 已由 `cargo check` 重新生成，`npm.cmd run tauri:build` 和内置 loader 核验通过。
+- 已生成安装包 [`本地资料工作台_0.3.26_x64-setup.exe`](E:/Project/test/prototype/src-tauri/target/release/bundle/nsis/本地资料工作台_0.3.26_x64-setup.exe)，大小 `8790936` bytes，SHA-256 `B6C4E602B64FD46FCF8E960ACC214D2158E76DBB5E641EFAE40877B93380FA1B`；release 主程序大小 `35541231` bytes，SHA-256 `B1CA0A2C039621640DA56FDEE4585BDC8D307DD56B9FAB62503513656F6D167E`。
+- `WebView2Loader.dll` 与主程序同目录，大小 `160320` bytes，SHA-256 `8427B1FC58EC707813E5C0A51EB5D69397BB333250A7B891BE4D3B123F1E0F1C`；loader 目标架构为 Windows x64。
+
+## 2026-09-02
+
+### 文件夹子项预览解析修复（0.3.25 修订候选）
+
+#### 已完成
+
+- 修复登记文件夹内普通文件无法预览的问题：目录子项预览目标仍使用不透明 `directoryId` 和受控 `relativePath`，但 Rust `resolve_preview_target` 误调用了只允许目录的解析函数，导致文件子项在预览前被拒绝。
+- 目录子项预览现在复用已登记目录子项的通用安全解析，并继续由文件类型注册表确认预览类型；目录浏览解析仍保持只接受文件夹的原有行为。
+- `can_preview` 和 `load_preview` 共享该修复路径，覆盖预览检查与实际加载；未开放任意本地路径访问。
+- 已重新构建 `0.3.25` Windows x64 NSIS 安装包 `prototype/src-tauri/target/release/bundle/nsis/本地资料工作台_0.3.25_x64-setup.exe`，大小 `8738373` bytes，SHA-256 为 `6F57EA4035B963EE35674ED9DFDEE2524016B6BA26965B87E86F853507EFB39A`；loader 校验通过，大小 `160320` bytes，SHA-256 为 `8427B1FC58EC707813E5C0A51EB5D69397BB333250A7B891BE4D3B123F1E0F1C`。
+
+#### 进行中
+
+- 代码回归、契约/预览测试、Rust 编译检查、clippy、前端构建和安装包构建已完成；等待用户在 Windows 11/Tauri/WebView2 环境安装修订候选，实际打开已登记文件夹中的文件确认预览。
+
+#### 阻塞与风险
+
+- 浏览器回退不会执行真实 Tauri 目录子项解析、文件读取或 WebView2 预览；本次修复未由浏览器回退代替 Windows 原生验收。
+- 安装包未签名且不内置 WebView2 Runtime；DOC 预览仍依赖 LibreOffice，其他既有外部依赖边界不变。
+
+#### 下一步
+
+- 用户安装新的 `0.3.25` NSIS 包，选择一个已登记文件夹，进入子目录并分别打开 TXT、Markdown、图片、PDF 或 Office 文件，确认预览、切换和关闭行为；记录失败样本后再决定是否需要下一轮修复。
+
+#### 验证
+
+- `npm.cmd run test:contracts`：14 项通过，包含目录子项预览目标回归测试；`npm.cmd run test:preview`：15 项通过。
+- `cargo fmt --all -- --check`、`cargo check --locked`、`cargo clippy --locked --all-targets --all-features -- -D warnings`：通过。
+- `npm.cmd run tauri:build` 和 `verify:loader`：通过，生成并校验上述修订版安装包。
+
+### 阶段 I：递归导入和导入策略（0.3.25 代码候选）
+
+#### 已完成
+
+- 文件夹选择后默认打开“登记文件夹 / 导入文件夹内资料”策略对话框；默认登记只保存文件夹本身，原有目录按需浏览行为保持不变。
+- 递归模式明确显示扫描范围、支持格式范围、隐藏/系统项排除规则、最大递归深度和最大登记条目，并说明取消、超时和部分完成语义。
+- Rust 新增受限递归扫描器和 `import_folders_recursive` command：每个目录项重新执行 `symlink_metadata`、canonical、普通文件类型、权限和导入根边界校验；不跟随符号链接、Windows reparse point 或目录外跳转。
+- 扫描限制包括 64 层后端深度上限、20,000 个候选条目、80,000 个扫描节点、32 KiB 路径长度、受限待扫描队列和 30 秒单任务截止时间；扫描不会读取正文或修改用户原文件。
+- 扫描通过 `recursive-import-progress` 事件报告检查项、候选文件、准备项、跳过数和当前文件名；取消/超时保留已扫描候选，索引只在扫描结束后一次原子合并，避免半写状态。
+- 重复根目录和重复路径会跳过；已有索引路径由现有 merge 逻辑保留 ID、收藏、标签、分组、添加时间、预览状态和最近记录元数据。结果中心记录扫描摘要、跳过原因和当前会话重试入口，不把完整路径写入操作历史。
+- 版本入口已统一为 `0.3.25`，同步前端 package、package-lock、Tauri 配置、Rust crate、Cargo.lock、IPC 契约、权限声明和生成 schema。
+- `npm.cmd run tauri:build` 已生成 Windows x64 NSIS 安装包 `prototype/src-tauri/target/release/bundle/nsis/本地资料工作台_0.3.25_x64-setup.exe`，大小 `8735546` bytes，SHA-256 为 `FB968D3F7E6A7DD36EA5130359025FB7D2542544A01D8D05743A8BA6E532582C`；`WebView2Loader.dll` 校验通过，大小 `160320` bytes，SHA-256 为 `8427B1FC58EC707813E5C0A51EB5D69397BB333250A7B891BE4D3B123F1E0F1C`，与 release 主程序位于同一目录。
+
+#### 进行中
+
+- 无；阶段 I 的代码门禁、文档同步和 `0.3.25` NSIS 候选构建已完成，等待用户执行 Windows 原生验收。
+
+#### 阻塞与风险
+
+- 浏览器回退不会执行真实 Tauri 文件夹选择器、文件系统扫描、取消 command、索引持久化或重启恢复；浏览器布局检查不能替代桌面验收。
+- 递归扫描默认只导入共享 manifest 中已有预览格式；用户勾选“包含暂不支持预览的普通文件”后才会登记其他普通文件。扫描限制达到时只保留已完成部分并提供重试入口。
+- 安装包不签名且不内置 WebView2 Runtime；DOC 预览仍依赖目标机 LibreOffice，既有 `xlsx@0.18.5` 依赖风险保持不变。本阶段没有新增 npm、Rust 或系统运行时依赖。
+
+#### 下一步
+
+- 用户安装候选后验证默认登记与递归导入选择、中文/空格/深层路径、隐藏项、同名文件、取消/超时、重启恢复、权限拒绝、符号链接/reparse point 和长路径显示；未完成前不创建 Tag、Release 或推送远程。
+
+#### 涉及文件
+
+- `prototype/src-tauri/src/filesystem/recursive_import.rs`、`filesystem/mod.rs`、`commands/mod.rs`、`src/lib.rs`、`build.rs`、`capabilities/default.json`、`permissions/autogenerated/import_folders_recursive.toml`
+- `prototype/src/features/library/ImportFolderDialog.jsx`、`recursiveImportModel.js`、`libraryRepository.js`、`useLibraryActions.js`、`prototype/src/App.jsx`
+- `prototype/src/lib/ipcContracts.js`、`ipcContracts.d.ts`、`prototype/src/features/operations/OperationCenter.jsx`、`operationModel.js`、`styles.css`
+- `prototype/tests/fixtures/recursive-import/`、`recursive-import-model.test.mjs`、`ipc-contracts.test.mjs`、`operation-model.test.mjs`
+- `prototype/package.json`、`package-lock.json`、`src-tauri/tauri.conf.json`、`Cargo.toml`、`Cargo.lock`、`README.md`、`prototype/README.md`、`PROJECT_PLAN.md`
+
+#### 验证
+
+- `npm.cmd run test:library`：21 项通过；`npm.cmd run test:contracts`：13 项通过；`npm.cmd run test:operations`：3 项通过。
+- `npm.cmd run build`：通过，继续生成 `dist/client/index.html`、`dist/server/index.js` 和 `dist/.openai/hosting.json`。
+- `cargo fmt --all`、`cargo test --locked --lib`：70 项通过；`cargo check --locked`：通过。
+- Microsoft Edge 浏览器回退检查：1280px 与 360px 页面 `body/root scrollWidth` 均等于视口宽度；临时 Vite 服务和浏览器标签已关闭。
+- `cargo clippy --locked --all-targets --all-features -- -D warnings`、`npm.cmd run tauri:build` 和 `verify:loader`：通过；安装器启动/卸载和 Windows 11 原生手工验收仍待用户执行。
+
+### 阶段 H：DOCX 和大型预览性能（0.3.24 代码候选）
+
+#### 已完成
+
+- DOCX 预览已从前端主线程 Mammoth 转换改为可终止的 `docxWorker.js`；资源下载仍由 `AbortController` 管理，Worker 在关闭、切换、取消、失败和超时路径统一终止。
+- DOCX 解析过程显示读取、后台转换、HTML 清理和耗时提示；用户可在解析期间取消，30 秒截止后返回显式 `timed-out` 状态，已有失败页继续提供重试、默认程序打开和返回列表等下一步。
+- Worker 转换结果和主线程清理结果均受 8 MiB HTML、50,000 个元素限制；源文件继续受共享 manifest 的 20 MiB 限制。HTML 仍经过 DOMPurify，脚本、外链、嵌入对象和宏不进入预览。
+- HTML 清理按顶层节点分批执行并在批次间检查取消信号；预览资源由 `PreviewPane` 既有 dispose 路径释放，XLSX 与 DOC/DOCX 超时状态统一为 `timed-out`。
+- 依赖评估确认没有新增 npm、Rust 或系统运行时依赖；Mammoth、DOMPurify、Vite、Tauri、WebView2 和 Office 容器边界仍使用现有锁定版本。版本入口已统一到 `0.3.24`。
+- `npm.cmd run tauri:build` 已生成 Windows x64 NSIS 安装包 `prototype/src-tauri/target/release/bundle/nsis/本地资料工作台_0.3.24_x64-setup.exe`，大小 `8719181` bytes，SHA-256 为 `17407CEBCF4A25E2CB45F01A07A47BE7953F3159B2B7486145DD5C2A0D0A83E3`；loader 校验通过，大小 `160320` bytes，SHA-256 为 `8427B1FC58EC707813E5C0A51EB5D69397BB333250A7B891BE4D3B123F1E0F1C`。
+
+#### 性能基线
+
+- 使用 Mammoth `1.12.2` 自带的无敏感 `single-paragraph.docx`、`tables.docx` 和 `tiny-picture.docx`，以 Node 侧原实现测量原始、2 MiB、10 MiB、20 MiB 输入；2/10/20 MiB 的转换耗时分别约为：单段落 `16.94/24.77/38.21 ms`，复杂表格 `10.75/55.94/108.21 ms`，图片 `11.85/25.13/40.52 ms`。
+- 这些输入通过安全夹具尾部填充得到，主要反映资源读取和转换边界，不等同于真实复杂 DOCX；RSS 增量受 GC 影响不稳定，浏览器 WebView2 的主线程内存曲线和真实取消响应仍由 Windows 手工验收补充。
+
+#### 进行中
+
+- 无；阶段 H 代码门禁、文档同步、版本统一和 Windows x64 NSIS 候选构建已完成。不创建 Tag、Release 或推送远程。
+
+#### 阻塞与风险
+
+- 浏览器回退和开发侧命令不能替代 Windows 11/WebView2 下真实 DOCX 的 Worker 取消、超时、关闭、快速切换、输出过大、损坏/加密文档和安装后资源清理验收。
+- 安装包不签名且不内置 WebView2 Runtime；DOC 仍依赖目标机 LibreOffice。`xlsx@0.18.5` 的既有 Prototype Pollution/ReDoS 风险未消失，本阶段未扩大其解析权限。
+
+#### 下一步
+
+- 由用户安装 `0.3.24` NSIS 候选，使用无敏感 DOCX 夹具记录 Windows 11/Tauri/WebView2 的后台转换、取消、超时、关闭、快速切换和资源释放结果。
+- 桌面验收无具体阻断后，按计划进入阶段 I 的递归导入和导入策略工作。
+
+#### 涉及文件
+
+- `prototype/src/features/preview/OfficePreviewer.jsx`
+- `prototype/src/features/preview/docxWorker.js`
+- `prototype/src/features/preview/docxRenderModel.js`
+- `prototype/src/features/preview/previewSecurity.js`
+- `prototype/src/features/preview/SpreadsheetPreviewer.jsx`
+- `prototype/src/features/preview/previewTypes.js`
+- `prototype/src/lib/ipcContracts.js`、`ipcContracts.d.ts`
+- `prototype/src-tauri/src/preview/mod.rs`、`preview/loaders.rs`
+- `prototype/tests/docx-preview-model.test.mjs`
+- `README.md`、`prototype/README.md`、`PROJECT_PLAN.md`
+
+#### 验证
+
+- `npm.cmd run test:preview`：15 项通过。
+- `npm.cmd run test:contracts`：12 项通过。
+- `cargo fmt --all -- --check`：通过；`cargo test --lib`：66 项通过。
+- `npm.cmd run build`：通过，生成独立的 `docxWorker-*.js` 及 Sites 产物；`cargo check --locked`、`cargo clippy --locked --all-targets --all-features -- -D warnings`、`npm.cmd run tauri:build` 和 `npm.cmd run verify:loader`：通过。
+
+## 2026-09-02
+
+### 阶段 G：最近打开和悬浮球连续工作流（0.3.23 代码候选）
+
+#### 已完成
+
+- 索引格式从 v4 升级到 v5，`IndexEntry` 增加可选 `lastOpenedAt`；旧版本迁移前创建 recovery 备份，迁移写入失败时保留旧索引内容并进入已有恢复状态。
+- 预览 command 只有返回 `ready` 且目标是有效主索引普通文件时才记录最近打开；默认程序打开 command 只有外部打开成功后才记录。失效资料、文件夹、预览失败和默认程序打开失败均不会伪造 `lastOpenedAt`。
+- 主窗口新增“最近打开”导航，按 `lastOpenedAt` 倒序并限制最近 50 条；“最近添加”仍使用 `addedAt`，悬浮球和托盘仍使用 `lastRecordedAt` 的“最近记录”，各自的数量和空状态文案已区分。
+- 最近打开的索引变更复用 `index-changed` revision 事件，主窗口、悬浮球和托盘沿用现有刷新路径；从悬浮球打开资料时，主窗口会直接定位并打开文件预览，文件夹记录会进入对应目录。
+- 索引迁移和最近打开记录只保存元数据，不保存正文，不新增完整路径日志；版本入口已统一为 `0.3.23`，README、原型 README、计划和本进度已同步。
+
+#### 进行中
+
+- 阶段 G 代码、Rust/前端自动验证、文档同步和 `0.3.23` Windows x64 NSIS 安装包构建已完成；当前等待用户执行 Windows 11/Tauri/WebView2 原生验收。
+
+#### 阻塞与风险
+
+- 浏览器回退和开发侧测试不能验证 Tauri 原生预览、默认程序、托盘/悬浮球窗口焦点、Windows Shell 和真实升级路径；`0.3.23` 安装包仍需用户在 Windows 11/Tauri/WebView2 环境手工验收。
+- 安装包不签名且不内置 WebView2 Runtime；DOC 预览仍依赖目标机 LibreOffice，`xlsx@0.18.5` 的既有依赖风险保持不变。
+
+#### 下一步
+
+- 用户安装候选后检查 v4 到 v5 迁移备份、最近打开排序/重启恢复、预览和默认程序成功/失败边界、托盘与悬浮球同步以及悬浮球到主窗口的连续工作流。
+- 桌面验收无具体阻断后再进入阶段 H，不创建 Tag、Release 或推送远程。
+
+#### 涉及文件
+
+- `prototype/src-tauri/src/filesystem/mod.rs`
+- `prototype/src-tauri/src/filesystem/operations.rs`
+- `prototype/src-tauri/src/storage/mod.rs`
+- `prototype/src-tauri/src/commands/mod.rs`
+- `prototype/src-tauri/src/commands/library.rs`
+- `prototype/src/App.jsx`
+- `prototype/src/features/library/libraryModel.js`
+- `prototype/src/features/library/useLibraryNavigation.js`
+- `prototype/src/features/library/LibraryPanel.jsx`
+- `prototype/src/features/library/LibraryPanelParts.jsx`
+- `prototype/src/lib/ipcContracts.js`、`ipcContracts.d.ts`
+- `prototype/tests/library-model.test.mjs`、`ipc-contracts.test.mjs`
+- `prototype/package.json`、`package-lock.json`、`src-tauri/Cargo.toml`、`Cargo.lock`、`tauri.conf.json`
+- `README.md`、`prototype/README.md`、`PROJECT_PLAN.md`
+
+#### 验证
+
+- `cargo fmt --all -- --check`：通过；`cargo check --locked`：通过；`cargo test --lib`：66 项通过。
+- `npm.cmd run test:library`：19 项通过；`npm.cmd run test:contracts`：12 项通过。
+- `npm.cmd run test:preview`：11 项通过；`npm.cmd run test:floating-ball`：17 项通过；`npm.cmd run test:tray`：3 项通过；`npm.cmd run test:sites`：4 项通过。
+- `cargo clippy --all-targets --all-features -- -D warnings`：通过；`npm.cmd run build`：通过，生成 Sites 所需的 `dist/client/index.html`、`dist/server/index.js` 和 `dist/.openai/hosting.json`。
+- `npm.cmd run tauri:build`：通过，生成 Windows x64 NSIS 安装包 `prototype/src-tauri/target/release/bundle/nsis/本地资料工作台_0.3.23_x64-setup.exe`，大小 `8712755` bytes，SHA-256 为 `9AAD808A22E34EC38299E69DCA8427F69183D66722BCE5B80CBF6AFA3156D716`。
+- `verify-webview2-loader.mjs`：通过；`WebView2Loader.dll` 大小 `160320` bytes，SHA-256 为 `8427B1FC58EC707813E5C0A51EB5D69397BB333250A7B891BE4D3B123F1E0F1C`，与 release 主程序位于同一目录，目标架构为 Windows x64。
+
+### 阶段 F：键盘、范围选择和响应式细节（0.3.22 代码候选）
+
+#### 已完成
+
+- 新增主窗口键盘动作模型并接入 `Ctrl+F` 搜索聚焦、`F5` 刷新索引、`Ctrl+O` 选择文件、`Ctrl+Shift+O` 选择文件夹和 `Ctrl+Z` 撤销；快捷键只绑定当前主窗口，输入框、选择框、内容编辑区和已有弹层不会抢占输入，也未引入系统级全局快捷键。
+- 资料库复选框支持鼠标 Shift-click、键盘 Space/Shift+Space 的连续范围选择；范围按当前导航/搜索/类型/标签/分组/目录上下文计算，可跨分页，当前页全选和刷新保留规则不变。
+- 预览 Dialog 支持左右方向键切换当前可见列表中的上一项/下一项；预览输入控件不会触发切换。完善 Dialog 焦点回收、筛选菜单和操作中心 Escape 关闭/触发点焦点返回。
+- 收紧表格、状态文字和控件的对比度，保留 `prefers-reduced-motion`；360px 下保留“更多”入口和可滚动导航，设置、刷新、清除选择和 Dialog 内容仍可到达；等效 125%/150% CSS 视口未出现页面级横向溢出。
+- 新增快捷键模型和范围选择模型测试，更新根 README、原型 README、计划和五个版本入口到 `0.3.22`。
+
+#### 进行中
+
+- 阶段 F 的代码候选、自动验证和安装包构建已完成；当前等待用户安装 `0.3.22` 候选并执行 Windows 11/Tauri/WebView2 原生验收。
+
+#### 阻塞与风险
+
+- 浏览器回退已验证页面布局、键盘状态、范围选择、预览切换和弹层焦点，但不能验证 Tauri 原生文件/文件夹选择器、真实索引刷新/撤销 command、无边框窗口拖动和 Windows Shell 行为。
+- 阶段 F 不引入全局系统快捷键；安装包不签名且不内置 WebView2 Runtime，Windows 11/Tauri/WebView2 原生验收仍需用户安装候选后单独记录。
+
+#### 下一步
+
+- 由用户安装 `0.3.22` 候选，验证 Windows 11 下快捷键、原生选择器、无边框拖动、预览切换和退出边界。
+- 根据具体桌面回归修复，或按计划进入阶段 G 的最近打开和悬浮球连续工作流。
+
+#### 涉及文件
+
+- `prototype/src/App.jsx`
+- `prototype/src/features/library/LibraryPanel.jsx`
+- `prototype/src/features/library/libraryModel.js`
+- `prototype/src/features/library/LibraryActions.jsx`
+- `prototype/src/features/library/LibraryPanelParts.jsx`
+- `prototype/src/features/preview/PreviewPane.jsx`
+- `prototype/src/components/Dialog.jsx`
+- `prototype/src/features/operations/OperationCenter.jsx`
+- `prototype/src/lib/keyboardModel.js`
+- `prototype/tests/keyboard-model.test.mjs`
+- `prototype/tests/library-model.test.mjs`
+- `prototype/src/styles.css`
+- `prototype/package.json`、`package-lock.json`
+- `prototype/src-tauri/Cargo.toml`、`Cargo.lock`、`tauri.conf.json`
+- `PROJECT_PLAN.md`、`README.md`、`prototype/README.md`
+
+#### 验证
+
+- `npm.cmd run test:library`：18 项通过，包含快捷键和连续范围选择模型。
+- `npm.cmd run test:contracts`：12 项通过；`npm.cmd run test:preview`：11 项通过；`npm.cmd run test:sites`：4 项通过。
+- 浏览器回退检查：预览左右键、鼠标 Shift-click、Space/Shift+Space、Ctrl+F、Dialog/菜单 Escape 和 360px 设置入口通过；1280px、960px、680px、360px 及等效 125%/150% CSS 视口的 document/body scroll width 均等于视口宽度。
+- `npm.cmd run build`：通过，生成 Sites 所需的 `dist/client/index.html`、`dist/server/index.js` 和 `dist/.openai/hosting.json`。
+- `npm.cmd run tauri:build`：通过，生成 Windows x64 NSIS 安装包 `prototype/src-tauri/target/release/bundle/nsis/本地资料工作台_0.3.22_x64-setup.exe`，大小 `8714321` bytes，SHA-256 为 `7FBAB2D42CAA79823BCA8DB4B412D0AAB2E70989DD92DBCD542DEAE23F3DBEC9`。
+- `WebView2Loader.dll` 校验通过，大小 `160320` bytes，SHA-256 为 `8427B1FC58EC707813E5C0A51EB5D69397BB333250A7B891BE4D3B123F1E0F1C`，与 release 主程序位于同一目录。
+
+### 阶段 E：操作结果中心和设置一致性（0.3.21 代码候选）
+
+#### 已完成
+
+- 新增 `features/operations`：`OperationRecord` 前端模型、操作历史 API、持久化队列和操作中心；导入、刷新、单条收藏/标签/分组/重命名/索引移除、批量收藏/标签/分组/索引移除和撤销均会显示进行中及最终结果。
+- 操作中心区分成功、部分完成、失败、已取消和已超时状态；批量详情保留逐项成功/跳过/失败、跳过原因、已完成项和失败项重试入口。toast 继续只承担短确认，详情可在 toast 消失后回看。
+- 新增 Rust `storage/operation_history.rs` 与 `commands/operation_history.rs`，使用版本 `1` 的独立 `operation-history.json`、原子替换、最多 100 条记录、结果/原因/重试参数上限和损坏备份；历史只写入操作元数据和不透明资料 ID，不写入正文、完整路径或密钥，损坏时回退空历史且不阻塞索引启动。
+- 设置文件格式升级为 v3，新增持久化 revision；v1/v2 设置保留原字段并原子迁移。`update_settings` 使用 expected revision，前端设置草稿记录打开时快照和实际编辑字段，跨窗口 `settings-changed` 到来时提示并只合并用户编辑字段，过期保存由 Rust CAS 拒绝。
+- 新增操作历史 IPC runtime contract、TypeScript 声明、Tauri command 清单和 capability 权限；补充阶段 E 操作模型、IPC、设置合并和 Rust 存储测试。
+- 五个版本入口已统一为 `0.3.21`：`prototype/package.json`、`prototype/package-lock.json` 根包、`prototype/src-tauri/tauri.conf.json`、`prototype/src-tauri/Cargo.toml` 和 `prototype/src-tauri/Cargo.lock` 根包；README、计划和本进度已同步。
+- `0.3.21` Windows x64 NSIS 安装包已构建：`prototype/src-tauri/target/release/bundle/nsis/本地资料工作台_0.3.21_x64-setup.exe`，大小 `8716353` bytes，SHA-256 为 `FF1263C8C2599392A01417DBD8B8AE6CFDA4C7F96F16B4BB7C2E1C9F091C0BC0`。
+
+#### 进行中
+
+- 等待用户安装 `0.3.21` 候选并执行 Windows 11/Tauri/WebView2 阶段 E 原生验收。
+
+#### 阻塞与风险
+
+- 浏览器回退只验证操作中心空状态、设置入口和 360px 层级/布局，不能验证 Tauri IPC、真实导入跳过、批量取消/超时、跨窗口托盘设置或重启后的 app data 历史恢复。
+- Windows 11/Tauri/WebView2 原生安装、启动、操作历史重启恢复、批量取消/重试、设置冲突和卸载仍需用户手工验收；安装包不签名且不内置 WebView2 Runtime 的既有发布边界不变。
+- 设置数据从 v2 迁移到 v3 时 revision 从文件默认 `0` 开始；操作历史为新增附属文件，无旧版本迁移，损坏时备份后清空并允许继续启动。
+
+#### 下一步
+
+- 由用户安装并核对 `0.3.21` NSIS 候选，随后记录 Windows 11/Tauri/WebView2 下阶段 E 原生验收，再决定是否创建 Tag/Release。
+
+#### 涉及文件
+
+- `prototype/src/App.jsx`
+- `prototype/src/features/operations/OperationCenter.jsx`
+- `prototype/src/features/operations/operationModel.js`
+- `prototype/src/features/operations/operationApi.js`
+- `prototype/src/features/operations/useOperationController.js`
+- `prototype/src/features/library/useLibraryActions.js`
+- `prototype/src/features/library/useIndexController.js`
+- `prototype/src/features/settings/SettingsPanel.jsx`
+- `prototype/src/features/settings/useSettingsController.js`
+- `prototype/src/features/settings/settingsModel.js`
+- `prototype/src/lib/ipcContracts.js`、`ipcContracts.d.ts`
+- `prototype/src-tauri/src/storage/operation_history.rs`
+- `prototype/src-tauri/src/storage/settings.rs`
+- `prototype/src-tauri/src/commands/operation_history.rs`
+- `prototype/src-tauri/src/commands/settings.rs`
+- `prototype/src-tauri/src/lib.rs`、`build.rs`、`capabilities/default.json`
+- `PROJECT_PLAN.md`、`README.md`、`prototype/README.md`
+
+#### 验证
+
+- `npm.cmd run test:library`：14 项通过。
+- `npm.cmd run test:contracts`：12 项通过。
+- `npm.cmd run test:settings`：5 项通过。
+- `npm.cmd run test:operations`：2 项通过。
+- `npm.cmd run build`：通过，生成 `dist/client/index.html`、`dist/server/index.js` 和 `dist/.openai/hosting.json`。
+- `cargo fmt --check`、`cargo test --lib`：65 项通过、0 失败；`cargo check` 和 `cargo clippy --all-targets --all-features -- -D warnings` 通过。
+- Microsoft Edge 回退检查：1280px 操作中心展开正常；360px 资料列表无页面横向溢出，设置面板内容可滚动，修复了操作中心覆盖设置 Dialog 的层级问题；临时 Vite 服务和浏览器标签已关闭。
+- `npm.cmd run tauri:build`：通过，生成 Windows x64 NSIS 安装包；`verify-webview2-loader.mjs` 通过，`WebView2Loader.dll` 大小 `160320` bytes，SHA-256 为 `8427B1FC58EC707813E5C0A51EB5D69397BB333250A7B891BE4D3B123F1E0F1C`，与 release 主程序位于同一目录。
+
+
 ## 2026-09-01
 
 ### 阶段 D：单条标签、分组和详情面板（0.3.20 代码候选）

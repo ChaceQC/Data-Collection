@@ -2,7 +2,10 @@ use std::{
     fs,
     io::Write,
     path::{Path, PathBuf},
-    sync::Mutex,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Mutex,
+    },
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -12,8 +15,9 @@ use thiserror::Error;
 
 use crate::filesystem;
 
-pub const SETTINGS_FORMAT_VERSION: u32 = 2;
+pub const SETTINGS_FORMAT_VERSION: u32 = 3;
 const LEGACY_SETTINGS_FORMAT_VERSION: u32 = 1;
+const PREVIOUS_SETTINGS_FORMAT_VERSION: u32 = 2;
 pub const DEFAULT_PAGE_SIZE: u32 = 20;
 pub const PAGE_SIZE_OPTIONS: &[u32] = &[10, 20, 50];
 
@@ -43,6 +47,8 @@ pub struct SettingsUpdate {
     pub hide_to_tray: bool,
     #[serde(default = "default_show_floating_window")]
     pub show_floating_window: bool,
+    #[serde(default)]
+    pub expected_revision: Option<u64>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -56,6 +62,7 @@ pub struct PreviewLimitView {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppSettings {
+    pub revision: u64,
     pub default_sort: SortPreference,
     pub page_size: u32,
     pub confirm_before_remove: bool,
@@ -81,12 +88,16 @@ pub enum SettingsError {
     UnsupportedVersion,
     #[error("设置值不受支持")]
     InvalidValue,
+    #[error("设置已在其他窗口更新")]
+    Conflict,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct SettingsDocument {
     version: u32,
+    #[serde(default)]
+    revision: u64,
     settings: PersistedSettings,
 }
 
@@ -123,6 +134,7 @@ pub struct SettingsState {
     settings: Mutex<PersistedSettings>,
     mutation_lock: Mutex<()>,
     warning: Mutex<Option<String>>,
+    revision: AtomicU64,
 }
 
 impl SettingsState {
@@ -135,7 +147,12 @@ impl SettingsState {
             match read_settings(&settings_path) {
                 Ok(read_result) => {
                     if read_result.needs_migration
-                        && save_settings(&settings_path, &read_result.settings).is_err()
+                        && save_settings(
+                            &settings_path,
+                            &read_result.settings,
+                            read_result.revision,
+                        )
+                        .is_err()
                     {
                         warning = Some("设置已迁移到当前格式，但修复文件未写入".to_string());
                     }
@@ -148,7 +165,7 @@ impl SettingsState {
                 ) => {
                     let backup_created = backup_settings_file(&settings_path);
                     let settings = PersistedSettings::default();
-                    let repaired = save_settings(&settings_path, &settings).is_ok();
+                    let repaired = save_settings(&settings_path, &settings, 0).is_ok();
                     warning = Some(if repaired {
                         if backup_created {
                             "设置文件损坏，已备份并使用默认设置".to_string()
@@ -167,9 +184,13 @@ impl SettingsState {
             }
         } else {
             let settings = PersistedSettings::default();
-            save_settings(&settings_path, &settings)?;
+            save_settings(&settings_path, &settings, 0)?;
             settings
         };
+
+        let revision = read_settings(&settings_path)
+            .map(|result| result.revision)
+            .unwrap_or(0);
 
         *self
             .settings_path
@@ -177,6 +198,7 @@ impl SettingsState {
             .map_err(|_| SettingsError::State)? = Some(settings_path);
         *self.settings.lock().map_err(|_| SettingsError::State)? = settings;
         *self.warning.lock().map_err(|_| SettingsError::State)? = warning;
+        self.revision.store(revision, Ordering::Release);
         Ok(())
     }
 
@@ -190,11 +212,16 @@ impl SettingsState {
                     .lock()
                     .map_err(|_| SettingsError::State)?
                     .clone();
-                Ok(AppSettings::from_persisted(&settings, warning))
+                Ok(AppSettings::from_persisted(
+                    &settings,
+                    self.revision.load(Ordering::Acquire),
+                    warning,
+                ))
             })
     }
 
     pub fn update(&self, update: SettingsUpdate) -> Result<AppSettings, SettingsError> {
+        let expected_revision = update.expected_revision;
         let next = validate_update(update)?;
         let _guard = self
             .mutation_lock
@@ -207,16 +234,28 @@ impl SettingsState {
             .clone()
             .ok_or(SettingsError::DataDirectory)?;
 
-        save_settings(&settings_path, &next)?;
+        let current_revision = self.revision.load(Ordering::Acquire);
+        if expected_revision.is_some_and(|revision| revision != current_revision) {
+            return Err(SettingsError::Conflict);
+        }
+        let next_revision = current_revision.saturating_add(1);
+
+        save_settings(&settings_path, &next, next_revision)?;
         *self.settings.lock().map_err(|_| SettingsError::State)? = next.clone();
         *self.warning.lock().map_err(|_| SettingsError::State)? = None;
-        Ok(AppSettings::from_persisted(&next, None))
+        self.revision.store(next_revision, Ordering::Release);
+        Ok(AppSettings::from_persisted(&next, next_revision, None))
     }
 }
 
 impl AppSettings {
-    fn from_persisted(settings: &PersistedSettings, warning: Option<String>) -> Self {
+    fn from_persisted(
+        settings: &PersistedSettings,
+        revision: u64,
+        warning: Option<String>,
+    ) -> Self {
         Self {
+            revision,
             default_sort: settings.default_sort.clone(),
             page_size: settings.page_size,
             confirm_before_remove: settings.confirm_before_remove,
@@ -237,6 +276,7 @@ impl AppSettings {
 
 struct ReadSettings {
     settings: PersistedSettings,
+    revision: u64,
     needs_migration: bool,
 }
 
@@ -244,7 +284,8 @@ fn read_settings(path: &Path) -> Result<ReadSettings, SettingsError> {
     let bytes = fs::read(path).map_err(|_| SettingsError::Read)?;
     let document =
         serde_json::from_slice::<SettingsDocument>(&bytes).map_err(|_| SettingsError::Corrupt)?;
-    let needs_migration = document.version == LEGACY_SETTINGS_FORMAT_VERSION;
+    let needs_migration = document.version == LEGACY_SETTINGS_FORMAT_VERSION
+        || document.version == PREVIOUS_SETTINGS_FORMAT_VERSION;
     if document.version != SETTINGS_FORMAT_VERSION && !needs_migration {
         return Err(SettingsError::UnsupportedVersion);
     }
@@ -254,16 +295,23 @@ fn read_settings(path: &Path) -> Result<ReadSettings, SettingsError> {
         confirm_before_remove: document.settings.confirm_before_remove,
         hide_to_tray: document.settings.hide_to_tray,
         show_floating_window: document.settings.show_floating_window,
+        expected_revision: None,
     })?;
     Ok(ReadSettings {
         settings,
+        revision: document.revision,
         needs_migration,
     })
 }
 
-fn save_settings(path: &Path, settings: &PersistedSettings) -> Result<(), SettingsError> {
+fn save_settings(
+    path: &Path,
+    settings: &PersistedSettings,
+    revision: u64,
+) -> Result<(), SettingsError> {
     let document = SettingsDocument {
         version: SETTINGS_FORMAT_VERSION,
+        revision,
         settings: settings.clone(),
     };
     let encoded = serde_json::to_vec_pretty(&document).map_err(|_| SettingsError::Write)?;
@@ -347,6 +395,7 @@ mod tests {
             .expect("settings should initialize");
 
         let settings = state.snapshot().expect("settings should be readable");
+        assert_eq!(settings.revision, 0);
         assert_eq!(settings.page_size, DEFAULT_PAGE_SIZE);
         assert!(settings.confirm_before_remove);
         assert!(!settings.hide_to_tray);
@@ -411,10 +460,12 @@ mod tests {
                 confirm_before_remove: false,
                 hide_to_tray: true,
                 show_floating_window: false,
+                expected_revision: None,
             })
             .expect("settings update should succeed");
 
         assert_eq!(updated.default_sort.key, "name");
+        assert_eq!(updated.revision, 1);
         assert_eq!(updated.page_size, 50);
         assert!(!updated.confirm_before_remove);
         assert!(updated.hide_to_tray);
@@ -444,10 +495,44 @@ mod tests {
             confirm_before_remove: false,
             hide_to_tray: false,
             show_floating_window: true,
+            expected_revision: None,
         });
 
         assert!(result.is_err());
         assert_eq!(state.snapshot().expect("settings should read"), before);
+        cleanup(path);
+    }
+
+    #[test]
+    fn rejects_stale_revision_without_overwriting_newer_settings() {
+        let path = unique_path("settings-conflict.json");
+        let state = SettingsState::default();
+        state
+            .initialize(path.clone())
+            .expect("settings should initialize");
+        let first = state
+            .update(SettingsUpdate {
+                default_sort: SortPreference {
+                    key: "name".to_string(),
+                    direction: "asc".to_string(),
+                },
+                page_size: DEFAULT_PAGE_SIZE,
+                confirm_before_remove: true,
+                hide_to_tray: false,
+                show_floating_window: true,
+                expected_revision: Some(0),
+            })
+            .expect("first revision should save");
+        let stale = state.update(SettingsUpdate {
+            default_sort: SortPreference::default(),
+            page_size: 50,
+            confirm_before_remove: false,
+            hide_to_tray: true,
+            show_floating_window: false,
+            expected_revision: Some(0),
+        });
+        assert!(matches!(stale, Err(super::SettingsError::Conflict)));
+        assert_eq!(state.snapshot().expect("settings should read"), first);
         cleanup(path);
     }
 

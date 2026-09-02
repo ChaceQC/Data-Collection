@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-clear-operation-history"
+description = "Enables the clear_operation_history command without any pre-configured scope."
+commands.allow = ["clear_operation_history"]
+
+[[permission]]
+identifier = "deny-clear-operation-history"
+description = "Denies the clear_operation_history command without any pre-configured scope."
+commands.deny = ["clear_operation_history"]

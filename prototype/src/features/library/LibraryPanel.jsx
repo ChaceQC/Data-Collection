@@ -24,6 +24,7 @@ import {
   EntryLocation,
   EntryMetadata,
   LibraryFilterMenu,
+  SearchHitSummary,
   getActiveFilterChips,
   getEmptyActions,
   getEmptyDescription,
@@ -41,8 +42,13 @@ import {
   getDisplayType,
   getDuplicateNameIds,
   getParentSummary,
+  getRecentEntries,
+  getRecentOpenedEntries,
   getLibraryContextKey,
   getSelectedIdsInEntries,
+  getSelectionRangeIds,
+  SEARCH_MODES,
+  validateSearchQuery,
   paginateEntries,
   sortEntries,
 } from "./libraryModel";
@@ -69,6 +75,14 @@ export function LibraryPanel({
   activeNav,
   searchQuery,
   onSearchQueryChange,
+  searchMode = SEARCH_MODES.metadata,
+  onSearchModeChange,
+  useRegex = false,
+  onUseRegexChange,
+  contentSearchResults = [],
+  contentSearchLoading = false,
+  contentSearchError = "",
+  contentIndexStatus,
   sort = DEFAULT_SORT,
   onSortChange,
   pageSize = PAGE_SIZE,
@@ -78,7 +92,9 @@ export function LibraryPanel({
   onVisibleEntriesChange,
   onSelectionChange,
   onToggleSelection,
+  onSelectRange,
   onSelectPage,
+  searchInputRef,
   directoryView,
   directoryLoading,
   indexReady,
@@ -122,11 +138,17 @@ export function LibraryPanel({
   const [filters, setFilters] = useState({ type: "", tags: [], groupIds: [] });
   const headerCheckboxRef = useRef(null);
   const tableScrollRef = useRef(null);
+  const selectionAnchorRef = useRef("");
+  const handledSelectionKeyRef = useRef(new Set());
   const previousContextKeyRef = useRef("");
   const previousRefreshingRef = useRef(false);
   const refreshScrollTopRef = useRef(0);
   const sourceEntries = directoryView?.entries || files;
-  const contextKey = useMemo(() => getLibraryContextKey({ activeNav, searchQuery, filters, directoryView }), [activeNav, directoryView, filters, searchQuery]);
+  const contextKey = useMemo(() => getLibraryContextKey({ activeNav, searchQuery, searchMode, useRegex, filters, directoryView }), [activeNav, directoryView, filters, searchMode, searchQuery, useRegex]);
+  const contentMatchIds = useMemo(() => new Set(contentSearchResults.map((result) => result.fileId).filter(Boolean)), [contentSearchResults]);
+  const contentResultById = useMemo(() => new Map(contentSearchResults.map((result) => [result.fileId, result])), [contentSearchResults]);
+  const searchValidation = validateSearchQuery(searchQuery, useRegex);
+  const metadataSearchError = searchMode === SEARCH_MODES.metadata && !searchValidation.valid ? searchValidation.message : "";
   const visibleFiles = useMemo(() => {
     const filtered = filterEntries(sourceEntries, {
       activeNav,
@@ -137,10 +159,14 @@ export function LibraryPanel({
       groupIds: filters.groupIds,
       groups,
       directoryView,
+      searchMode,
+      useRegex,
+      contentMatchIds,
     });
     const directorySort = sort.key === "addedAt" ? { key: "name", direction: "asc" } : sort;
+    if (!directoryView && activeNav === "recent-opened") return filtered;
     return sortEntries(filtered, directoryView ? directorySort : sort);
-  }, [activeNav, directoryView, filters, groups, searchQuery, sort, sourceEntries]);
+  }, [activeNav, contentMatchIds, directoryView, filters, groups, searchMode, searchQuery, sort, sourceEntries, useRegex]);
   const page = useMemo(() => paginateEntries(visibleFiles, currentPage, pageSize), [currentPage, pageSize, visibleFiles]);
   const duplicateIds = useMemo(() => getDuplicateNameIds(sourceEntries), [sourceEntries]);
   const selectedIdSet = useMemo(() => new Set(selectedIds), [selectedIds]);
@@ -148,12 +174,32 @@ export function LibraryPanel({
   const allPageSelected = selectablePageIds.length > 0 && selectablePageIds.every((id) => selectedIdSet.has(id));
   const somePageSelected = selectablePageIds.some((id) => selectedIdSet.has(id));
   const visibleSelectedCount = getSelectedIdsInEntries(selectedIds, visibleFiles).length;
-  const totalEntryCount = directoryView ? sourceEntries.length : files.length;
+  const totalEntryCount = directoryView
+    ? sourceEntries.length
+    : activeNav === "recent"
+      ? getRecentEntries(files).length
+      : activeNav === "recent-opened"
+        ? getRecentOpenedEntries(files).length
+        : files.length;
   const activeFilterChips = getActiveFilterChips(filters, groups);
 
   useEffect(() => {
     onContextChange?.(contextKey);
   }, [contextKey, onContextChange]);
+
+  useEffect(() => {
+    selectionAnchorRef.current = "";
+  }, [contextKey]);
+
+  useEffect(() => {
+    if (selectionAnchorRef.current && !visibleFiles.some((file) => file.id === selectionAnchorRef.current)) {
+      selectionAnchorRef.current = "";
+    }
+  }, [visibleFiles]);
+
+  useEffect(() => {
+    if (!selectedIds.length) selectionAnchorRef.current = "";
+  }, [selectedIds.length]);
 
   useEffect(() => {
     onVisibleEntriesChange?.(visibleFiles, contextKey);
@@ -213,6 +259,38 @@ export function LibraryPanel({
     });
   }
 
+  function handleToggleSelection(fileId, shiftKey) {
+    const rangeIds = shiftKey
+      ? getSelectionRangeIds(visibleFiles, selectionAnchorRef.current, fileId)
+      : [];
+    if (rangeIds.length && onSelectRange) onSelectRange(rangeIds);
+    else onToggleSelection?.(fileId);
+    selectionAnchorRef.current = fileId;
+  }
+
+  function handleSelectPage(pageIds, selected) {
+    onSelectPage?.(pageIds, selected);
+    selectionAnchorRef.current = selected ? pageIds.at(-1) || "" : "";
+  }
+
+  function handleSelectionKeyDown(fileId, event) {
+    if (event.key !== " " && event.key !== "Spacebar") return;
+    event.preventDefault();
+    event.stopPropagation();
+    handledSelectionKeyRef.current.add(fileId);
+    window.setTimeout(() => handledSelectionKeyRef.current.delete(fileId), 0);
+    handleToggleSelection(fileId, event.shiftKey);
+  }
+
+  function handleSelectionClick(fileId, event) {
+    event.stopPropagation();
+    if (handledSelectionKeyRef.current.has(fileId)) {
+      handledSelectionKeyRef.current.delete(fileId);
+      return;
+    }
+    handleToggleSelection(fileId, event.shiftKey);
+  }
+
   const heading = directoryView ? (
     <nav id="recent-title" className="folder-breadcrumbs" aria-label="文件夹路径">
       <button type="button" className="breadcrumb-button" onClick={() => onOpenBreadcrumb(-1)}><ArrowLeft size={17} weight="regular" /><span>资料库</span></button>
@@ -231,23 +309,41 @@ export function LibraryPanel({
         {heading}
         <div className="section-heading-actions">
           <span className="result-count" aria-live="polite">显示 {visibleFiles.length} 项 / 共 {totalEntryCount} 项</span>
-          {onRefresh && <button type="button" className="icon-button" aria-label="刷新索引" title="刷新索引" aria-busy={refreshing} disabled={refreshing || !indexReady} onClick={onRefresh}><ArrowClockwise size={17} weight="bold" className={refreshing ? "is-spinning" : ""} aria-hidden="true" /></button>}
+          {onRefresh && <button type="button" className="icon-button" aria-label="刷新索引" aria-keyshortcuts="F5" title="刷新索引" aria-busy={refreshing} disabled={refreshing || !indexReady} onClick={onRefresh}><ArrowClockwise size={17} weight="bold" className={refreshing ? "is-spinning" : ""} aria-hidden="true" /></button>}
         </div>
       </div>
       {refreshError && <div className="inline-error" role="alert">{refreshError}</div>}
       <div className="library-toolbar">
-        <label className="search-field">
-          <MagnifyingGlass size={17} weight="regular" aria-hidden="true" />
-          <span className="sr-only">搜索资料</span>
-          <input aria-label="搜索资料" value={searchQuery} placeholder="搜索名称、类型、状态、位置或标签" onChange={(event) => onSearchQueryChange(event.target.value)} />
-          {searchQuery && <button type="button" className="search-clear-button" aria-label="清空搜索" title="清空搜索" onClick={() => onSearchQueryChange("")}><X size={15} weight="bold" aria-hidden="true" /></button>}
-        </label>
+        <div className="search-controls">
+          <label className="search-field">
+            <MagnifyingGlass size={17} weight="regular" aria-hidden="true" />
+            <span className="sr-only">搜索资料</span>
+            <input ref={searchInputRef} maxLength={256} aria-label="搜索资料" aria-keyshortcuts="Control+F" value={searchQuery} placeholder={searchMode === SEARCH_MODES.content ? "搜索正文" : "搜索名称、类型、状态、位置或标签"} onChange={(event) => onSearchQueryChange(event.target.value)} />
+            {searchQuery && <button type="button" className="search-clear-button" aria-label="清空搜索" title="清空搜索" onClick={() => onSearchQueryChange("")}><X size={15} weight="bold" aria-hidden="true" /></button>}
+          </label>
+          <div className="search-options" role="group" aria-label="搜索范围和方式">
+            <div className="search-mode-toggle" role="group" aria-label="搜索范围">
+              <button type="button" className={searchMode === SEARCH_MODES.metadata ? "is-active" : ""} aria-pressed={searchMode === SEARCH_MODES.metadata} onClick={() => onSearchModeChange?.(SEARCH_MODES.metadata)}>文件名和元数据</button>
+              <button type="button" className={searchMode === SEARCH_MODES.content ? "is-active" : ""} aria-pressed={searchMode === SEARCH_MODES.content} onClick={() => onSearchModeChange?.(SEARCH_MODES.content)}>正文</button>
+            </div>
+            <label className="regex-toggle"><input type="checkbox" checked={useRegex} onChange={(event) => onUseRegexChange?.(event.target.checked)} /><span>正则</span></label>
+          </div>
+        </div>
         <LibraryFilterMenu files={files} groups={groups} filters={filters} onChange={setFilters} onManageGroups={onManageGroups} />
         <div className="sort-controls">
           <label className="sort-control"><span>排序</span><select aria-label="排序字段" value={sort.key} onChange={(event) => onSortChange({ ...sort, key: event.target.value })}>{SORT_OPTIONS.map((option) => <option value={option.key} key={option.key}>{option.label}</option>)}</select></label>
           <button type="button" className="sort-direction-button" aria-label={sort.direction === "asc" ? "升序" : "降序"} title={sort.direction === "asc" ? "升序" : "降序"} onClick={() => onSortChange({ ...sort, direction: sort.direction === "asc" ? "desc" : "asc" })}>{sort.direction === "asc" ? <CaretUp size={17} weight="bold" aria-hidden="true" /> : <CaretDown size={17} weight="bold" aria-hidden="true" />}</button>
         </div>
       </div>
+      {metadataSearchError && <div className="inline-error" role="alert">{metadataSearchError}</div>}
+      {searchMode === SEARCH_MODES.content && searchQuery && contentSearchError && <div className="inline-error" role="alert">{contentSearchError}</div>}
+      {searchMode === SEARCH_MODES.content && contentIndexStatus && (
+        <div className={`content-search-status content-search-status-${contentIndexStatus.state}`} role="status" aria-live="polite">
+          <span>{contentIndexStatus.state === "indexing" ? "正文索引更新中" : contentIndexStatus.state === "recovery" ? "正文索引需要重建" : contentIndexStatus.state === "unavailable" ? "正文索引暂不可用" : "正文索引已就绪"}</span>
+          <span>{contentIndexStatus.indexedCount} 项 · {formatFileSize(contentIndexStatus.totalBytes)}</span>
+          {contentIndexStatus.failedCount > 0 && <span>跳过 {contentIndexStatus.failedCount} 项</span>}
+        </div>
+      )}
       {activeFilterChips.length > 0 && (
         <div className="active-filter-summary" role="group" aria-label="当前筛选条件">
           <span className="active-filter-label">当前筛选</span>
@@ -262,21 +358,21 @@ export function LibraryPanel({
 
       {!directoryView && selectedIds.length > 0 && <BulkLibraryToolbar selectedIds={selectedIds} visibleSelectedCount={visibleSelectedCount} groups={groups} busy={batchBusy} retryBatch={retryBatch} undoStatus={undoStatus} onBatchFavorite={onBatchFavorite} onBatchGroup={onBatchGroup} onBatchTags={onBatchTags} onBatchRemove={onBatchRemove} onUndo={onUndo} onRetry={onRetryBatch} onCancelBatch={onCancelBatch} onClear={onClearSelection} />}
 
-      {!indexReady ? <EmptyState icon={<Clock size={28} weight="regular" />} title="正在读取本地索引" description="请稍候。" /> : directoryLoading ? <EmptyState icon={<Clock size={28} weight="regular" />} title="正在读取文件夹" description="请稍候。" /> : visibleFiles.length ? (
+      {!indexReady ? <EmptyState icon={<Clock size={28} weight="regular" />} title="正在读取本地索引" description="请稍候。" /> : directoryLoading ? <EmptyState icon={<Clock size={28} weight="regular" />} title="正在读取文件夹" description="请稍候。" /> : contentSearchLoading && searchMode === SEARCH_MODES.content && searchQuery ? <EmptyState icon={<Clock size={28} weight="regular" />} title="正在搜索正文" description="请稍候。" /> : visibleFiles.length ? (
         <div className="file-table">
           <div ref={tableScrollRef} className="file-table-scroll" data-testid="recent-list">
             <table className="file-table-grid">
               <caption className="sr-only">{directoryView ? "当前文件夹内容" : getNavigationLabel(activeNav)}，显示 {visibleFiles.length} 项，共 {totalEntryCount} 项</caption>
               <thead>
                 <tr className="file-row file-row-header">
-                  <th scope="col" className="file-selection-cell">{!directoryView && <input ref={headerCheckboxRef} type="checkbox" aria-label="选择当前页资料" checked={allPageSelected} onChange={() => onSelectPage(selectablePageIds, !allPageSelected)} />}</th>
+                  <th scope="col" className="file-selection-cell">{!directoryView && <input ref={headerCheckboxRef} type="checkbox" aria-label="选择当前页资料" checked={allPageSelected} onChange={() => handleSelectPage(selectablePageIds, !allPageSelected)} />}</th>
                   <th scope="col">名称</th><th scope="col">类型</th><th scope="col">分组</th><th scope="col">大小</th><th scope="col">状态</th><th scope="col">修改时间</th><th scope="col" className="file-actions-header">操作</th>
                 </tr>
               </thead>
               <tbody>
                 {page.entries.map((file) => (
                   <tr className={`file-row ${selectedId === file.id ? "is-selected" : ""}`} key={file.id} tabIndex={0} aria-selected={selectedId === file.id} onClick={() => onRowClick(file)} onKeyDown={(event) => onRowKeyDown(event, file)}>
-                    <td className="file-selection-cell" data-label="选择"><input type="checkbox" aria-label={`选择 ${file.name}`} checked={selectedIdSet.has(file.id)} disabled={batchBusy || Boolean(directoryView)} onClick={(event) => event.stopPropagation()} onChange={(event) => { event.stopPropagation(); onToggleSelection(file.id); }} /></td>
+                    <td className="file-selection-cell" data-label="选择"><input type="checkbox" aria-label={`选择 ${file.name}`} checked={selectedIdSet.has(file.id)} disabled={batchBusy || Boolean(directoryView)} onKeyDown={(event) => handleSelectionKeyDown(file.id, event)} onClick={(event) => handleSelectionClick(file.id, event)} onChange={() => {}} /></td>
                     <th scope="row" data-label="名称">
                       <div className="file-name-cell">
                         <FileTypeIcon kind={file.kind} />
@@ -285,6 +381,7 @@ export function LibraryPanel({
                           {duplicateIds.has(file.id) && <span className="file-parent-summary" title={getParentSummary(file, directoryView)}>位于 {getParentSummary(file, directoryView)}</span>}
                           <EntryLocation entry={file} directoryView={directoryView} onCopy={onCopyLocation} onReveal={onReveal} />
                            <EntryMetadata entry={file} onTagClick={onTagFilter} />
+                           <SearchHitSummary entry={file} searchMode={searchMode} searchResult={contentResultById.get(file.id)} searchQuery={searchQuery} useRegex={useRegex} directoryView={directoryView} groups={groups} />
                         </div>
                       </div>
                     </th>

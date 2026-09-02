@@ -16,14 +16,17 @@ use uuid::Uuid;
 
 use crate::filesystem::IndexEntry;
 
+pub(crate) mod content_index;
+pub(crate) mod content_search;
 pub(crate) mod floating_ball;
+pub(crate) mod operation_history;
 #[cfg(not(test))]
 pub(crate) mod repository;
 pub(crate) mod settings;
 
-pub const INDEX_FORMAT_VERSION: u32 = 4;
+pub const INDEX_FORMAT_VERSION: u32 = 5;
 const LEGACY_INDEX_FORMAT_VERSION: u32 = 1;
-const PREVIOUS_INDEX_FORMAT_VERSION: u32 = 3;
+const PREVIOUS_INDEX_FORMAT_VERSION: u32 = 4;
 const MAX_GROUPS: usize = 256;
 const MAX_GROUP_NAME_CHARS: usize = 64;
 pub(crate) const MAX_TAGS_PER_ENTRY: usize = 32;
@@ -719,6 +722,9 @@ pub fn load_entries(path: &Path) -> Result<Vec<IndexEntry>, StorageError> {
 fn load_index_document(path: &Path) -> Result<IndexDocumentParts, StorageError> {
     let (entries, groups, undo_log, revision, needs_save) = read_index_document(path)?;
     if needs_save {
+        if fs::symlink_metadata(path).is_ok() && !backup_file(path) {
+            return Err(StorageError::Write);
+        }
         save_index_document(path, &entries, &groups, &undo_log, revision)?;
     }
     Ok((entries, groups, undo_log, revision))
@@ -746,7 +752,7 @@ fn read_index_document(path: &Path) -> Result<ReadIndexDocument, StorageError> {
         INDEX_FORMAT_VERSION => {
             normalize_entries(&mut entries, &groups)? || normalize_groups(&mut groups)?
         }
-        LEGACY_INDEX_FORMAT_VERSION | 2 | PREVIOUS_INDEX_FORMAT_VERSION => {
+        LEGACY_INDEX_FORMAT_VERSION | 2 | 3 | PREVIOUS_INDEX_FORMAT_VERSION => {
             normalize_entries(&mut entries, &groups)?;
             normalize_groups(&mut groups)?;
             true
@@ -816,6 +822,7 @@ pub fn merge_index_entries(
             let preview_status = existing.preview_status.clone();
             let added_at = existing.added_at;
             let last_recorded_at = existing.last_recorded_at;
+            let last_opened_at = existing.last_opened_at;
             let tags = existing.tags.clone();
             let group_id = existing.group_id.clone();
             *existing = incoming;
@@ -832,6 +839,7 @@ pub fn merge_index_entries(
                     Some(recorded_timestamp(base_recorded_at, input_index))
                 }
             };
+            existing.last_opened_at = last_opened_at;
             stats.refreshed_count += 1;
             stats.accepted_count += 1;
             stats.affected_ids.push(existing.id.clone());
@@ -882,6 +890,28 @@ pub fn floating_recent(entries: &[IndexEntry]) -> Vec<FloatingRecentEntry> {
     });
     recent.truncate(FLOATING_RECENT_LIMIT);
     recent
+}
+
+pub fn set_last_opened(
+    entries: &mut [IndexEntry],
+    file_id: &str,
+    opened_at: i64,
+) -> Result<bool, StorageError> {
+    if file_id.trim().is_empty() || !(1..=MAX_TIMESTAMP_MILLIS).contains(&opened_at) {
+        return Err(StorageError::InvalidId);
+    }
+    let entry = find_entry_mut(entries, file_id)?;
+    if entry.invalid || entry.kind == "folder" {
+        return Ok(false);
+    }
+    if entry
+        .last_opened_at
+        .is_some_and(|current| current >= opened_at)
+    {
+        return Ok(false);
+    }
+    entry.last_opened_at = Some(opened_at);
+    Ok(true)
 }
 
 pub fn set_favorite(
@@ -1092,6 +1122,10 @@ fn normalize_entries(
             entry.last_recorded_at = None;
             changed = true;
         }
+        if entry.last_opened_at.is_some_and(|value| value <= 0) {
+            entry.last_opened_at = None;
+            changed = true;
+        }
         if entry.invalid && entry.status != "路径失效" {
             entry.status = "路径失效".to_string();
             changed = true;
@@ -1181,6 +1215,11 @@ fn merge_duplicate_metadata(current: &mut IndexEntry, duplicate: &IndexEntry) {
         (None, value) => value,
         (value, None) => value,
     };
+    current.last_opened_at = match (current.last_opened_at, duplicate.last_opened_at) {
+        (Some(left), Some(right)) => Some(left.max(right)),
+        (None, value) => value,
+        (value, None) => value,
+    };
     if current.preview_status == "idle" && duplicate.preview_status != "idle" {
         current.preview_status = duplicate.preview_status.clone();
     }
@@ -1241,6 +1280,9 @@ fn validate_entries(entries: &[IndexEntry], groups: &[Group]) -> Result<(), Stor
             || entry
                 .last_recorded_at
                 .is_some_and(|value| !(1..=MAX_TIMESTAMP_MILLIS).contains(&value))
+            || entry
+                .last_opened_at
+                .is_some_and(|value| !(1..=MAX_TIMESTAMP_MILLIS).contains(&value))
             || entry.modified_at > MAX_TIMESTAMP_SECONDS
             || entry.added_at > MAX_TIMESTAMP_SECONDS
             || normalize_tags(&entry.tags).map_or(true, |tags| tags != entry.tags)
@@ -1264,6 +1306,7 @@ fn validate_entries(entries: &[IndexEntry], groups: &[Group]) -> Result<(), Stor
                     | "too-large"
                     | "converter-missing"
                     | "parse-error"
+                    | "timed-out"
             )
         {
             return Err(StorageError::Corrupt);
@@ -1353,6 +1396,9 @@ fn validate_entry_shape(entry: &IndexEntry) -> Result<(), StorageError> {
         || entry
             .last_recorded_at
             .is_some_and(|value| !(1..=MAX_TIMESTAMP_MILLIS).contains(&value))
+        || entry
+            .last_opened_at
+            .is_some_and(|value| !(1..=MAX_TIMESTAMP_MILLIS).contains(&value))
         || normalize_tags(&entry.tags).map_or(true, |tags| tags != entry.tags)
         || !matches!(entry.status.as_str(), "已登记" | "路径失效")
         || entry.invalid != (entry.status == "路径失效")
@@ -1367,6 +1413,7 @@ fn validate_entry_shape(entry: &IndexEntry) -> Result<(), StorageError> {
                 | "too-large"
                 | "converter-missing"
                 | "parse-error"
+                | "timed-out"
         )
     {
         return Err(StorageError::Corrupt);
@@ -1664,27 +1711,32 @@ mod tests {
     }
 
     #[test]
-    fn migrates_legacy_index_and_backfills_added_at_without_clearing_entries() {
-        for version in [1, 2] {
+    fn migrates_versioned_index_with_a_backup_without_clearing_entries() {
+        for version in [1, 2, 3, 4] {
             let path = unique_temp_path();
             let entry = sample_entry("旧资料.txt", 42);
             let mut legacy_entry = serde_json::to_value(&entry).expect("entry should serialize");
-            legacy_entry
+            let legacy_object = legacy_entry
                 .as_object_mut()
-                .expect("entry should be an object")
-                .remove("addedAt");
+                .expect("entry should be an object");
+            legacy_object.remove("addedAt");
+            legacy_object.remove("lastOpenedAt");
             legacy_entry["lastRecordedAt"] = serde_json::json!(9999);
-            let legacy = serde_json::json!({ "version": version, "entries": [legacy_entry] });
-            fs::write(
-                &path,
-                serde_json::to_vec(&legacy).expect("legacy should serialize"),
-            )
-            .expect("legacy index should be written");
+            if version == 4 {
+                legacy_entry["lastOpenedAt"] = serde_json::json!(8888);
+            }
+            let original = serde_json::to_vec(&serde_json::json!({
+                "version": version,
+                "entries": [legacy_entry]
+            }))
+            .expect("legacy should serialize");
+            fs::write(&path, &original).expect("legacy index should be written");
 
             let loaded = load_entries(&path).expect("legacy index should migrate");
 
             assert_eq!(loaded[0].added_at, 42);
             assert_eq!(loaded[0].last_recorded_at, Some(9999));
+            assert_eq!(loaded[0].last_opened_at, (version == 4).then_some(8888));
             let migrated: serde_json::Value =
                 serde_json::from_slice(&fs::read(&path).expect("migrated index should exist"))
                     .expect("migrated index should be valid JSON");
@@ -1694,8 +1746,45 @@ mod tests {
                 migrated["entries"][0]["lastRecordedAt"],
                 serde_json::json!(9999)
             );
-            let _ = fs::remove_file(path);
+            if version == 4 {
+                assert_eq!(migrated["entries"][0]["lastOpenedAt"], 8888);
+            }
+            let backup_matches =
+                fs::read_dir(path.parent().expect("temp path should have a parent"))
+                    .expect("backup directory should be readable")
+                    .flatten()
+                    .filter(|item| {
+                        item.file_name().to_string_lossy().starts_with(&format!(
+                            "{}.recovery-",
+                            path.file_name()
+                                .expect("temp path should have a name")
+                                .to_string_lossy()
+                        ))
+                    })
+                    .collect::<Vec<_>>();
+            assert!(!backup_matches.is_empty());
+            assert!(backup_matches.iter().any(|item| {
+                fs::read(item.path())
+                    .map(|bytes| bytes == original)
+                    .unwrap_or(false)
+            }));
+            cleanup_recovery_artifacts(&path);
         }
+    }
+
+    #[test]
+    fn records_only_successful_file_opens_and_keeps_the_timestamp_monotonic() {
+        let mut entries = vec![sample_entry("可打开.txt", 42)];
+        assert!(super::set_last_opened(&mut entries, "可打开.txt", 1_000).unwrap());
+        assert_eq!(entries[0].last_opened_at, Some(1_000));
+        assert!(!super::set_last_opened(&mut entries, "可打开.txt", 999).unwrap());
+        assert!(!super::set_last_opened(&mut entries, "可打开.txt", 1_000).unwrap());
+
+        entries[0].invalid = true;
+        assert!(!super::set_last_opened(&mut entries, "可打开.txt", 2_000).unwrap());
+        entries[0].invalid = false;
+        entries[0].kind = "folder".to_string();
+        assert!(!super::set_last_opened(&mut entries, "可打开.txt", 2_000).unwrap());
     }
 
     #[test]
@@ -1705,6 +1794,7 @@ mod tests {
         existing.added_at = 11;
         existing.preview_status = "ready".to_string();
         existing.last_recorded_at = Some(100);
+        existing.last_opened_at = Some(700);
         let mut incoming = sample_entry("资料.txt", 30);
         incoming.id = "incoming-id".to_string();
         incoming.name = "资料.txt".to_string();
@@ -1726,6 +1816,7 @@ mod tests {
         assert_eq!(entries[0].added_at, 11);
         assert_eq!(entries[0].preview_status, "ready");
         assert_eq!(entries[0].last_recorded_at, Some(2_000));
+        assert_eq!(entries[0].last_opened_at, Some(700));
 
         let mut more = (0..6)
             .map(|index| {
@@ -1794,6 +1885,7 @@ mod tests {
         let mut entry = sample_entry("收藏资料.md", 12);
         entry.added_at = 7;
         entry.last_recorded_at = Some(99);
+        entry.last_opened_at = Some(199);
         entry.preview_status = "ready".to_string();
         let original = entry.clone();
         let mut entries = vec![entry];
@@ -1806,6 +1898,7 @@ mod tests {
         assert_eq!(entries[0].path, original.path);
         assert_eq!(entries[0].added_at, original.added_at);
         assert_eq!(entries[0].last_recorded_at, original.last_recorded_at);
+        assert_eq!(entries[0].last_opened_at, original.last_opened_at);
         assert_eq!(entries[0].preview_status, original.preview_status);
     }
 
@@ -1953,6 +2046,7 @@ mod tests {
         let mut duplicate = first.clone();
         duplicate.favorite = true;
         duplicate.last_recorded_at = Some(99);
+        duplicate.last_opened_at = Some(199);
         duplicate.preview_status = "ready".to_string();
         let document = serde_json::json!({
             "version": INDEX_FORMAT_VERSION,
@@ -1969,6 +2063,7 @@ mod tests {
         assert_eq!(loaded[0].id, first.id);
         assert!(loaded[0].favorite);
         assert_eq!(loaded[0].last_recorded_at, Some(99));
+        assert_eq!(loaded[0].last_opened_at, Some(199));
         assert_eq!(loaded[0].preview_status, "ready");
         assert!(fs::read(&path).is_ok());
         let _ = fs::remove_file(path);
@@ -2105,6 +2200,7 @@ mod tests {
             added_at: modified_at,
             preview_status: "idle".to_string(),
             last_recorded_at: None,
+            last_opened_at: None,
             tags: Vec::new(),
             group_id: None,
         }

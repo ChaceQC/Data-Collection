@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { libraryRepository } from "./libraryRepository.js";
-import { getRecentEntries } from "./libraryModel.js";
+import { getRecentEntries, getRecentOpenedEntries } from "./libraryModel.js";
 
 export function useLibraryNavigation({ filesRef, initialSelectedId = "", showToast, clearSelection }) {
   const [activeNav, setActiveNav] = useState("library");
@@ -58,6 +58,8 @@ export function useLibraryNavigation({ filesRef, initialSelectedId = "", showToa
     const files = filesRef.current;
     const firstMatch = key === "recent"
       ? getRecentEntries(files)[0]
+      : key === "recent-opened"
+        ? getRecentOpenedEntries(files)[0]
       : files.find((file) => matchesNavigation(file, key));
     if (firstMatch) setSelectedId(firstMatch.id);
   }
@@ -111,5 +113,6 @@ function matchesNavigation(entry, activeNav) {
   if (activeNav === "favorites") return Boolean(entry.favorite);
   if (activeNav === "invalid") return Boolean(entry.invalid);
   if (activeNav === "recent") return !entry.invalid && Number.isFinite(entry.addedAt);
+  if (activeNav === "recent-opened") return !entry.invalid && Number.isFinite(entry.lastOpenedAt) && entry.lastOpenedAt > 0;
   return true;
 }

@@ -2,6 +2,7 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, Runtime, State};
 
 use crate::{
+    commands::command_error,
     storage::settings::{AppSettings, SettingsState, SettingsUpdate},
     windows::{self, FloatingBallState, FloatingWindowStatus},
 };
@@ -24,10 +25,26 @@ pub async fn update_settings(
     settings: SettingsUpdate,
     state: State<'_, SettingsState>,
     app: AppHandle,
-) -> Result<AppSettings, String> {
-    let saved = state.update(settings).map_err(|error| error.to_string())?;
+) -> Result<AppSettings, super::CommandError> {
+    let saved = state.update(settings).map_err(settings_error)?;
     apply_runtime_settings(&app, &saved);
     Ok(saved)
+}
+
+fn settings_error(error: crate::storage::settings::SettingsError) -> super::CommandError {
+    let (code, retryable) = match error {
+        crate::storage::settings::SettingsError::Conflict => ("settings-conflict", false),
+        crate::storage::settings::SettingsError::InvalidValue => ("settings-invalid", false),
+        crate::storage::settings::SettingsError::DataDirectory
+        | crate::storage::settings::SettingsError::Read
+        | crate::storage::settings::SettingsError::Write
+        | crate::storage::settings::SettingsError::State
+        | crate::storage::settings::SettingsError::Corrupt
+        | crate::storage::settings::SettingsError::UnsupportedVersion => {
+            ("settings-unavailable", true)
+        }
+    };
+    command_error(code, error.to_string(), retryable, "unchanged")
 }
 
 pub(crate) fn apply_runtime_settings<R: Runtime>(

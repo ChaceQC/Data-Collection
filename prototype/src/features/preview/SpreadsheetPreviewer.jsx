@@ -29,17 +29,19 @@ export function SpreadsheetPreviewer({ content, onFailure, ...failureActions }) 
     let worker;
     let workerTimeout;
 
-    function setFailure(reason) {
-      if (cancelled) return;
-      setState({ status: "parse-error", workbook: null, reason });
-      onFailure?.("parse-error", reason);
+    let failed = false;
+    function setFailure(reason, status = "parse-error") {
+      if (cancelled || failed) return;
+      failed = true;
+      setState({ status, workbook: null, reason });
+      onFailure?.(status, reason);
     }
 
     function resetTimeout() {
       window.clearTimeout(workerTimeout);
       workerTimeout = window.setTimeout(() => {
         worker?.terminate();
-        setFailure("工作簿解析超时，已终止解析任务。");
+        setFailure("工作簿解析超时，已终止解析任务。", "timed-out");
       }, 30000);
     }
 
@@ -133,8 +135,8 @@ export function SpreadsheetPreviewer({ content, onFailure, ...failureActions }) 
       if (requestIdRef.current !== requestId) return;
       worker.terminate();
       const reason = "工作表解析超时，已终止解析任务。";
-      setState({ status: "parse-error", workbook: null, reason });
-      onFailure?.("parse-error", reason);
+      setState({ status: "timed-out", workbook: null, reason });
+      onFailure?.("timed-out", reason);
     }, 30000);
     worker.postMessage({ type: "load-sheet", index: selectedSheet, requestId });
     return () => window.clearTimeout(sheetTimeoutRef.current);
@@ -146,7 +148,7 @@ export function SpreadsheetPreviewer({ content, onFailure, ...failureActions }) 
   );
 
   if (state.status === "loading") return <div className="preview-loading-state">正在解析 Excel 工作簿...</div>;
-  if (state.status !== "ready" || !state.workbook) return <UnsupportedPreviewer status="parse-error" reason={state.reason} {...failureActions} />;
+  if (state.status !== "ready" || !state.workbook) return <UnsupportedPreviewer status={state.status} reason={state.reason} {...failureActions} />;
 
   return (
     <div className="preview-spreadsheet-content">

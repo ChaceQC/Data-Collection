@@ -10,8 +10,10 @@ import {
   getLibraryContextKey,
   getParentSummary,
   getRecentEntries,
+  getRecentOpenedEntries,
   getNavigationCount,
   getSelectedIdsInEntries,
+  getSelectionRangeIds,
   paginateEntries,
   retainExistingSelection,
   sortEntries,
@@ -138,4 +140,38 @@ test("selection is cleared only when the list context changes and refresh keeps 
   assert.deepEqual(clearSelectionOnContextChange("library", "favorites", ["a", "b"]), []);
   assert.deepEqual(retainExistingSelection(["a", "missing", "a"], [{ id: "a" }, { id: "b" }]), ["a"]);
   assert.deepEqual(getSelectedIdsInEntries(["a", "missing"], [{ id: "a" }, { id: "b" }]), ["a"]);
+});
+
+test("recent opened view is bounded, ignores invalid entries, and keeps open-time order", () => {
+  const opened = [
+    { id: "older", name: "older.txt", addedAt: 100, lastOpenedAt: 1_000, invalid: false },
+    { id: "newer", name: "newer.txt", addedAt: 10, lastOpenedAt: 2_000, invalid: false },
+    { id: "invalid", name: "invalid.txt", addedAt: 300, lastOpenedAt: 3_000, invalid: true },
+    { id: "never", name: "never.txt", addedAt: 400, invalid: false },
+  ];
+  assert.deepEqual(getRecentOpenedEntries(opened).map((entry) => entry.id), ["newer", "older"]);
+  assert.deepEqual(
+    filterEntries(opened, { activeNav: "recent-opened" }).map((entry) => entry.id),
+    ["newer", "older"],
+  );
+  assert.equal(getNavigationCount(opened, "recent-opened"), 2);
+
+  const many = Array.from({ length: 55 }, (_, index) => ({
+    id: `opened-${index}`,
+    name: `${index}.txt`,
+    lastOpenedAt: index + 1,
+    invalid: false,
+  }));
+  assert.equal(getRecentOpenedEntries(many).length, 50);
+  assert.equal(getRecentOpenedEntries(many)[0].id, "opened-54");
+});
+
+test("selects a continuous range inside the current list context, including across pages", () => {
+  const visibleEntries = Array.from({ length: 25 }, (_, index) => ({ id: `file-${index + 1}` }));
+  assert.deepEqual(
+    getSelectionRangeIds(visibleEntries, "file-3", "file-23"),
+    visibleEntries.slice(2, 23).map((entry) => entry.id),
+  );
+  assert.deepEqual(getSelectionRangeIds(visibleEntries, "missing", "file-4"), ["file-4"]);
+  assert.deepEqual(getSelectionRangeIds(visibleEntries, "file-4", "missing"), []);
 });

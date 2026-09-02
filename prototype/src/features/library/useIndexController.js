@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { save } from "@tauri-apps/plugin-dialog";
 import { getOperationError } from "../../lib/ipcContracts.js";
+import { createOperationId } from "../operations/operationModel.js";
 import { libraryRepository } from "./libraryRepository.js";
 
 export function useIndexController({
@@ -11,6 +12,7 @@ export function useIndexController({
   directoryView,
   setDirectoryView,
   showToast,
+  operationReporter,
 }) {
   const [files, setFiles] = useState(isTauriRuntime ? [] : initialFiles);
   const [groups, setGroups] = useState([]);
@@ -114,6 +116,8 @@ export function useIndexController({
 
   const handleRefreshIndex = useCallback(async () => {
     if (!isTauriRuntime || refreshing) return;
+    const operationId = createOperationId("refresh");
+    operationReporter?.startOperation({ id: operationId, operation: "refresh", totalCount: files.length });
     setRefreshing(true);
     setRefreshError("");
     try {
@@ -125,16 +129,25 @@ export function useIndexController({
         ? `已刷新 ${result.changedCount} 项${result.invalidCount ? `，失效路径 ${result.invalidCount} 项` : ""}`
         : result.invalidCount
           ? `索引已是最新，当前有 ${result.invalidCount} 项失效路径`
-          : "索引已是最新";
+        : "索引已是最新";
+      operationReporter?.finishOperation(operationId, {
+        status: "success",
+        totalCount: files.length,
+        updatedCount: result.changedCount,
+        successCount: result.changedCount,
+        invalidCount: result.invalidCount,
+        recoveredCount: result.recoveredCount,
+      });
       showToastRef.current(message);
     } catch (error) {
       const message = getOperationError(error, "索引刷新失败，请重试");
       setRefreshError(message);
+      operationReporter?.failOperation(operationId, "索引刷新失败，请重试");
       showToastRef.current(message);
     } finally {
       setRefreshing(false);
     }
-  }, [isTauriRuntime, refreshing, reloadIndexPreservingState]);
+  }, [files.length, isTauriRuntime, operationReporter, refreshing, reloadIndexPreservingState]);
 
   const resetIndexRecovery = useCallback(async () => {
     if (!isTauriRuntime || refreshing) return;

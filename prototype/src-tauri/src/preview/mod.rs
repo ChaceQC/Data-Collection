@@ -6,7 +6,7 @@ mod resource_protocol;
 mod resources;
 mod result;
 mod spreadsheet;
-mod text;
+pub(crate) mod text;
 mod video;
 
 use std::{
@@ -38,6 +38,7 @@ const STATUS_TOO_LARGE: &str = "too-large";
 const STATUS_CONVERTER_MISSING: &str = "converter-missing";
 const STATUS_PARSE_ERROR: &str = "parse-error";
 const STATUS_CANCELLED: &str = "cancelled";
+const STATUS_TIMED_OUT: &str = "timed-out";
 
 #[derive(Clone, Debug, Default)]
 pub(crate) struct PreviewState {

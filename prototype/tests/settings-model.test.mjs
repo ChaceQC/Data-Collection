@@ -4,6 +4,8 @@ import {
   DEFAULT_SETTINGS,
   PAGE_SIZE_OPTIONS,
   formatByteLimit,
+  getChangedSettingsFields,
+  mergeSettingsFields,
   normalizeSettings,
 } from "../src/features/settings/settingsModel.js";
 
@@ -11,6 +13,7 @@ test("keeps the settings defaults within the supported safety bounds", () => {
   assert.deepEqual(DEFAULT_SETTINGS.defaultSort, { key: "addedAt", direction: "desc" });
   assert.deepEqual(PAGE_SIZE_OPTIONS, [10, 20, 50]);
   assert.equal(DEFAULT_SETTINGS.pageSize, 20);
+  assert.equal(DEFAULT_SETTINGS.revision, 0);
   assert.equal(DEFAULT_SETTINGS.confirmBeforeRemove, true);
   assert.equal(DEFAULT_SETTINGS.hideToTray, false);
   assert.equal(DEFAULT_SETTINGS.showFloatingWindow, true);
@@ -52,4 +55,15 @@ test("formats binary limits for the read-only settings view", () => {
   assert.equal(formatByteLimit(2 * 1024 * 1024), "2 MiB");
   assert.equal(formatByteLimit(512 * 1024 * 1024), "512 MiB");
   assert.equal(formatByteLimit(-1), "未知");
+});
+
+test("merges only fields edited in a stale settings draft", () => {
+  const base = normalizeSettings({ revision: 4, pageSize: 20, hideToTray: false, showFloatingWindow: true });
+  const latest = normalizeSettings({ revision: 5, pageSize: 50, hideToTray: true, showFloatingWindow: false });
+  const draft = normalizeSettings({ ...base, pageSize: 10 });
+  assert.deepEqual(getChangedSettingsFields(base, draft), ["pageSize"]);
+  assert.deepEqual(mergeSettingsFields(latest, draft, ["pageSize"]), {
+    ...latest,
+    pageSize: 10,
+  });
 });

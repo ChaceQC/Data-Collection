@@ -13,6 +13,7 @@ use thiserror::Error;
 pub(crate) mod clipboard;
 pub(crate) mod external;
 pub(crate) mod operations;
+pub(crate) mod recursive_import;
 
 pub const MAX_INDEX_ENTRIES: usize = 20_000;
 
@@ -108,6 +109,8 @@ pub struct IndexEntry {
     #[serde(default)]
     pub last_recorded_at: Option<i64>,
     #[serde(default)]
+    pub last_opened_at: Option<i64>,
+    #[serde(default)]
     pub tags: Vec<String>,
     #[serde(default)]
     pub group_id: Option<String>,
@@ -129,6 +132,7 @@ pub struct DirectoryEntry {
     pub added_at: i64,
     pub preview_status: String,
     pub last_recorded_at: Option<i64>,
+    pub last_opened_at: Option<i64>,
     pub tags: Vec<String>,
     pub group_id: Option<String>,
     pub directory_id: String,
@@ -154,6 +158,7 @@ impl DirectoryEntry {
             added_at: entry.added_at,
             preview_status: entry.preview_status,
             last_recorded_at: entry.last_recorded_at,
+            last_opened_at: entry.last_opened_at,
             tags: entry.tags,
             group_id: entry.group_id,
             directory_id,
@@ -469,6 +474,7 @@ fn build_entry(
         added_at: current_timestamp(),
         preview_status: default_preview_status(),
         last_recorded_at: None,
+        last_opened_at: None,
         tags: Vec::new(),
         group_id: None,
     })
