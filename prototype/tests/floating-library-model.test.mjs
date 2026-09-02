@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  buildFloatingFilesCommandArgs,
   FLOATING_LIBRARY_MAX_LIMIT,
   formatFloatingFileSize,
   formatFloatingTimestamp,
@@ -90,6 +91,16 @@ test("normalizes defaults and rejects unsafe query boundaries", () => {
   assert.throws(() => normalizeFloatingFilesQuery({ limit: FLOATING_LIBRARY_MAX_LIMIT + 1 }), TypeError);
   assert.throws(() => normalizeFloatingFilesQuery({ query: "x".repeat(257) }), TypeError);
   assert.throws(() => normalizeFloatingFilesQuery({ query: "资料\n目录" }), TypeError);
+  assert.deepEqual(buildFloatingFilesCommandArgs({ query: "项目" }), {
+    query: {
+      query: "项目",
+      filter: "all",
+      sortKey: "name",
+      direction: "asc",
+      offset: 0,
+      limit: 50,
+    },
+  });
 });
 
 test("returns all indexed entries, including entries never recorded by the floating ball", () => {

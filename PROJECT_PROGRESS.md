@@ -7,6 +7,7 @@
 #### 已完成
 
 - 按当前 `AGENT.md` 和 `PROJECT_PLAN.md` 完成阶段 C：悬浮球面板主数据改为 `files` 文件库语义，不再使用 `get_floating_recent` 或 `getRecentEntries` 限制主列表。
+- 修复 `get_floating_files` 的 Tauri 参数封装：Rust command 的 `query: FloatingFilesQuery` 现在收到 `{ query: normalizedQuery }`，不再把内部搜索字符串误当作结构体参数。
 - 新增 `useFloatingBallFiles` 查询 Hook，统一管理当前搜索词、筛选、排序、方向、页码、总数、revision、加载/刷新/错误状态和过期请求丢弃；搜索输入限制为 256 个字符并使用 180ms 防抖。
 - 面板接入“全部、收藏、文件夹、失效”四项筛选，名称/类型/修改时间/最近打开四项排序和升降序切换；分页固定为每页 20 条，列表滚动容器独立于主窗口。
 - 文件行补充文件/文件夹图标、名称省略、类型、大小、分组、修改时间、失效状态和收藏忙碌态；文件夹不显示误导性的文件大小。
@@ -50,13 +51,14 @@
 #### 验证
 
 - `npm.cmd run test:floating-ball`：24 项通过，覆盖悬浮状态机、文件库查询模型、搜索输入边界、显示格式和 50/51 条分页边界。
+- 参数封装修复回归断言已加入 `floating-library-model.test.mjs`，确认 command 参数同时保留 `query` 字段和完整查询对象。
 - `npm.cmd run test:contracts`：15 项通过，覆盖既有 IPC/索引控制契约和文件库安全投影契约。
 - `npm.cmd run build`：通过，生成 `dist/client/index.html`、`dist/server/index.js` 和 `dist/.openai/hosting.json`；Vite 保留既有大 chunk 非阻断警告。
 - 浏览器回退检查：默认视口展示 11 条样本；搜索、清除搜索、收藏筛选、修改时间降序、收藏成功反馈、无结果状态均正常；默认及 360px 窄视口无横向溢出，列表保持内部滚动。
 - `git diff --check`：通过；临时浏览器服务和标签已关闭，构建产物未进入工作树。
 - `npm.cmd run tauri:build`：通过，完成 Rust release 编译、Windows x64 NSIS 打包和 `verify-webview2-loader.mjs` 校验。
-- NSIS 安装包：`prototype/src-tauri/target/release/bundle/nsis/本地资料工作台_0.3.29_x64-setup.exe`，`8,815,061` bytes，SHA-256 `5AF3F1FB2FEEF0798FAD117FB8C02A40C4C34FE190384B1C9312EF78E34C2630`。
-- release 主程序：`prototype/src-tauri/target/release/local-material-workbench.exe`，`35,640,642` bytes，FileVersion/ProductVersion `0.3.29`，SHA-256 `C1D0B47C0D1CF667C3EE4D0C462AA1DEB3F08DC0B69BCE3319D8FFACB30B210C`。
+- NSIS 安装包：`prototype/src-tauri/target/release/bundle/nsis/本地资料工作台_0.3.29_x64-setup.exe`，`8,815,611` bytes，SHA-256 `725F38BD3F7F303030949AB7F0E72E507854AB3E7A319FE73314CF6F85CAAA88`。
+- release 主程序：`prototype/src-tauri/target/release/local-material-workbench.exe`，`35,640,830` bytes，FileVersion/ProductVersion `0.3.29`，SHA-256 `DAC4BFA9402E94F843284979B5E850642D52E8C711DED440A5EE7D1E9A8FFA1D`。
 - `WebView2Loader.dll`：`160,320` bytes，SHA-256 `8427B1FC58EC707813E5C0A51EB5D69397BB333250A7B891BE4D3B123F1E0F1C`；loader 与 release 主程序同目录，校验目标为 Windows x64。
 
 ### 阶段 B：悬浮球外观和文件库面板骨架（0.3.28 代码候选）

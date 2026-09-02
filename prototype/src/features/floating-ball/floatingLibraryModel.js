@@ -96,6 +96,10 @@ export function normalizeFloatingFilesQuery(value = {}) {
   };
 }
 
+export function buildFloatingFilesCommandArgs(value = {}) {
+  return { query: normalizeFloatingFilesQuery(value) };
+}
+
 export function queryFloatingFiles(items, options = {}, groups = []) {
   const query = normalizeFloatingFilesQuery(options);
   const groupNameById = new Map((Array.isArray(groups) ? groups : [])
