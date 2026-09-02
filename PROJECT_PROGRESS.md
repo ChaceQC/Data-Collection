@@ -2,6 +2,63 @@
 
 ## 2026-09-02
 
+### 阶段 C：文件列表、搜索、筛选和排序（0.3.29 代码候选）
+
+#### 已完成
+
+- 按当前 `AGENT.md` 和 `PROJECT_PLAN.md` 完成阶段 C：悬浮球面板主数据改为 `files` 文件库语义，不再使用 `get_floating_recent` 或 `getRecentEntries` 限制主列表。
+- 新增 `useFloatingBallFiles` 查询 Hook，统一管理当前搜索词、筛选、排序、方向、页码、总数、revision、加载/刷新/错误状态和过期请求丢弃；搜索输入限制为 256 个字符并使用 180ms 防抖。
+- 面板接入“全部、收藏、文件夹、失效”四项筛选，名称/类型/修改时间/最近打开四项排序和升降序切换；分页固定为每页 20 条，列表滚动容器独立于主窗口。
+- 文件行补充文件/文件夹图标、名称省略、类型、大小、分组、修改时间、失效状态和收藏忙碌态；文件夹不显示误导性的文件大小。
+- 空文件库提供打开主窗口资料库入口，搜索/筛选无结果提供清除入口；查询错误保留明确重试操作，收藏和拖放刷新保留当前查询上下文。
+- 浏览器回退演示数据扩展为 11 条无敏感信息样本，覆盖普通文件、文件夹、收藏、失效、同名、空格文件名、长中文文件名及多种类型；浏览器模式仍不访问真实本地文件。
+- 按 `AGENT.md` 的单一职责边界拆分 `useFloatingBallRecords.js`、`useFloatingBallFiles.js` 和 `floatingBallDemoData.js`，没有修改 `get_floating_files` 的 Rust/IPC 返回契约。
+- 五个版本入口已统一到 `0.3.29`：前端 package、package-lock 根包、Tauri 配置、Rust crate 和 Cargo.lock 本地 package。
+
+#### 进行中
+
+- 无；阶段 C 代码、最小自动验证、浏览器回退检查和 Windows x64 NSIS 候选构建已完成。
+
+#### 用户验收
+
+- Windows 11/Tauri/WebView2 原生安装、首次启动、真实索引查询、超过 20 条分页、中文/空格/同名路径、真实收藏失败、重启恢复和卸载仍需用户安装候选后单独确认；代理未将浏览器检查或构建成功当作原生验收。
+
+#### 阻塞与风险
+
+- 安装包未签名且不内置 WebView2 Runtime；目标 Windows 11 机器需要已有 WebView2。
+- 阶段 D 的文件定位、文件夹目录、资源管理器显示和直接预览快捷入口尚未实现；阶段 C 的文件行主点击仍沿用现有主窗口打开入口。
+- 浏览器回退没有真实 Tauri IPC、文件系统拖放或外部程序副作用；收藏失败分支已保留受控错误路径，但未在本轮注入原生故障。
+
+#### 下一步
+
+- 用户安装 `0.3.29` x64 候选，按阶段 C 验收矩阵检查真实文件库全量列表、搜索、筛选、排序、分页、收藏和重启恢复；确认无回归后进入阶段 D `0.3.30`。
+
+#### 涉及文件
+
+- `prototype/src/features/floating-ball/FloatingBallPanel.jsx`
+- `prototype/src/features/floating-ball/FloatingBallWindow.jsx`
+- `prototype/src/features/floating-ball/floatingBallApi.js`
+- `prototype/src/features/floating-ball/floatingLibraryModel.js`
+- `prototype/src/features/floating-ball/floatingBallDemoData.js`
+- `prototype/src/features/floating-ball/useFloatingBallFiles.js`
+- `prototype/src/features/floating-ball/useFloatingBallRecords.js`
+- `prototype/src/styles.css`
+- `prototype/tests/floating-library-model.test.mjs`
+- `prototype/package.json`、`package-lock.json`、`src-tauri/tauri.conf.json`、`src-tauri/Cargo.toml`、`src-tauri/Cargo.lock`
+- `README.md`、`prototype/README.md`、`PROJECT_PLAN.md`
+
+#### 验证
+
+- `npm.cmd run test:floating-ball`：24 项通过，覆盖悬浮状态机、文件库查询模型、搜索输入边界、显示格式和 50/51 条分页边界。
+- `npm.cmd run test:contracts`：15 项通过，覆盖既有 IPC/索引控制契约和文件库安全投影契约。
+- `npm.cmd run build`：通过，生成 `dist/client/index.html`、`dist/server/index.js` 和 `dist/.openai/hosting.json`；Vite 保留既有大 chunk 非阻断警告。
+- 浏览器回退检查：默认视口展示 11 条样本；搜索、清除搜索、收藏筛选、修改时间降序、收藏成功反馈、无结果状态均正常；默认及 360px 窄视口无横向溢出，列表保持内部滚动。
+- `git diff --check`：通过；临时浏览器服务和标签已关闭，构建产物未进入工作树。
+- `npm.cmd run tauri:build`：通过，完成 Rust release 编译、Windows x64 NSIS 打包和 `verify-webview2-loader.mjs` 校验。
+- NSIS 安装包：`prototype/src-tauri/target/release/bundle/nsis/本地资料工作台_0.3.29_x64-setup.exe`，`8,815,061` bytes，SHA-256 `5AF3F1FB2FEEF0798FAD117FB8C02A40C4C34FE190384B1C9312EF78E34C2630`。
+- release 主程序：`prototype/src-tauri/target/release/local-material-workbench.exe`，`35,640,642` bytes，FileVersion/ProductVersion `0.3.29`，SHA-256 `C1D0B47C0D1CF667C3EE4D0C462AA1DEB3F08DC0B69BCE3319D8FFACB30B210C`。
+- `WebView2Loader.dll`：`160,320` bytes，SHA-256 `8427B1FC58EC707813E5C0A51EB5D69397BB333250A7B891BE4D3B123F1E0F1C`；loader 与 release 主程序同目录，校验目标为 Windows x64。
+
 ### 阶段 B：悬浮球外观和文件库面板骨架（0.3.28 代码候选）
 
 #### 已完成

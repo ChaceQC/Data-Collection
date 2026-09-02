@@ -1,6 +1,7 @@
 export const FLOATING_LIBRARY_FILTERS = Object.freeze(["all", "favorite", "folder", "invalid"]);
 export const FLOATING_LIBRARY_SORT_KEYS = Object.freeze(["name", "type", "modifiedAt", "lastOpenedAt"]);
 export const FLOATING_LIBRARY_DIRECTIONS = Object.freeze(["asc", "desc"]);
+export const FLOATING_LIBRARY_PAGE_SIZE = 20;
 export const FLOATING_LIBRARY_DEFAULT_QUERY = Object.freeze({
   query: "",
   filter: "all",
@@ -12,6 +13,50 @@ export const FLOATING_LIBRARY_DEFAULT_QUERY = Object.freeze({
 export const FLOATING_LIBRARY_MAX_QUERY_CHARS = 256;
 export const FLOATING_LIBRARY_MAX_LIMIT = 100;
 export const FLOATING_LIBRARY_MAX_OFFSET = 20_000;
+
+export function normalizeFloatingSearchInput(value) {
+  if (typeof value !== "string") return "";
+  return [...value]
+    .filter((character) => !/[\u0000-\u001f\u007f-\u009f]/.test(character))
+    .slice(0, FLOATING_LIBRARY_MAX_QUERY_CHARS)
+    .join("");
+}
+
+export function formatFloatingFileSize(value) {
+  if (!Number.isSafeInteger(value) || value < 0) return "大小未知";
+  if (value === 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  const unitIndex = Math.min(Math.floor(Math.log(value) / Math.log(1024)), units.length - 1);
+  const display = value / (1024 ** unitIndex);
+  const rounded = display >= 10 || unitIndex === 0 ? Math.round(display) : Number(display.toFixed(1));
+  return `${rounded} ${units[unitIndex]}`;
+}
+
+export function formatFloatingTimestamp(value, emptyLabel = "未记录") {
+  if (!Number.isSafeInteger(value) || value <= 0) return emptyLabel;
+  const milliseconds = value < 100_000_000_000 ? value * 1000 : value;
+  const date = new Date(milliseconds);
+  if (Number.isNaN(date.getTime())) return "时间未知";
+  return new Intl.DateTimeFormat("zh-CN", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date).replace(/\//g, "-");
+}
+
+export function getFloatingPageSummary(offset, limit, total) {
+  const safeOffset = Number.isSafeInteger(offset) && offset >= 0 ? offset : 0;
+  const safeLimit = Number.isSafeInteger(limit) && limit > 0 ? limit : FLOATING_LIBRARY_PAGE_SIZE;
+  const safeTotal = Number.isSafeInteger(total) && total >= 0 ? total : 0;
+  return {
+    start: safeTotal ? safeOffset + 1 : 0,
+    end: Math.min(safeOffset + safeLimit, safeTotal),
+    page: Math.floor(safeOffset / safeLimit) + 1,
+    pageCount: Math.max(1, Math.ceil(safeTotal / safeLimit)),
+  };
+}
 
 export function normalizeFloatingFilesQuery(value = {}) {
   if (!value || typeof value !== "object" || Array.isArray(value)) {

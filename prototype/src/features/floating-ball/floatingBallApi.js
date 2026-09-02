@@ -39,6 +39,10 @@ export function openMainFromFloating(fileId) {
   return invokeCommand("open_main_from_floating", { fileId });
 }
 
+export function showMainWindow() {
+  return invokeCommand("show_main_window");
+}
+
 export function listenFloatingEvent(eventName, handler) {
   return getCurrentWindow().listen(eventName, handler);
 }

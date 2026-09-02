@@ -2,7 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   FLOATING_LIBRARY_MAX_LIMIT,
+  formatFloatingFileSize,
+  formatFloatingTimestamp,
+  getFloatingPageSummary,
   normalizeFloatingFilesQuery,
+  normalizeFloatingSearchInput,
   queryFloatingFiles,
 } from "../src/features/floating-ball/floatingLibraryModel.js";
 
@@ -114,4 +118,39 @@ test("searches metadata, applies filters, sorts stably, and paginates without du
 test("resolves group metadata when the item only carries a group ID", () => {
   const result = queryFloatingFiles([{ ...items[0], groupName: undefined }], { query: "项目" }, [{ id: "group-work", name: "项目资料" }]);
   assert.equal(result.items[0].id, "file-zeta");
+});
+
+test("keeps search input safe and formats stable row and page metadata", () => {
+  assert.equal(normalizeFloatingSearchInput(" 项目\n资料\u0000 "), " 项目资料 ");
+  assert.equal(formatFloatingFileSize(1024), "1 KB");
+  assert.equal(formatFloatingFileSize(null), "大小未知");
+  assert.equal(formatFloatingTimestamp(null), "未记录");
+  assert.deepEqual(getFloatingPageSummary(20, 20, 41), {
+    start: 21,
+    end: 40,
+    page: 2,
+    pageCount: 3,
+  });
+});
+
+test("paginates the 50-item boundary and entries beyond it", () => {
+  const manyItems = Array.from({ length: 51 }, (_, index) => ({
+    ...items[0],
+    id: `many-${String(index).padStart(2, "0")}`,
+    name: `资料-${String(index).padStart(2, "0")}.txt`,
+  }));
+  for (const count of [1, 5, 6]) {
+    const boundary = queryFloatingFiles(manyItems.slice(0, count), { limit: 20 });
+    assert.equal(boundary.items.length, count);
+    assert.equal(boundary.hasMore, false);
+  }
+  const firstPage = queryFloatingFiles(manyItems.slice(0, 50), { limit: 20 });
+  const finalPage = queryFloatingFiles(manyItems, { offset: 40, limit: 20 });
+  assert.equal(firstPage.total, 50);
+  assert.equal(firstPage.items.length, 20);
+  assert.equal(firstPage.hasMore, true);
+  assert.equal(finalPage.total, 51);
+  assert.equal(finalPage.items.length, 11);
+  assert.equal(finalPage.items.at(-1).id, "many-50");
+  assert.equal(finalPage.hasMore, false);
 });

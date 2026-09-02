@@ -10,6 +10,7 @@ import {
   canUseFloatingBallRuntime,
   listenFloatingEvent,
   openMainFromFloating,
+  showMainWindow,
 } from "./floatingBallApi.js";
 import { FloatingBallPanel } from "./FloatingBallPanel.jsx";
 import {
@@ -111,7 +112,7 @@ export function FloatingBallWindow() {
       const revision = Number(event.payload?.revision || 0);
       if (revision <= latestRevisionRef.current) return;
       latestRevisionRef.current = revision;
-      void records.refreshRecent();
+      void records.refreshFiles({ background: true });
     }));
     return () => {
       disposed = true;
@@ -157,13 +158,30 @@ export function FloatingBallWindow() {
       showFeedback("该资料路径已失效，请在主窗口中重新定位", "partial-error");
       return;
     }
-    if (!IS_TAURI_RUNTIME) return;
+    if (!IS_TAURI_RUNTIME) {
+      showFeedback("浏览器演示仅展示文件库，未打开本地文件", "partial-error");
+      return;
+    }
     try {
       if (!await hoverController.explicitClose()) return;
       await openMainFromFloating(entry.id);
     } catch (error) {
       const message = typeof error === "string" ? error : error?.message;
       showFeedback(typeof message === "string" && message.length <= 180 ? message : "主窗口无法打开该资料", "error");
+    }
+  }
+
+  async function handleOpenLibrary() {
+    if (!IS_TAURI_RUNTIME) {
+      showFeedback("浏览器演示仅展示文件库，未打开主窗口", "partial-error");
+      return;
+    }
+    try {
+      if (!await hoverController.explicitClose()) return;
+      await showMainWindow();
+    } catch (error) {
+      const message = typeof error === "string" ? error : error?.message;
+      showFeedback(typeof message === "string" && message.length <= 180 ? message : "主窗口无法打开，请重试", "error");
     }
   }
 
@@ -183,8 +201,14 @@ export function FloatingBallWindow() {
   ) : null;
   const panel = panelOpen ? (
     <FloatingBallPanel
-      entries={records.entries}
-      entriesStatus={records.entriesStatus}
+      files={records.files}
+      filesStatus={records.filesStatus}
+      filesRefreshing={records.filesRefreshing}
+      query={records.query}
+      searchInput={records.searchInput}
+      total={records.total}
+      page={records.page}
+      emptyState={records.emptyState}
       libraryCount={records.libraryCount}
       libraryCountStatus={records.libraryCountStatus}
       status={status}
@@ -192,8 +216,17 @@ export function FloatingBallWindow() {
       favoriteBusyId={records.favoriteBusyId}
       onOpenFile={handleOpenFile}
       onToggleFavorite={records.handleFavorite}
-      onRetry={() => records.refreshRecent()}
+      onOpenLibrary={handleOpenLibrary}
+      onSearchChange={records.handleSearchInput}
+      onFilterChange={records.handleFilterChange}
+      onSortKeyChange={records.handleSortKeyChange}
+      onDirectionToggle={records.handleDirectionToggle}
+      onPreviousPage={records.handlePreviousPage}
+      onNextPage={records.handleNextPage}
+      onRetry={() => records.refreshFiles({ initial: true })}
       onClose={() => void hoverController.explicitClose()}
+      onClearSearch={records.clearSearch}
+      onClearFilters={records.clearFilters}
       onPointerEnter={handlePointerEnter}
       onPointerLeave={handlePointerLeave}
     />
