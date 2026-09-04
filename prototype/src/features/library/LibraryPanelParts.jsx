@@ -9,6 +9,7 @@ import {
   getDisplayType,
   getEntryLocation,
   getMetadataSearchHit,
+  getMetadataSearchHitFromResult,
   getSearchTextRanges,
 } from "./libraryModel";
 
@@ -137,7 +138,7 @@ export function getNavigationLabel(activeNav) {
   return { recent: "最近添加", "recent-opened": "最近打开", favorites: "收藏", invalid: "失效路径" }[activeNav] || "资料库";
 }
 
-export function SearchHitSummary({ entry, searchMode, searchResult, searchQuery, useRegex, directoryView, groups = [] }) {
+export function SearchHitSummary({ entry, searchMode, searchResult, metadataSearchResult, metadataSearchHit, searchQuery, useRegex, directoryView, groups = [] }) {
   if (!searchQuery) return null;
   if (searchMode === "content") {
     if (!searchResult) return null;
@@ -149,13 +150,17 @@ export function SearchHitSummary({ entry, searchMode, searchResult, searchQuery,
       </div>
     );
   }
-  const hit = getMetadataSearchHit(entry, searchQuery, { useRegex, directoryView, groups });
+  const hit = metadataSearchResult
+    ? getMetadataSearchHitFromResult(entry, metadataSearchHit, { directoryView, groups })
+    : getMetadataSearchHit(entry, searchQuery, { useRegex, directoryView, groups });
   if (!hit) return null;
-  const ranges = hit.key === "name" ? getSearchTextRanges(hit.value, searchQuery, useRegex) : [];
+  const ranges = metadataSearchResult
+    ? hit.key === "name" ? hit.ranges : []
+    : hit.key === "name" ? getSearchTextRanges(hit.value, searchQuery, useRegex) : [];
   return (
     <div className="search-hit-summary" aria-label={`命中${hit.label}`}>
       <span className="search-hit-field">命中{hit.label}</span>
-      {ranges.length > 0 && <HighlightedText text={hit.value} ranges={ranges} />}
+      {ranges.length > 0 && <HighlightedText text={hit.value} ranges={ranges} characterRanges={Boolean(metadataSearchResult)} />}
     </div>
   );
 }

@@ -23,6 +23,7 @@ export const RECENT_ENTRY_LIMIT = 50;
 export const RECENT_OPENED_ENTRY_LIMIT = 50;
 export const SEARCH_MODES = Object.freeze({ metadata: "metadata", content: "content" });
 export const MAX_SEARCH_QUERY_CHARS = 256;
+export const MAX_METADATA_FIELD_CHARS = 4096;
 
 export function getIndexEventDecision(currentRevision = 0, eventRevision) {
   const current = normalizeRevision(currentRevision);
@@ -63,7 +64,7 @@ export function normalizeRawSearchQuery(value) {
   return String(value ?? "").normalize("NFKC").trim();
 }
 
-export function validateSearchQuery(value, useRegex = false) {
+export function validateSearchQuery(value, useRegex = false, { validateRegex = true } = {}) {
   const query = normalizeRawSearchQuery(value);
   if ([...query].length > MAX_SEARCH_QUERY_CHARS) {
     return { valid: false, query, message: `搜索内容不能超过 ${MAX_SEARCH_QUERY_CHARS} 个字符` };
@@ -71,7 +72,7 @@ export function validateSearchQuery(value, useRegex = false) {
   if (/[\u0000-\u001f\u007f-\u009f]/.test(query)) {
     return { valid: false, query, message: "搜索内容不能包含控制字符" };
   }
-  if (useRegex && query) {
+  if (validateRegex && useRegex && query) {
     try {
       new RegExp(query, "iu");
     } catch {
@@ -79,6 +80,46 @@ export function validateSearchQuery(value, useRegex = false) {
     }
   }
   return { valid: true, query, message: "" };
+}
+
+export function buildMetadataSearchQuery({
+  activeNav = "library",
+  searchQuery = "",
+  useRegex = false,
+  filters = {},
+  directoryView = null,
+} = {}) {
+  const folder = directoryView?.trail?.at(-1);
+  const directoryId = folder?.directoryId || folder?.id;
+  return {
+    query: useRegex ? normalizeRawSearchQuery(searchQuery) : normalizeSearchQuery(searchQuery),
+    useRegex: Boolean(useRegex),
+    activeNav: String(activeNav || "library"),
+    filter: String(filters.type || ""),
+    groupIds: [...new Set((filters.groupIds || []).filter(Boolean).map(String))],
+    tags: [...new Set((filters.tags || []).filter(Boolean).map(String))],
+    targetDirectory: directoryId
+      ? {
+        directoryId: String(directoryId),
+        relativePath: Array.isArray(folder.relativePath) ? folder.relativePath.map(String) : [],
+      }
+      : null,
+  };
+}
+
+export function getMetadataSearchResponseDecision({
+  requestSequence,
+  currentSequence,
+  requestRevision,
+  responseRevision,
+  currentRevision,
+  requestContextKey,
+  currentContextKey,
+} = {}) {
+  if (requestSequence !== currentSequence) return "stale-request";
+  if (requestContextKey !== currentContextKey) return "stale-context";
+  if (responseRevision !== requestRevision || responseRevision !== currentRevision) return "stale-revision";
+  return "accept";
 }
 
 export { getExtension, getFileKind, getFileType };
@@ -225,6 +266,7 @@ export function filterEntries(
     searchMode = SEARCH_MODES.metadata,
     useRegex = false,
     contentMatchIds = new Set(),
+    metadataMatchIds = null,
   } = {},
 ) {
   const normalizedQuery = searchMode === SEARCH_MODES.content || useRegex
@@ -251,6 +293,11 @@ export function filterEntries(
       return contentMatchIds instanceof Set
         ? contentMatchIds.has(entry.id)
         : contentMatchIds.includes(entry.id);
+    }
+    if (metadataMatchIds != null) {
+      return metadataMatchIds instanceof Set
+        ? metadataMatchIds.has(entry.id)
+        : metadataMatchIds.includes(entry.id);
     }
     const fields = getSearchableEntryFields(entry, { directoryView, entryTags, groupNameById });
     if (useRegex) {
@@ -303,6 +350,18 @@ export function getMetadataSearchHit(entry, query, { useRegex = false, directory
     const value = normalizeSearchQuery(field.value);
     return tokens.every((token) => value.includes(token));
   }) || null;
+}
+
+export function getMetadataSearchHitFromResult(entry, result, { directoryView, groups = [] } = {}) {
+  if (!result || typeof result.field !== "string") return null;
+  const groupNameById = new Map(groups.map((group) => [group.id, group.name]));
+  const field = getSearchableEntryFields(entry, { directoryView, groupNameById })
+    .find((candidate) => candidate.key === result.field);
+  if (!field) return null;
+  return {
+    ...field,
+    ranges: Array.isArray(result.ranges) ? result.ranges : [],
+  };
 }
 
 export function getSearchTextRanges(value, query, useRegex = false) {

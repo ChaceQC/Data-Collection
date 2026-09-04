@@ -24,6 +24,7 @@ export function useIndexController({
   const [refreshError, setRefreshError] = useState("");
   const [indexRecovery, setIndexRecovery] = useState(null);
   const [diagnosticExporting, setDiagnosticExporting] = useState(false);
+  const [latestRevision, setLatestRevision] = useState(0);
   const latestRevisionRef = useRef(0);
   const reloadPromiseRef = useRef(null);
   const requestedRevisionRef = useRef(0);
@@ -40,6 +41,7 @@ export function useIndexController({
       : latestRevisionRef.current;
     if (getIndexSnapshotDecision(latestRevisionRef.current, revision) === "stale") return false;
     latestRevisionRef.current = revision;
+    setLatestRevision(revision);
     setFiles(loadedFiles);
     setGroups(Array.isArray(snapshot?.groups) ? snapshot.groups : []);
     setUndoStatus(snapshot?.undo || null);
@@ -196,6 +198,7 @@ export function useIndexController({
     indexReady,
     indexRecovery,
     indexing,
+    latestRevision,
     latestRevisionRef,
     refreshError,
     refreshing,

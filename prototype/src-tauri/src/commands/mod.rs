@@ -861,6 +861,52 @@ pub fn search_content(
 }
 
 #[tauri::command]
+pub async fn search_metadata(
+    query: storage::metadata_search::MetadataSearchQuery,
+    state: State<'_, AppState>,
+) -> Result<storage::metadata_search::MetadataSearchResponse, CommandError> {
+    let snapshot = state.snapshot().map_err(storage_command_error)?;
+    let entries = if let Some(target) = query.target_directory.as_ref() {
+        let directory_target = DirectoryTarget {
+            directory_id: target.directory_id.clone(),
+            relative_path: target.relative_path.clone(),
+        };
+        let (_, path) = resolve_directory_target(&state, &directory_target).map_err(|message| {
+            command_error(
+                "metadata-search-target-invalid",
+                message,
+                false,
+                "unchanged",
+            )
+        })?;
+        tauri::async_runtime::spawn_blocking(move || {
+            filesystem::list_directory(&path.to_string_lossy())
+        })
+        .await
+        .map_err(|_| {
+            command_error(
+                "metadata-search-unavailable",
+                "当前文件夹读取任务未完成，请重试",
+                true,
+                "unknown",
+            )
+        })?
+        .map_err(|_| {
+            command_error(
+                "metadata-search-target-invalid",
+                "当前文件夹内容无法读取，请刷新后重试",
+                true,
+                "unchanged",
+            )
+        })?
+    } else {
+        snapshot.entries
+    };
+    storage::metadata_search::search(&entries, &snapshot.groups, snapshot.revision, &query)
+        .map_err(metadata_search_error)
+}
+
+#[tauri::command]
 pub async fn rebuild_content_index(
     operation_id: String,
     state: State<'_, AppState>,
@@ -1058,6 +1104,15 @@ fn content_index_error(error: storage::content_index::ContentIndexError) -> Comm
         }
     };
     command_error(code, message, retryable, state)
+}
+
+fn metadata_search_error(error: storage::metadata_search::MetadataSearchError) -> CommandError {
+    command_error(
+        "invalid-metadata-query",
+        error.to_string(),
+        false,
+        "unchanged",
+    )
 }
 
 fn resolve_directory_target(

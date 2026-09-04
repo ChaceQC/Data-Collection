@@ -4,6 +4,7 @@ export const IPC_COMMANDS = Object.freeze([
   "load_file_index", "list_directory", "reveal_directory_child", "index_paths", "import_folders_recursive", "refresh_index", "get_index_recovery",
   "reset_index_recovery", "export_index_diagnostic", "reposition_file", "set_favorite",
   "content_index_status", "search_content", "rebuild_content_index", "clear_content_index", "cancel_content_index",
+  "search_metadata",
   "remove_index_entry", "copy_indexed_file", "open_indexed_file", "reveal_indexed_file",
   "rename_indexed_file", "delete_original_file", "set_entry_tags", "set_entry_group",
   "create_group", "rename_group", "delete_group", "batch_set_favorite",
@@ -22,6 +23,10 @@ export const PREVIEW_STATUSES = Object.freeze([
   "too-large", "converter-missing", "parse-error", "cancelled", "timed-out",
 ]);
 export const FLOATING_OPEN_ACTIONS = Object.freeze(["locate", "preview"]);
+const METADATA_SEARCH_FIELDS = new Set(["name", "type", "status", "location", "tag", "group"]);
+const MAX_METADATA_SEARCH_RESULTS = 20_000;
+const MAX_METADATA_SEARCH_FIELD_CHARS = 4096;
+const MAX_METADATA_SEARCH_RANGES = 64;
 
 const OPERATION_MESSAGES = Object.freeze({
   "entry-not-found": "资料已不存在，请刷新索引",
@@ -44,6 +49,9 @@ const OPERATION_MESSAGES = Object.freeze({
   "undo-unavailable": "撤销不可用，索引已经发生变化",
   "undo-conflict": "撤销目标已经发生变化，请先刷新索引",
   "invalid-content-query": "搜索表达式无效，请检查正则语法或缩短搜索内容",
+  "invalid-metadata-query": "元数据搜索表达式无效，请检查正则语法、筛选条件或缩短搜索内容",
+  "metadata-search-target-invalid": "当前文件夹内容无法搜索，请刷新后重试",
+  "metadata-search-unavailable": "元数据搜索暂时不可用，请重试",
   "content-index-recovery-required": "正文索引损坏，请重建正文索引",
   "content-index-unavailable": "正文索引暂不可用，请重试或重建正文索引",
   "content-index-stale": "正文索引任务已过期，请重建后重试",
@@ -242,6 +250,56 @@ export function parseContentIndexStatus(value, command = "content_index_status")
     sourceRevision: nonNegativeInteger(source.sourceRevision, command, "sourceRevision"),
     lastError: source.lastError == null ? null : string(source.lastError, command, "lastError"),
   };
+}
+
+export function parseMetadataSearchResponse(value, command = "search_metadata") {
+  const source = record(value, command);
+  if ("path" in source || "content" in source) throw contractError(command, "元数据搜索返回了禁止字段");
+  const revision = nonNegativeInteger(source.revision, command, "revision");
+  const matchedIds = opaqueIdArray(source.matchedIds, command, "matchedIds");
+  const matchedIdSet = new Set(matchedIds);
+  if (matchedIdSet.size !== matchedIds.length || matchedIds.length > MAX_METADATA_SEARCH_RESULTS) {
+    throw contractError(command, "元数据搜索 ID 结果无效");
+  }
+  const total = nonNegativeInteger(source.total, command, "total");
+  if (total > MAX_METADATA_SEARCH_RESULTS || matchedIds.length > total) {
+    throw contractError(command, "元数据搜索统计无效");
+  }
+  const truncated = boolean(source.truncated, command, "truncated");
+  if (truncated !== (matchedIds.length < total)) {
+    throw contractError(command, "元数据搜索截断状态无效");
+  }
+  const rawHits = array(source.hits, command);
+  if (rawHits.length > MAX_METADATA_SEARCH_RESULTS) {
+    throw contractError(command, "元数据命中结果过多");
+  }
+  const hits = rawHits.map((item) => {
+    const hit = record(item, command);
+    if ("path" in hit || "value" in hit || "content" in hit) {
+      throw contractError(command, "元数据命中包含禁止字段");
+    }
+    const fileId = assertOpaqueId(hit.fileId, "fileId");
+    const field = string(hit.field, command, "field");
+    if (!METADATA_SEARCH_FIELDS.has(field)) throw contractError(command, "元数据命中字段无效");
+    const ranges = array(hit.ranges, command).map((range) => {
+      const itemRange = record(range, command);
+      const start = nonNegativeInteger(itemRange.start, command, "start");
+      const end = nonNegativeInteger(itemRange.end, command, "end");
+      if (start >= end || end > MAX_METADATA_SEARCH_FIELD_CHARS) {
+        throw contractError(command, "元数据高亮范围无效");
+      }
+      return { start, end };
+    });
+    if (ranges.length > MAX_METADATA_SEARCH_RANGES) {
+      throw contractError(command, "元数据高亮范围过多");
+    }
+    return { fileId, field, ranges };
+  });
+  const hitIdSet = new Set(hits.map((hit) => hit.fileId));
+  if (hitIdSet.size !== hits.length || hits.some((hit) => !matchedIdSet.has(hit.fileId))) {
+    throw contractError(command, "元数据命中结果无效");
+  }
+  return { revision, matchedIds, hits, total, truncated };
 }
 
 export function parseContentSearchResponse(value, command = "search_content") {

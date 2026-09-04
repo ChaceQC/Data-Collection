@@ -453,6 +453,12 @@
           "markdownDescription": "Enables the search_content command without any pre-configured scope."
         },
         {
+          "description": "Enables the search_metadata command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-search-metadata",
+          "markdownDescription": "Enables the search_metadata command without any pre-configured scope."
+        },
+        {
           "description": "Enables the set_entry_group command without any pre-configured scope.",
           "type": "string",
           "const": "allow-set-entry-group",
@@ -775,6 +781,12 @@
           "type": "string",
           "const": "deny-search-content",
           "markdownDescription": "Denies the search_content command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the search_metadata command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-search-metadata",
+          "markdownDescription": "Denies the search_metadata command without any pre-configured scope."
         },
         {
           "description": "Denies the set_entry_group command without any pre-configured scope.",

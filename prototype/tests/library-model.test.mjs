@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  buildMetadataSearchQuery,
   filterEntries,
   clearSelectionOnContextChange,
   countEntriesInGroup,
@@ -8,6 +9,8 @@ import {
   getDuplicateNameIds,
   getEntryLocation,
   getLibraryContextKey,
+  getMetadataSearchHitFromResult,
+  getMetadataSearchResponseDecision,
   getParentSummary,
   getRecentEntries,
   getRecentOpenedEntries,
@@ -17,6 +20,7 @@ import {
   paginateEntries,
   retainExistingSelection,
   sortEntries,
+  validateSearchQuery,
 } from "../src/features/library/libraryModel.js";
 
 const entries = [
@@ -38,6 +42,57 @@ test("search normalizes whitespace and matches name, type, and status", () => {
     filterEntries(entries, { query: "研究计划" }).map((entry) => entry.id),
     ["c"],
   );
+});
+
+test("desktop metadata results filter by opaque ids and preserve controlled hit ranges", () => {
+  assert.equal(validateSearchQuery("[", true, { validateRegex: false }).valid, true);
+  assert.deepEqual(
+    filterEntries(entries, { query: "[", useRegex: true, metadataMatchIds: new Set(["a"]) }).map((entry) => entry.id),
+    ["a"],
+  );
+  const hit = getMetadataSearchHitFromResult(
+    { ...entries[0], name: "资料 10.txt" },
+    { fileId: "b", field: "name", ranges: [{ start: 0, end: 2 }] },
+  );
+  assert.equal(hit.key, "name");
+  assert.deepEqual(hit.ranges, [{ start: 0, end: 2 }]);
+});
+
+test("builds normalized metadata search context for the desktop command", () => {
+  assert.deepEqual(
+    buildMetadataSearchQuery({
+      activeNav: "favorites",
+      searchQuery: "  ＪＳ  ",
+      useRegex: false,
+      filters: { type: "代码或配置", tags: ["重点"], groupIds: ["group-a"] },
+      directoryView: { trail: [{ id: "folder-a", relativePath: ["项目"] }] },
+    }),
+    {
+      query: "js",
+      useRegex: false,
+      activeNav: "favorites",
+      filter: "代码或配置",
+      groupIds: ["group-a"],
+      tags: ["重点"],
+      targetDirectory: { directoryId: "folder-a", relativePath: ["项目"] },
+    },
+  );
+});
+
+test("accepts only the metadata response for the active request context and revision", () => {
+  const base = {
+    requestSequence: 3,
+    currentSequence: 3,
+    requestRevision: 8,
+    responseRevision: 8,
+    currentRevision: 8,
+    requestContextKey: "library",
+    currentContextKey: "library",
+  };
+  assert.equal(getMetadataSearchResponseDecision(base), "accept");
+  assert.equal(getMetadataSearchResponseDecision({ ...base, currentSequence: 4 }), "stale-request");
+  assert.equal(getMetadataSearchResponseDecision({ ...base, responseRevision: 7 }), "stale-revision");
+  assert.equal(getMetadataSearchResponseDecision({ ...base, currentContextKey: "favorites" }), "stale-context");
 });
 
 test("search includes safe indexed locations and keeps directory children relative", () => {

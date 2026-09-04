@@ -16,6 +16,7 @@ import {
   parseMutationResult,
   parseIndexSnapshot,
   parseFloatingFilesResult,
+  parseMetadataSearchResponse,
   parsePreviewResult,
 } from "../src/lib/ipcContracts.js";
 
@@ -78,6 +79,39 @@ test("validates preview status and maps structured operation errors", () => {
   assert.equal(parsePreviewResult({ previewId: "", kind: "text", status: "unsupported", content: null, byteLength: 0 }).status, "unsupported");
   assert.throws(() => parsePreviewResult({ previewId: "", kind: "text", status: "broken", content: null, byteLength: 0 }), IpcContractError);
   assert.equal(getOperationError({ code: "partial-success", message: "internal" }, "fallback"), "文件操作已部分完成，请刷新索引确认状态");
+});
+
+test("validates metadata search ids, hit fields, ranges, and privacy boundaries", () => {
+  const result = parseMetadataSearchResponse({
+    revision: 11,
+    matchedIds: ["file-1"],
+    hits: [{ fileId: "file-1", field: "name", ranges: [{ start: 0, end: 2 }] }],
+    total: 1,
+    truncated: false,
+  });
+  assert.equal(result.hits[0].field, "name");
+  assert.deepEqual(result.hits[0].ranges, [{ start: 0, end: 2 }]);
+  assert.throws(() => parseMetadataSearchResponse({
+    revision: 11,
+    matchedIds: ["file-1"],
+    hits: [{ fileId: "file-1", field: "location", value: "C:\\secret", ranges: [] }],
+    total: 1,
+    truncated: false,
+  }), IpcContractError);
+  assert.throws(() => parseMetadataSearchResponse({
+    revision: 11,
+    matchedIds: ["file-1"],
+    hits: [{ fileId: "file-1", field: "unknown", ranges: [] }],
+    total: 1,
+    truncated: false,
+  }), IpcContractError);
+  assert.throws(() => parseMetadataSearchResponse({
+    revision: 11,
+    matchedIds: ["file-1"],
+    hits: [],
+    total: 2,
+    truncated: false,
+  }), IpcContractError);
 });
 
 test("validates single-entry mutation responses used by tag and group editors", () => {

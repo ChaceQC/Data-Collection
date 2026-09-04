@@ -5,7 +5,7 @@ use thiserror::Error;
 
 use super::content_index::{ContentDocument, MAX_CONTENT_QUERY_CHARS};
 
-const MAX_REGEX_PROGRAM_BYTES: usize = 64 * 1024;
+pub(crate) const MAX_REGEX_PROGRAM_BYTES: usize = 64 * 1024;
 const MAX_MATCHES_PER_DOCUMENT: usize = 64;
 const MAX_SNIPPETS_PER_RESULT: usize = 3;
 const SNIPPET_CONTEXT_CHARS: usize = 72;

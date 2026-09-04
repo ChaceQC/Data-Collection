@@ -6,6 +6,7 @@ import {
   parseContentIndexRebuildResult,
   parseContentIndexStatus,
   parseContentSearchResponse,
+  parseMetadataSearchResponse,
   parseGroupMutationResult,
   parseIndexImportResult,
   parseRecursiveImportResult,
@@ -38,6 +39,9 @@ export const libraryRepository = Object.freeze({
   },
   searchContent(query, useRegex = false) {
     return invokeCommand("search_content", { query, useRegex }, parseContentSearchResponse);
+  },
+  searchMetadata(query) {
+    return invokeCommand("search_metadata", { query }, parseMetadataSearchResponse);
   },
   rebuildContentIndex(operationId) {
     return invokeCommand("rebuild_content_index", { operationId }, parseContentIndexRebuildResult);

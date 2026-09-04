@@ -111,6 +111,7 @@ pub fn run() {
             commands::refresh_index,
             commands::content_index_status,
             commands::search_content,
+            commands::search_metadata,
             commands::rebuild_content_index,
             commands::clear_content_index,
             commands::cancel_content_index,

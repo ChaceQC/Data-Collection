@@ -248,7 +248,7 @@ function App() {
     onSettingsChanged: handleSettingsChanged,
     showToast,
   });
-  const { files, groups, indexReady, indexRecovery, indexing, refreshing, refreshError, diagnosticExporting, undoStatus } = index;
+  const { files, groups, indexReady, indexRecovery, indexing, latestRevision, refreshing, refreshError, diagnosticExporting, undoStatus } = index;
   const { activeNav, clearFocusRequest, directoryError, directoryLoading, directoryView, focusRequest, handleRowClick, handleRowKeyDown, openBreadcrumb, previewEntryId, retryDirectory, searchQuery, selectNav, selectedId, setSearchQuery } = navigation;
   const { addTag, batchBusy, busyFileId, canRetryOperation, choosePaths, closePendingAction, confirmBatchRemove, confirmDelete, confirmFolderImport, confirmGroup, confirmRemove, confirmRename, confirmTags, createGroup, deleteGroup, dragActive, fileInputRef, folderInputRef, groupBusy, groupDraft, handleBatchFavorite, handleBatchGroup, handleBatchTags, handleCancelBatch, handleCancelImport, handleCopy, handleCopyLocation, handleDragLeave, handleDragOver, handleDrop, handleFavorite, handleOpenDefault, handleReveal, handleRetryBatch, handleUndo, openRepositionPicker, pendingAction, recursiveImportProgress, repositionInputRef, repositionInvalidPath, removeTag, renameName, renameGroup, renameValidation, requestBatchRemove, requestDelete, requestEditTags, requestRemove, requestRename, requestSetGroup, retryBatch, retryOperation, setGroupDraft, setRenameName, setTagInput, tagDraft, tagInput } = actions;
   const { floatingWindowError, floatingWindowRetrying, handleWindowAction, retryFloatingBall } = windowController;
@@ -499,6 +499,8 @@ function App() {
 
         <LibraryPanel
           files={files}
+          isTauriRuntime={IS_TAURI_RUNTIME}
+          indexRevision={latestRevision}
           groups={groups}
           activeNav={activeNav}
           searchQuery={searchQuery}

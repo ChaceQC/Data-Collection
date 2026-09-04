@@ -3,7 +3,7 @@ export type PreviewStatus = "idle" | "loading" | "ready" | "unsupported" | "miss
 export type FloatingOpenAction = "locate" | "preview";
 export type IpcCommand =
   | "load_file_index" | "list_directory" | "reveal_directory_child" | "index_paths" | "import_folders_recursive" | "refresh_index"
-  | "content_index_status" | "search_content" | "rebuild_content_index" | "clear_content_index" | "cancel_content_index" | "get_index_recovery"
+  | "content_index_status" | "search_content" | "search_metadata" | "rebuild_content_index" | "clear_content_index" | "cancel_content_index" | "get_index_recovery"
   | "reset_index_recovery" | "export_index_diagnostic" | "reposition_file" | "set_favorite"
   | "remove_index_entry" | "copy_indexed_file" | "open_indexed_file" | "reveal_indexed_file"
   | "rename_indexed_file" | "delete_original_file" | "set_entry_tags" | "set_entry_group"
@@ -147,6 +147,42 @@ export interface ContentSearchResult {
 export interface ContentSearchResponse {
   status: ContentIndexStatus;
   results: ContentSearchResult[];
+}
+
+export type MetadataSearchField = "name" | "type" | "status" | "location" | "tag" | "group";
+
+export interface MetadataSearchTarget {
+  directoryId: string;
+  relativePath: string[];
+}
+
+export interface MetadataSearchQuery {
+  query: string;
+  useRegex: boolean;
+  activeNav: "library" | "recent" | "recent-opened" | "favorites" | "invalid";
+  filter: string;
+  groupIds: string[];
+  tags: string[];
+  targetDirectory: MetadataSearchTarget | null;
+}
+
+export interface MetadataTextRange {
+  start: number;
+  end: number;
+}
+
+export interface MetadataSearchHit {
+  fileId: string;
+  field: MetadataSearchField;
+  ranges: MetadataTextRange[];
+}
+
+export interface MetadataSearchResponse {
+  revision: number;
+  matchedIds: string[];
+  hits: MetadataSearchHit[];
+  total: number;
+  truncated: boolean;
 }
 
 export interface ContentIndexRebuildResult {

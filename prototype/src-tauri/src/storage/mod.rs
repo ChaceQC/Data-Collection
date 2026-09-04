@@ -17,6 +17,7 @@ pub(crate) mod content_index;
 pub(crate) mod content_search;
 pub(crate) mod floating_ball;
 pub(crate) mod floating_files;
+pub(crate) mod metadata_search;
 pub(crate) mod operation_history;
 #[cfg(not(test))]
 pub(crate) mod repository;

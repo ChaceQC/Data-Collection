@@ -20,6 +20,7 @@ import {
 } from "@phosphor-icons/react";
 import { BulkLibraryToolbar } from "./LibraryActions";
 import { LibraryRowActions } from "./LibraryRowActionMenu.jsx";
+import { useMetadataSearchController } from "./useMetadataSearchController.js";
 import {
   EmptyState,
   EntryLocation,
@@ -73,6 +74,8 @@ function FileTypeIcon({ kind }) {
 }
 export function LibraryPanel({
   files,
+  isTauriRuntime = false,
+  indexRevision = 0,
   groups = [],
   activeNav,
   searchQuery,
@@ -151,12 +154,34 @@ export function LibraryPanel({
   const refreshScrollTopRef = useRef(0);
   const selectedRowRef = useRef(null);
   const handledFocusRequestRef = useRef(0);
+  const metadataSearch = useMetadataSearchController({
+    isTauriRuntime,
+    indexRevision,
+    activeNav,
+    searchQuery,
+    searchMode,
+    useRegex,
+    filters,
+    directoryView,
+  });
   const sourceEntries = directoryView?.entries || files;
   const contextKey = useMemo(() => getLibraryContextKey({ activeNav, searchQuery, searchMode, useRegex, filters, directoryView }), [activeNav, directoryView, filters, searchMode, searchQuery, useRegex]);
   const contentMatchIds = useMemo(() => new Set(contentSearchResults.map((result) => result.fileId).filter(Boolean)), [contentSearchResults]);
   const contentResultById = useMemo(() => new Map(contentSearchResults.map((result) => [result.fileId, result])), [contentSearchResults]);
-  const searchValidation = validateSearchQuery(searchQuery, useRegex);
-  const metadataSearchError = searchMode === SEARCH_MODES.metadata && !searchValidation.valid ? searchValidation.message : "";
+  const searchValidation = validateSearchQuery(searchQuery, useRegex, { validateRegex: !isTauriRuntime });
+  const activeMetadataSearchResult = metadataSearch.result
+    && metadataSearch.resultContextKey === contextKey
+    && metadataSearch.result.revision === indexRevision
+    ? metadataSearch.result
+    : null;
+  const metadataMatchIds = useMemo(() => {
+    if (activeMetadataSearchResult) return new Set(activeMetadataSearchResult.matchedIds);
+    if (isTauriRuntime && searchMode === SEARCH_MODES.metadata && searchValidation.query) return new Set();
+    return null;
+  }, [activeMetadataSearchResult, indexRevision, isTauriRuntime, searchMode, searchValidation.query]);
+  const metadataSearchError = searchMode === SEARCH_MODES.metadata
+    ? metadataSearch.error || (!searchValidation.valid ? searchValidation.message : "")
+    : "";
   const visibleFiles = useMemo(() => {
     const filtered = filterEntries(sourceEntries, {
       activeNav,
@@ -170,12 +195,20 @@ export function LibraryPanel({
       searchMode,
       useRegex,
       contentMatchIds,
+      metadataMatchIds,
     });
     const directorySort = sort.key === "addedAt" ? { key: "name", direction: "asc" } : sort;
     if (!directoryView && activeNav === "recent-opened") return filtered;
     return sortEntries(filtered, directoryView ? directorySort : sort);
   }, [activeNav, contentMatchIds, directoryView, filters, groups, searchMode, searchQuery, sort, sourceEntries, useRegex]);
   const page = useMemo(() => paginateEntries(visibleFiles, currentPage, pageSize), [currentPage, pageSize, visibleFiles]);
+  const visiblePageIds = useMemo(() => new Set(page.entries.map((entry) => entry.id)), [page.entries]);
+  const metadataResultById = useMemo(
+    () => new Map((activeMetadataSearchResult?.hits || [])
+      .filter((result) => visiblePageIds.has(result.fileId))
+      .map((result) => [result.fileId, result])),
+    [activeMetadataSearchResult, visiblePageIds],
+  );
   const duplicateIds = useMemo(() => getDuplicateNameIds(sourceEntries), [sourceEntries]);
   const selectedIdSet = useMemo(() => new Set(selectedIds), [selectedIds]);
   const selectablePageIds = directoryView ? [] : page.entries.map((file) => file.id);
@@ -395,7 +428,7 @@ export function LibraryPanel({
 
       {!directoryView && selectedIds.length > 0 && <BulkLibraryToolbar selectedIds={selectedIds} visibleSelectedCount={visibleSelectedCount} groups={groups} busy={batchBusy} retryBatch={retryBatch} undoStatus={undoStatus} onBatchFavorite={onBatchFavorite} onBatchGroup={onBatchGroup} onBatchTags={onBatchTags} onBatchRemove={onBatchRemove} onUndo={onUndo} onRetry={onRetryBatch} onCancelBatch={onCancelBatch} onClear={onClearSelection} />}
 
-      {!indexReady ? <EmptyState icon={<Clock size={28} weight="regular" />} title="正在读取本地索引" description="请稍候。" /> : directoryLoading ? <EmptyState icon={<Clock size={28} weight="regular" />} title="正在读取文件夹" description="请稍候。" /> : directoryError ? <div className="empty-state" role="alert"><WarningCircle size={28} weight="fill" aria-hidden="true" /><strong>无法进入文件夹</strong><span>{directoryError.message}</span><div className="empty-state-actions">{directoryError.retryable !== false && <button type="button" className="text-button" onClick={onRetryDirectory}>重新读取</button>}{onReposition && directoryError.folder && <button type="button" className="text-button" onClick={() => onReposition(directoryError.folder)}>重新定位</button>}<button type="button" className="text-button" onClick={() => onOpenBreadcrumb(-1)}>返回资料库</button></div></div> : contentSearchLoading && searchMode === SEARCH_MODES.content && searchQuery ? <EmptyState icon={<Clock size={28} weight="regular" />} title="正在搜索正文" description="请稍候。" /> : visibleFiles.length ? (
+      {!indexReady ? <EmptyState icon={<Clock size={28} weight="regular" />} title="正在读取本地索引" description="请稍候。" /> : directoryLoading ? <EmptyState icon={<Clock size={28} weight="regular" />} title="正在读取文件夹" description="请稍候。" /> : directoryError ? <div className="empty-state" role="alert"><WarningCircle size={28} weight="fill" aria-hidden="true" /><strong>无法进入文件夹</strong><span>{directoryError.message}</span><div className="empty-state-actions">{directoryError.retryable !== false && <button type="button" className="text-button" onClick={onRetryDirectory}>重新读取</button>}{onReposition && directoryError.folder && <button type="button" className="text-button" onClick={() => onReposition(directoryError.folder)}>重新定位</button>}<button type="button" className="text-button" onClick={() => onOpenBreadcrumb(-1)}>返回资料库</button></div></div> : metadataSearch.loading && searchMode === SEARCH_MODES.metadata && searchQuery ? <EmptyState icon={<Clock size={28} weight="regular" />} title="正在搜索资料" description="请稍候。" /> : contentSearchLoading && searchMode === SEARCH_MODES.content && searchQuery ? <EmptyState icon={<Clock size={28} weight="regular" />} title="正在搜索正文" description="请稍候。" /> : visibleFiles.length ? (
         <div className="file-table">
           <div ref={tableScrollRef} className="file-table-scroll" data-testid="recent-list">
             <table className="file-table-grid">
@@ -418,7 +451,7 @@ export function LibraryPanel({
                           {duplicateIds.has(file.id) && <span className="file-parent-summary" title={getParentSummary(file, directoryView)}>位于 {getParentSummary(file, directoryView)}</span>}
                           <EntryLocation entry={file} directoryView={directoryView} onCopy={onCopyLocation} onReveal={onReveal} />
                            <EntryMetadata entry={file} onTagClick={onTagFilter} />
-                           <SearchHitSummary entry={file} searchMode={searchMode} searchResult={contentResultById.get(file.id)} searchQuery={searchQuery} useRegex={useRegex} directoryView={directoryView} groups={groups} />
+                           <SearchHitSummary entry={file} searchMode={searchMode} searchResult={contentResultById.get(file.id)} metadataSearchResult={activeMetadataSearchResult} metadataSearchHit={metadataResultById.get(file.id)} searchQuery={searchQuery} useRegex={useRegex} directoryView={directoryView} groups={groups} />
                         </div>
                       </div>
                     </th>
