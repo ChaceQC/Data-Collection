@@ -686,7 +686,10 @@ pub async fn copy_indexed_file(
     }
     let name = entry.name.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let (source, _) = operations::validate_indexed_file(&entry).map_err(operation_error)?;
+        let (_source, metadata) =
+            operations::validate_indexed_file(&entry).map_err(operation_error)?;
+        let (source, _) =
+            operations::revalidate_indexed_file(&entry, &metadata).map_err(operation_error)?;
         clipboard::set_file(&source).map_err(|error| {
             command_error("clipboard-failed", error.to_string(), true, "unchanged")
         })
@@ -724,10 +727,11 @@ pub async fn open_indexed_file(
     }
     let name = entry.name.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let (path, _) = operations::validate_indexed_file(&entry).map_err(operation_error)?;
-        external::open_with_default(&path).map_err(|error| {
-            command_error("external-open-failed", error.to_string(), true, "unchanged")
-        })
+        let (_path, metadata) =
+            operations::validate_indexed_file(&entry).map_err(operation_error)?;
+        let (path, metadata) =
+            operations::revalidate_indexed_file(&entry, &metadata).map_err(operation_error)?;
+        external::open_with_default(&path, &metadata).map_err(external_error)
     })
     .await
     .map_err(|_| {
@@ -755,23 +759,11 @@ pub async fn reveal_indexed_file(
     let is_directory = entry.kind == "folder";
     let name = entry.name.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let path = if is_directory {
-            filesystem::validate_directory_path(&entry.path).map_err(|error| {
-                command_error(
-                    "source-invalid",
-                    map_path_validation_error(error),
-                    true,
-                    "unchanged",
-                )
-            })?
-        } else {
-            operations::validate_indexed_file(&entry)
-                .map_err(operation_error)?
-                .0
-        };
-        external::reveal_in_explorer(&path, is_directory).map_err(|error| {
-            command_error("external-open-failed", error.to_string(), true, "unchanged")
-        })
+        let (_path, metadata) =
+            operations::validate_indexed_entry(&entry).map_err(operation_error)?;
+        let (path, metadata) =
+            operations::revalidate_indexed_entry(&entry, &metadata).map_err(operation_error)?;
+        external::reveal_in_explorer(&path, is_directory, &metadata).map_err(external_error)
     })
     .await
     .map_err(|_| {
@@ -806,13 +798,14 @@ pub async fn rename_indexed_file(
         ));
     }
     let operation = tauri::async_runtime::spawn_blocking(move || {
-        let (source, _) = operations::validate_indexed_file(&entry).map_err(operation_error)?;
+        let (source, source_metadata) =
+            operations::validate_indexed_file(&entry).map_err(operation_error)?;
         let target = operations::validate_new_name(&source, &new_name).map_err(operation_error)?;
-        operations::rename_file(&source, &target).map_err(operation_error)?;
+        operations::rename_file(&source, &target, &source_metadata).map_err(operation_error)?;
         let mut replacement = match filesystem::index_selected_path(&target.to_string_lossy()) {
             Ok(replacement) => replacement,
             Err(_) => {
-                let _ = operations::restore_renamed_file(&target, &source);
+                let _ = operations::restore_renamed_file(&target, &source, &source_metadata);
                 return Err(command_error(
                     "metadata-failed",
                     "文件已重命名，但无法读取新文件元数据",
@@ -829,11 +822,16 @@ pub async fn rename_indexed_file(
         replacement.last_opened_at = entry.last_opened_at;
         replacement.tags = entry.tags.clone();
         replacement.group_id = entry.group_id.clone();
-        Ok::<(PathBuf, PathBuf, IndexEntry), CommandError>((source, target, replacement))
+        Ok::<(PathBuf, PathBuf, IndexEntry, std::fs::Metadata), CommandError>((
+            source,
+            target,
+            replacement,
+            source_metadata,
+        ))
     })
     .await
     .map_err(|_| command_error("task-failed", "重命名任务未完成，请重试", true, "unchanged"))??;
-    let (source, target, replacement) = operation;
+    let (source, target, replacement, source_metadata) = operation;
     let outcome = repository.update_entries_with(|entries| {
         let current = entries
             .iter_mut()
@@ -856,7 +854,7 @@ pub async fn rename_indexed_file(
             })
         }
         Err(error) => {
-            if operations::restore_renamed_file(&target, &source) {
+            if operations::restore_renamed_file(&target, &source, &source_metadata) {
                 Err(structured_storage_error(error))
             } else {
                 Err(command_error(
@@ -897,12 +895,13 @@ pub async fn delete_original_file(
             "unchanged",
         ));
     }
-    let (source, _) = operations::validate_indexed_file(&entry).map_err(operation_error)?;
+    let (source, source_metadata) =
+        operations::validate_indexed_file(&entry).map_err(operation_error)?;
     repository
         .prepare_delete(&file_id, &source)
         .map_err(structured_storage_error)?;
     let delete_result = tauri::async_runtime::spawn_blocking(move || {
-        operations::delete_to_recycle_bin(&source).map_err(operation_error)
+        operations::delete_to_recycle_bin(&source, &source_metadata).map_err(operation_error)
     })
     .await
     .map_err(|_| command_error("task-failed", "删除任务未完成，请重试", true, "unknown"))?;
@@ -964,6 +963,7 @@ fn find_entry(repository: &IndexRepository<'_>, file_id: &str) -> Result<IndexEn
 fn operation_error(error: operations::FileOperationError) -> CommandError {
     let (code, retryable, state) = match &error {
         operations::FileOperationError::SourceMissing => ("source-missing", false, "unchanged"),
+        operations::FileOperationError::SourceChanged => ("source-changed", true, "unchanged"),
         operations::FileOperationError::SourcePermissionDenied => {
             ("source-permission-denied", true, "unchanged")
         }
@@ -984,16 +984,10 @@ fn operation_error(error: operations::FileOperationError) -> CommandError {
     command_error(code, error.to_string(), retryable, state)
 }
 
-fn map_path_validation_error(error: filesystem::PathValidationError) -> String {
-    match error {
-        filesystem::PathValidationError::Missing => {
-            "资料路径已失效，请先重新定位或重新导入".to_string()
-        }
-        filesystem::PathValidationError::PermissionDenied => {
-            "没有访问资料路径的权限，请检查文件权限".to_string()
-        }
-        filesystem::PathValidationError::Invalid => {
-            "资料路径不是可访问的普通文件或文件夹".to_string()
-        }
+fn external_error(error: external::ExternalOpenError) -> CommandError {
+    if matches!(error, external::ExternalOpenError::TargetChanged) {
+        command_error("source-changed", error.to_string(), true, "unchanged")
+    } else {
+        command_error("external-open-failed", error.to_string(), true, "unchanged")
     }
 }

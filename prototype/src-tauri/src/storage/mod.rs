@@ -13,6 +13,9 @@ use uuid::Uuid;
 
 use crate::filesystem::IndexEntry;
 
+use self::app_data::{AppDataError, AppDataFile};
+
+pub(crate) mod app_data;
 pub(crate) mod content_index;
 pub(crate) mod content_search;
 pub(crate) mod floating_ball;
@@ -269,8 +272,7 @@ pub struct FloatingRecentEntry {
 
 impl AppState {
     pub fn initialize(&self, index_path: PathBuf) -> Result<(), StorageError> {
-        let parent = index_path.parent().ok_or(StorageError::DataDirectory)?;
-        fs::create_dir_all(parent).map_err(|_| StorageError::DataDirectory)?;
+        app_data::ensure_parent(&index_path).map_err(|_| StorageError::DataDirectory)?;
         let (entries, groups, undo_log, revision, mut recovery) =
             match load_index_document(&index_path) {
                 Ok((entries, groups, undo_log, revision)) => {
@@ -289,7 +291,7 @@ impl AppState {
                         0,
                         Some(RecoveryInfo {
                             issue: issue.to_string(),
-                            backup_created: backup_file(&index_path),
+                            backup_created: backup_file(&index_path, AppDataFile::Index),
                         }),
                     )
                 }
@@ -303,7 +305,7 @@ impl AppState {
                         revision,
                         Some(RecoveryInfo {
                             issue: "索引格式迁移未完成".to_string(),
-                            backup_created: backup_file(&index_path),
+                            backup_created: backup_file(&index_path, AppDataFile::Index),
                         }),
                     )
                 }
@@ -313,8 +315,9 @@ impl AppState {
         let pending_operations = match load_pending_operations(&pending_path) {
             Ok(operations) => operations,
             Err(StorageError::Corrupt | StorageError::UnsupportedVersion) => {
-                let backup_created = backup_file(&pending_path);
-                let repaired = save_pending_operations(&pending_path, &[]).is_ok();
+                let backup_created = backup_file(&pending_path, AppDataFile::PendingOperations);
+                let repaired =
+                    backup_created && save_pending_operations(&pending_path, &[]).is_ok();
                 if recovery.is_none() {
                     recovery = Some(RecoveryInfo {
                         issue: "待同步操作记录损坏".to_string(),
@@ -763,7 +766,7 @@ pub fn load_entries(path: &Path) -> Result<Vec<IndexEntry>, StorageError> {
 fn load_index_document(path: &Path) -> Result<IndexDocumentParts, StorageError> {
     let (entries, groups, undo_log, revision, needs_save) = read_index_document(path)?;
     if needs_save {
-        if fs::symlink_metadata(path).is_ok() && !backup_file(path) {
+        if !backup_file(path, AppDataFile::Index) {
             return Err(StorageError::Write);
         }
         save_index_document(path, &entries, &groups, &undo_log, revision)?;
@@ -772,17 +775,10 @@ fn load_index_document(path: &Path) -> Result<IndexDocumentParts, StorageError> 
 }
 
 fn read_index_document(path: &Path) -> Result<ReadIndexDocument, StorageError> {
-    let metadata = match fs::symlink_metadata(path) {
-        Ok(metadata) => metadata,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            return Ok((Vec::new(), Vec::new(), Vec::new(), 0, false));
-        }
-        Err(_) => return Err(StorageError::Read),
+    let Some(bytes) = app_data::read(path, AppDataFile::Index).map_err(map_app_data_read_error)?
+    else {
+        return Ok((Vec::new(), Vec::new(), Vec::new(), 0, false));
     };
-    if crate::filesystem::is_unsafe_metadata(&metadata) || !metadata.is_file() {
-        return Err(StorageError::Corrupt);
-    }
-    let bytes = fs::read(path).map_err(|_| StorageError::Read)?;
     let document =
         serde_json::from_slice::<IndexDocument>(&bytes).map_err(|_| StorageError::Corrupt)?;
     let mut entries = document.entries;
@@ -832,9 +828,7 @@ fn save_index_document(
         undo_log: undo_log.to_vec(),
     };
     let encoded = serde_json::to_vec_pretty(&document).map_err(|_| StorageError::Write)?;
-    let mut file = AtomicWriteFile::open(path).map_err(|_| StorageError::Write)?;
-    std::io::Write::write_all(file.as_file_mut(), &encoded).map_err(|_| StorageError::Write)?;
-    file.commit().map_err(|_| StorageError::Write)
+    app_data::write(path, AppDataFile::Index, &encoded).map_err(|_| StorageError::Write)
 }
 
 fn save_index_state(path: &Path, state: &IndexStateData) -> Result<(), StorageError> {
@@ -1346,6 +1340,7 @@ fn validate_entries(entries: &[IndexEntry], groups: &[Group]) -> Result<(), Stor
         if entry.id.trim().is_empty()
             || !ids.insert(entry.id.clone())
             || entry.path.trim().is_empty()
+            || entry.path.len() > crate::filesystem::recursive_import::MAX_PATH_BYTES
             || !paths.insert(crate::filesystem::path_identity(&entry.path))
             || entry.name.trim().is_empty()
             || path_name != entry.name
@@ -1461,6 +1456,7 @@ fn validate_entry_shape(entry: &IndexEntry) -> Result<(), StorageError> {
         .unwrap_or_default();
     if !is_valid_opaque_id(&entry.id)
         || entry.path.trim().is_empty()
+        || entry.path.len() > crate::filesystem::recursive_import::MAX_PATH_BYTES
         || entry.name.trim().is_empty()
         || path_name != entry.name
         || entry.size > MAX_INDEXED_SIZE_BYTES
@@ -1601,29 +1597,26 @@ fn path_exists(path: &str) -> bool {
 }
 
 fn load_pending_operations(path: &Path) -> Result<Vec<PendingOperation>, StorageError> {
-    let metadata = match fs::symlink_metadata(path) {
-        Ok(metadata) => metadata,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            return Ok(Vec::new());
-        }
-        Err(_) => return Err(StorageError::Read),
+    let Some(bytes) =
+        app_data::read(path, AppDataFile::PendingOperations).map_err(map_app_data_read_error)?
+    else {
+        return Ok(Vec::new());
     };
-    if crate::filesystem::is_unsafe_metadata(&metadata) || !metadata.is_file() {
-        return Err(StorageError::Corrupt);
-    }
-    let bytes = fs::read(path).map_err(|_| StorageError::Read)?;
     let document =
         serde_json::from_slice::<PendingDocument>(&bytes).map_err(|_| StorageError::Corrupt)?;
     if document.version != 1 {
         return Err(StorageError::UnsupportedVersion);
     }
-    if document.operations.iter().any(|operation| {
-        operation.file_id.trim().is_empty()
-            || operation.operation != "delete-original"
-            || !matches!(operation.state.as_str(), "prepared" | "physical-complete")
-            || operation.path.trim().is_empty()
-            || operation.created_at <= 0
-    }) {
+    if document.operations.len() > MAX_PENDING_OPERATIONS
+        || document.operations.iter().any(|operation| {
+            !is_valid_opaque_id(&operation.file_id)
+                || operation.operation != "delete-original"
+                || !matches!(operation.state.as_str(), "prepared" | "physical-complete")
+                || operation.path.trim().is_empty()
+                || operation.path.len() > crate::filesystem::recursive_import::MAX_PATH_BYTES
+                || !(1..=MAX_TIMESTAMP_MILLIS).contains(&operation.created_at)
+        })
+    {
         return Err(StorageError::Corrupt);
     }
     Ok(document.operations)
@@ -1633,50 +1626,40 @@ fn save_pending_operations(
     path: &Path,
     operations: &[PendingOperation],
 ) -> Result<(), StorageError> {
+    if operations.len() > MAX_PENDING_OPERATIONS
+        || operations.iter().any(|operation| {
+            !is_valid_opaque_id(&operation.file_id)
+                || operation.operation != "delete-original"
+                || !matches!(operation.state.as_str(), "prepared" | "physical-complete")
+                || operation.path.trim().is_empty()
+                || operation.path.len() > crate::filesystem::recursive_import::MAX_PATH_BYTES
+                || !(1..=MAX_TIMESTAMP_MILLIS).contains(&operation.created_at)
+        })
+    {
+        return Err(StorageError::Write);
+    }
     if operations.is_empty() {
-        if path.exists() {
-            fs::remove_file(path).map_err(|_| StorageError::Write)?;
-        }
-        return Ok(());
+        return app_data::remove(path).map_err(|_| StorageError::Write);
     }
     let document = PendingDocument {
         version: 1,
         operations: operations.to_vec(),
     };
     let encoded = serde_json::to_vec_pretty(&document).map_err(|_| StorageError::Write)?;
-    let mut file = AtomicWriteFile::open(path).map_err(|_| StorageError::Write)?;
-    std::io::Write::write_all(file.as_file_mut(), &encoded).map_err(|_| StorageError::Write)?;
-    file.commit().map_err(|_| StorageError::Write)
+    app_data::write(path, AppDataFile::PendingOperations, &encoded).map_err(|_| StorageError::Write)
 }
 
-fn backup_file(path: &Path) -> bool {
-    let Ok(metadata) = fs::symlink_metadata(path) else {
-        return false;
-    };
-    if crate::filesystem::is_unsafe_metadata(&metadata) || !metadata.is_file() {
-        return false;
+fn backup_file(path: &Path, file_kind: AppDataFile) -> bool {
+    app_data::backup(path, file_kind)
+}
+
+const MAX_PENDING_OPERATIONS: usize = 500;
+
+fn map_app_data_read_error(error: AppDataError) -> StorageError {
+    match error {
+        AppDataError::TooLarge | AppDataError::Unsafe => StorageError::Corrupt,
+        AppDataError::Read | AppDataError::Write | AppDataError::Directory => StorageError::Read,
     }
-    let timestamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_nanos())
-        .unwrap_or_default();
-    for attempt in 0..3_u32 {
-        let backup = path.with_file_name(format!(
-            "{}.recovery-{}-{}.bak",
-            path.file_name()
-                .and_then(|name| name.to_str())
-                .unwrap_or("index"),
-            timestamp,
-            attempt
-        ));
-        if backup.exists() {
-            continue;
-        }
-        if fs::copy(path, backup).is_ok() {
-            return true;
-        }
-    }
-    false
 }
 
 #[cfg(test)]

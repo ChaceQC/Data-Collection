@@ -10,6 +10,9 @@ mod lifecycle_policy_tests;
 mod monitor_tests;
 #[cfg_attr(test, allow(dead_code))]
 mod preview;
+#[cfg(test)]
+#[path = "windows/single_instance.rs"]
+mod single_instance_tests;
 #[cfg_attr(test, allow(dead_code))]
 mod storage;
 #[cfg(test)]
@@ -27,6 +30,9 @@ use tauri::{Emitter, Manager};
 #[cfg(not(test))]
 pub fn run() {
     let result = tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+            windows::single_instance::handle(app, args);
+        }))
         .plugin(tauri_plugin_dialog::init())
         .register_uri_scheme_protocol(preview::RESOURCE_SCHEME, |_context, request| {
             let state = _context.app_handle().state::<preview::PreviewState>();
@@ -50,6 +56,8 @@ pub fn run() {
                 .path()
                 .app_data_dir()
                 .map_err(|_| Error::other("无法使用应用数据目录"))?;
+            storage::app_data::ensure_directory(&data_dir)
+                .map_err(|_| Error::other("应用数据目录不可用"))?;
             app.state::<storage::AppState>()
                 .initialize(data_dir.join("index.json"))
                 .map_err(|error| Error::other(error.to_string()))?;

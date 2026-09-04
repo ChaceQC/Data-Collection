@@ -4,6 +4,7 @@ import {
   getOperationError,
   invokeCommand,
   parseFloatingOpenEvent,
+  parseIndexImportResult,
   parseIndexChangedEvent,
   parseRevisionEvent,
   parseSettingsChangedEvent,
@@ -48,6 +49,15 @@ export function useWindowController({
       const payload = safeParse(parseIndexChangedEvent, event.payload, "index-changed");
       if (payload) handlersRef.current.onIndexChanged(payload.revision);
     }));
+    register(getCurrentWindow().listen("single-instance-imported", (event) => {
+      const payload = safeParse(parseIndexImportResult, event.payload, "single-instance-imported");
+      if (!payload) return;
+      handlersRef.current.onIndexChanged(payload.revision);
+      showToastRef.current(`已处理第二个实例的导入请求：新增 ${payload.indexedCount} 项，刷新 ${payload.refreshedCount} 项，跳过 ${payload.skippedCount} 项`);
+    }));
+    register(getCurrentWindow().listen("single-instance-error", (event) => {
+      if (typeof event.payload === "string") showToastRef.current(event.payload);
+    }));
     register(getCurrentWindow().listen("open-settings", () => handlersRef.current.onOpenSettings()));
     register(getCurrentWindow().listen("tray-unavailable", (event) => {
       if (typeof event.payload === "string") showToastRef.current(event.payload);
@@ -67,7 +77,7 @@ export function useWindowController({
     invokeCommand("floating_window_status", undefined, parseWindowStatus)
       .then((status) => {
         if (disposed) return;
-        const message = status.available ? "" : status.error || "悬浮球不可用，请重试";
+        const message = status.error || (status.available ? "" : "悬浮球不可用，请重试");
         setFloatingWindowError(message);
         if (message) showToastRef.current(message);
       })

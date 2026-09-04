@@ -629,6 +629,27 @@ pub(crate) fn is_unsafe_metadata(metadata: &Metadata) -> bool {
     is_reparse_point(metadata)
 }
 
+pub(crate) fn same_file_metadata(left: &Metadata, right: &Metadata) -> bool {
+    #[cfg(windows)]
+    {
+        left.len() == right.len()
+            && left.created().ok() == right.created().ok()
+            && left.modified().ok() == right.modified().ok()
+            && left.file_type().is_file() == right.file_type().is_file()
+            && left.file_type().is_dir() == right.file_type().is_dir()
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+
+        left.dev() == right.dev() && left.ino() == right.ino()
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        left.len() == right.len() && left.modified().ok() == right.modified().ok()
+    }
+}
+
 pub(crate) fn canonicalize_existing_path(raw_path: &str) -> Result<PathBuf, PathValidationError> {
     let trimmed = raw_path.trim();
     if trimmed.is_empty() {

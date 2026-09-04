@@ -1,9 +1,9 @@
 # 本地资料工作台 0.3.x 架构加固、性能和可维护性实施计划
 
-> 计划状态：阶段 A 已完成，阶段 B 代码候选已完成并已本地合并到 `dev`，阶段 C 代码候选已完成，阶段 D 代码候选已完成，均待用户原生验收
+> 计划状态：阶段 A 已完成，阶段 B 代码候选已完成并已本地合并到 `dev`，阶段 C 代码候选已完成，阶段 D 代码候选已完成，阶段 E 代码候选已完成，均待用户原生验收
 > 编制日期：2026-09-04
 > 当前发布基线：v0.3.32
-> 下一候选版本：v0.3.36
+> 下一候选版本：v0.3.38
 > 开发和合并策略：每个阶段使用独立分支开发，阶段完成后本地快进并入 `dev`
 > 适用平台：Windows 11 x64、Tauri 2、Rust stable、React 19、Vite 6
 > 计划范围：修复当前代码审查发现的确定性问题，收敛状态/IPC/存储边界，改善大索引性能，拆分高耦合模块，并建立每阶段本地安装包门禁。
@@ -638,6 +638,8 @@ search_metadata({
 
 本阶段默认选择单实例：
 
+- 实际接入 `tauri-plugin-single-instance` `2.4.4`，由官方 Windows named mutex 和消息窗口把第二次启动请求交给第一个进程。
+
 - 第二次启动不能加载一份独立索引后静默覆盖第一进程。
 - 第二次启动的打开请求、文件路径参数或显示请求必须有明确处理结果；没有请求时显示已有实例并退出。
 - 主进程退出、崩溃、锁残留和升级安装场景必须有可恢复策略。
@@ -651,6 +653,7 @@ search_metadata({
 
 ### 9.5 主要文件
 
+- `prototype/src-tauri/src/storage/app_data.rs`
 - `prototype/src-tauri/src/storage/settings.rs`
 - `prototype/src-tauri/src/storage/floating_ball.rs`
 - `prototype/src-tauri/src/storage/operation_history.rs`

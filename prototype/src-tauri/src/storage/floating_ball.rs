@@ -1,8 +1,9 @@
-use std::{fs, path::Path};
+use std::path::Path;
 
-use atomic_write_file::AtomicWriteFile;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+
+use super::app_data::{self, AppDataError, AppDataFile};
 
 pub const FLOATING_PLACEMENT_FORMAT_VERSION: u32 = 1;
 const MAX_MONITOR_KEY_LENGTH: usize = 256;
@@ -54,10 +55,11 @@ pub fn default_placement() -> FloatingPlacement {
 }
 
 pub fn load_placement(path: &Path) -> Result<FloatingPlacement, PlacementError> {
-    if !path.exists() {
+    let Some(bytes) =
+        app_data::read(path, AppDataFile::FloatingPlacement).map_err(map_app_data_error)?
+    else {
         return Err(PlacementError::Missing);
-    }
-    let bytes = fs::read(path).map_err(|_| PlacementError::Read)?;
+    };
     let document =
         serde_json::from_slice::<PlacementDocument>(&bytes).map_err(|_| PlacementError::Corrupt)?;
     if document.version != FLOATING_PLACEMENT_FORMAT_VERSION {
@@ -69,16 +71,20 @@ pub fn load_placement(path: &Path) -> Result<FloatingPlacement, PlacementError> 
 
 pub fn save_placement(path: &Path, placement: &FloatingPlacement) -> Result<(), PlacementError> {
     validate_placement(placement)?;
-    let parent = path.parent().ok_or(PlacementError::Write)?;
-    fs::create_dir_all(parent).map_err(|_| PlacementError::Write)?;
     let document = PlacementDocument {
         version: FLOATING_PLACEMENT_FORMAT_VERSION,
         placement: placement.clone(),
     };
     let encoded = serde_json::to_vec_pretty(&document).map_err(|_| PlacementError::Write)?;
-    let mut file = AtomicWriteFile::open(path).map_err(|_| PlacementError::Write)?;
-    std::io::Write::write_all(file.as_file_mut(), &encoded).map_err(|_| PlacementError::Write)?;
-    file.commit().map_err(|_| PlacementError::Write)
+    app_data::write(path, AppDataFile::FloatingPlacement, &encoded)
+        .map_err(|_| PlacementError::Write)
+}
+
+fn map_app_data_error(error: AppDataError) -> PlacementError {
+    match error {
+        AppDataError::TooLarge | AppDataError::Unsafe => PlacementError::Corrupt,
+        AppDataError::Read | AppDataError::Write | AppDataError::Directory => PlacementError::Read,
+    }
 }
 
 pub fn validate_placement(placement: &FloatingPlacement) -> Result<(), PlacementError> {

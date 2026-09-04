@@ -1,15 +1,12 @@
 use std::{
-    fs,
-    io::Write,
     path::{Path, PathBuf},
     sync::Mutex,
 };
 
-use atomic_write_file::AtomicWriteFile;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::filesystem;
+use super::app_data::{self, AppDataError, AppDataFile};
 
 pub const OPERATION_HISTORY_FORMAT_VERSION: u32 = 1;
 pub const MAX_OPERATION_RECORDS: usize = 100;
@@ -113,43 +110,35 @@ impl OperationHistoryState {
         &self,
         history_path: PathBuf,
     ) -> Result<Option<String>, OperationHistoryError> {
-        let parent = history_path
-            .parent()
-            .ok_or(OperationHistoryError::DataDirectory)?;
-        fs::create_dir_all(parent).map_err(|_| OperationHistoryError::DataDirectory)?;
+        app_data::ensure_parent(&history_path).map_err(|_| OperationHistoryError::DataDirectory)?;
 
         let mut warning = None;
-        let records = if history_path.exists() {
-            match read_history(&history_path) {
-                Ok(records) => records,
-                Err(
-                    OperationHistoryError::Corrupt
-                    | OperationHistoryError::UnsupportedVersion
-                    | OperationHistoryError::InvalidRecord,
-                ) => {
-                    let backup_created = backup_history_file(&history_path);
-                    let repaired = save_history(&history_path, &[]).is_ok();
-                    warning = Some(if repaired {
-                        if backup_created {
-                            "操作历史文件损坏，已备份并使用空历史".to_string()
-                        } else {
-                            "操作历史文件损坏，已使用空历史".to_string()
-                        }
-                    } else {
-                        "操作历史文件损坏，已使用空历史；修复文件未写入".to_string()
-                    });
-                    Vec::new()
+        let records = match read_history(&history_path) {
+            Ok(Some(records)) => records,
+            Ok(None) => {
+                if save_history(&history_path, &[]).is_err() {
+                    warning = Some("操作历史文件无法写入，当前只保留会话内结果".to_string());
                 }
-                Err(_) => {
-                    warning = Some("操作历史文件无法读取，已使用空历史".to_string());
-                    Vec::new()
-                }
+                Vec::new()
             }
-        } else {
-            if save_history(&history_path, &[]).is_err() {
-                warning = Some("操作历史文件无法写入，当前只保留会话内结果".to_string());
+            Err(
+                OperationHistoryError::Corrupt
+                | OperationHistoryError::UnsupportedVersion
+                | OperationHistoryError::InvalidRecord,
+            ) => {
+                let backup_created = backup_history_file(&history_path);
+                let repaired = backup_created && save_history(&history_path, &[]).is_ok();
+                warning = Some(if repaired {
+                    "操作历史文件损坏，已备份并使用空历史".to_string()
+                } else {
+                    "操作历史文件损坏，已使用空历史；原文件未被覆盖".to_string()
+                });
+                Vec::new()
             }
-            Vec::new()
+            Err(_) => {
+                warning = Some("操作历史文件无法读取，已使用空历史".to_string());
+                Vec::new()
+            }
         };
 
         *self
@@ -249,12 +238,12 @@ impl OperationHistoryState {
     }
 }
 
-fn read_history(path: &Path) -> Result<Vec<OperationRecord>, OperationHistoryError> {
-    let metadata = fs::symlink_metadata(path).map_err(|_| OperationHistoryError::Read)?;
-    if filesystem::is_unsafe_metadata(&metadata) || !metadata.is_file() {
-        return Err(OperationHistoryError::Corrupt);
-    }
-    let bytes = fs::read(path).map_err(|_| OperationHistoryError::Read)?;
+fn read_history(path: &Path) -> Result<Option<Vec<OperationRecord>>, OperationHistoryError> {
+    let Some(bytes) =
+        app_data::read(path, AppDataFile::OperationHistory).map_err(map_app_data_error)?
+    else {
+        return Ok(None);
+    };
     let document = serde_json::from_slice::<OperationHistoryDocument>(&bytes)
         .map_err(|_| OperationHistoryError::Corrupt)?;
     if document.version != OPERATION_HISTORY_FORMAT_VERSION {
@@ -266,7 +255,7 @@ fn read_history(path: &Path) -> Result<Vec<OperationRecord>, OperationHistoryErr
     for record in &document.records {
         validate_record(record)?;
     }
-    Ok(document.records)
+    Ok(Some(document.records))
 }
 
 fn save_history(path: &Path, records: &[OperationRecord]) -> Result<(), OperationHistoryError> {
@@ -281,11 +270,8 @@ fn save_history(path: &Path, records: &[OperationRecord]) -> Result<(), Operatio
         records: records.to_vec(),
     };
     let encoded = serde_json::to_vec_pretty(&document).map_err(|_| OperationHistoryError::Write)?;
-    let mut file = AtomicWriteFile::open(path).map_err(|_| OperationHistoryError::Write)?;
-    file.as_file_mut()
-        .write_all(&encoded)
-        .map_err(|_| OperationHistoryError::Write)?;
-    file.commit().map_err(|_| OperationHistoryError::Write)
+    app_data::write(path, AppDataFile::OperationHistory, &encoded)
+        .map_err(|_| OperationHistoryError::Write)
 }
 
 fn validate_record(record: &OperationRecord) -> Result<(), OperationHistoryError> {
@@ -374,25 +360,16 @@ fn is_valid_id(value: &str) -> bool {
 }
 
 fn backup_history_file(path: &Path) -> bool {
-    let Ok(metadata) = fs::symlink_metadata(path) else {
-        return false;
-    };
-    if filesystem::is_unsafe_metadata(&metadata) || !metadata.is_file() {
-        return false;
-    }
-    for attempt in 0..3_u32 {
-        let backup = path.with_file_name(format!(
-            "{}.recovery-{}.bak",
-            path.file_name()
-                .and_then(|name| name.to_str())
-                .unwrap_or("operation-history"),
-            attempt
-        ));
-        if !backup.exists() && fs::copy(path, backup).is_ok() {
-            return true;
+    app_data::backup(path, AppDataFile::OperationHistory)
+}
+
+fn map_app_data_error(error: AppDataError) -> OperationHistoryError {
+    match error {
+        AppDataError::TooLarge | AppDataError::Unsafe => OperationHistoryError::Corrupt,
+        AppDataError::Read | AppDataError::Write | AppDataError::Directory => {
+            OperationHistoryError::Read
         }
     }
-    false
 }
 
 #[cfg(test)]

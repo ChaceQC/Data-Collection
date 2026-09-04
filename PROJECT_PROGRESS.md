@@ -1,5 +1,70 @@
 # 项目进度
 
+## 2026-09-05
+
+### 阶段 E：app data 安全和单实例保护（0.3.37 代码候选，自动门禁和 NSIS 已完成）
+
+#### 已完成
+
+- 按 `AGENT.md` 和当前 `PROJECT_PLAN.md` 在独立分支 `codex/phase-0.3.37-app-data-single-instance` 实现阶段 E，保持现有 `index.json` v5、`content-index.json` v1、`settings.json` v3、`operation-history.json` v1、悬浮球位置 v1 和待同步操作格式不变，不需要数据迁移。
+- 新增 `storage/app_data.rs` 统一处理六类 app data 文件：逐级检查并安全创建目录，读取前执行父目录/普通文件/reparse 检查和原始字节上限，写入使用父目录复核、目标类型复核和原子替换，备份使用固定后缀、最多三次命名尝试、独占创建并保留源文件；备份失败时不再用默认值静默覆盖原文件。
+- 既有索引、正文索引、设置、操作历史、悬浮球位置和 `pending-operations.json` 均切换到统一辅助层；待同步操作增加 500 条、路径 32 KiB、时间和不透明 ID 校验，索引条目路径也执行 32 KiB 上限。
+- 接入 `tauri-plugin-single-instance` `2.4.4`。第二次启动由官方 Windows named mutex/消息窗口转发给首个进程；无额外参数时聚焦已有主窗口，带路径参数时在 Rust 内复用受控导入流程，主窗口只接收导入计数、跳过摘要和不透明 ID，不接收完整路径事件。
+- 对默认程序打开、资源管理器定位、复制到剪贴板、重命名和回收站删除，在接近实际动作的位置复核 canonical 类型、reparse 状态和 metadata 快照；源文件被替换时返回 `source-changed`，保留索引并提示刷新后重试。
+
+#### 进行中
+
+- 阶段 E 代码、针对性测试、生产构建、版本同步、NSIS 候选构建和 loader 校验已完成；正在执行阶段分支 Git 收口。
+
+#### 用户验收
+
+- 尚未执行。单实例双进程聚焦/参数转发、app data 文件被替换为符号链接或目录、异常终止/重启/升级恢复、真实重命名/资源管理器/回收站操作以及安装/卸载仍需用户在 Windows 11/Tauri/WebView2 环境确认。
+
+#### 阻塞与风险
+
+- 安装包不签名且不内置 WebView2 Runtime，目标 Windows 11 机器需要已有 WebView2；DOC 预览仍依赖目标机 LibreOffice。
+- 阶段 E 未改变持久化格式，旧版本数据仍按原格式读取；对损坏、超限或 unsafe app data 文件只保留原文件/备份并进入可恢复错误，不自动删除或写入链接目标。
+- 浏览器回退和 Rust 自动化不能证明 Windows named mutex、真实 Tauri 窗口聚焦、跨进程消息、reparse point、安装/卸载或重启行为。
+
+#### 下一步
+
+- 在阶段分支提交并通过 ancestry 检查后使用 `git merge --ff-only` 本地并入 `dev`，删除已合并阶段分支；不执行 push、Tag 或 GitHub Release。
+- 用户安装候选后验收双实例、app data 替换、重启/升级和真实外部文件操作，验收通过后再决定后续阶段。
+
+#### 涉及文件
+
+- `prototype/src-tauri/src/storage/app_data.rs`
+- `prototype/src-tauri/src/storage/mod.rs`
+- `prototype/src-tauri/src/storage/content_index.rs`
+- `prototype/src-tauri/src/storage/settings.rs`
+- `prototype/src-tauri/src/storage/operation_history.rs`
+- `prototype/src-tauri/src/storage/floating_ball.rs`
+- `prototype/src-tauri/src/filesystem/mod.rs`
+- `prototype/src-tauri/src/filesystem/operations.rs`
+- `prototype/src-tauri/src/filesystem/external.rs`
+- `prototype/src-tauri/src/commands/mod.rs`
+- `prototype/src-tauri/src/commands/library.rs`
+- `prototype/src-tauri/src/windows/mod.rs`
+- `prototype/src-tauri/src/windows/single_instance.rs`
+- `prototype/src-tauri/src/lib.rs`
+- `prototype/src/features/window/useWindowController.js`
+- `prototype/src/lib/ipcContracts.js`
+- `prototype/src-tauri/Cargo.toml`、`prototype/src-tauri/Cargo.lock`
+- 五个版本入口、`README.md`、`prototype/README.md`、`PROJECT_PLAN.md`
+
+#### 验证
+
+- `cargo fmt --all -- --check`：通过。
+- `cargo check --tests`：通过。
+- `cargo test --locked`：103 项通过。
+- `cargo clippy --locked --all-targets --all-features -- -D warnings`：通过。
+- `npm.cmd run test:library`：26 项通过；`npm.cmd run test:contracts`：19 项通过；`npm.cmd run test:settings`：5 项通过；`npm.cmd run test:operations`：3 项通过；`npm.cmd run test:floating-ball`：30 项通过；`npm.cmd run test:sites`：4 项通过。
+- `npm.cmd run build`：通过，生成 `dist/client/index.html`、`dist/server/index.js` 和 `dist/.openai/hosting.json`；Vite 的大 chunk 提示不影响构建结果。
+- 五个版本入口检查：`prototype/package.json`、`package-lock.json` 根包、Tauri 配置、`Cargo.toml` 和 `Cargo.lock` 根 package 均为 `0.3.37`。
+- `npm.cmd run tauri:build`：通过，生成 Windows x64 NSIS 候选 `E:\Project\test\prototype\src-tauri\target\release\bundle\nsis\本地资料工作台_0.3.37_x64-setup.exe`，大小 `8976421` bytes，SHA-256 `78DC10B6A9EDFC02E83CEC428FB6DFEF3BFECD600226EA5D7446F8184199760D`；release 主程序版本 `0.3.37`，大小 `36238590` bytes，SHA-256 `6F61DF6E35736F3F3DAB9837425AFBDF5D2FA5E8CF08AA9BB526844E1F04358C`。
+- `npm.cmd run verify:loader`：通过；`E:\Project\test\prototype\src-tauri\target\release\WebView2Loader.dll` 为 `160320` bytes，SHA-256 `8427B1FC58EC707813E5C0A51EB5D69397BB333250A7B891BE4D3B123F1E0F1C`，确认 Windows x64 且与 release 主程序同目录。
+- 已通过 app data 六类原始字节上限、目录目标拒绝、受限备份保留源文件、单实例参数分类和源文件替换复核测试；未执行浏览器截图或 Windows 原生手工验收。
+
 ## 2026-09-04
 
 ### 阶段 D：索引和撤销性能（0.3.36 代码候选）

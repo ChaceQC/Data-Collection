@@ -7,14 +7,16 @@ use std::{
 use thiserror::Error;
 
 use super::{
-    is_unsafe_metadata, same_path, validate_directory_path, validate_regular_file_path, IndexEntry,
-    PathValidationError,
+    is_unsafe_metadata, same_file_metadata, same_path, validate_directory_path,
+    validate_regular_file_path, IndexEntry, PathValidationError,
 };
 
 #[derive(Debug, Error)]
 pub(crate) enum FileOperationError {
     #[error("源文件已失效，请先重新定位或重新导入")]
     SourceMissing,
+    #[error("源文件在操作前发生变化，请刷新索引后重试")]
+    SourceChanged,
     #[error("没有访问源文件的权限，请检查文件权限")]
     SourcePermissionDenied,
     #[error("只允许操作资料库中的普通文件")]
@@ -40,15 +42,51 @@ pub(crate) enum FileOperationError {
 pub(crate) fn validate_indexed_file(
     entry: &IndexEntry,
 ) -> Result<(PathBuf, Metadata), FileOperationError> {
-    validate_regular_file_path(&entry.path)
-        .map_err(map_source_validation_error)
-        .and_then(|(path, metadata)| {
-            if same_path(&entry.path, &path.to_string_lossy()) {
-                Ok((path, metadata))
-            } else {
-                Err(FileOperationError::SourceInvalid)
-            }
-        })
+    if entry.kind == "folder" {
+        return Err(FileOperationError::SourceInvalid);
+    }
+    validate_indexed_entry(entry)
+}
+
+pub(crate) fn validate_indexed_entry(
+    entry: &IndexEntry,
+) -> Result<(PathBuf, Metadata), FileOperationError> {
+    let (path, metadata) = if entry.kind == "folder" {
+        let path = validate_directory_path(&entry.path).map_err(map_source_validation_error)?;
+        let metadata = fs::symlink_metadata(&path).map_err(map_source_io_error)?;
+        (path, metadata)
+    } else {
+        validate_regular_file_path(&entry.path).map_err(map_source_validation_error)?
+    };
+    if same_path(&entry.path, &path.to_string_lossy()) {
+        Ok((path, metadata))
+    } else {
+        Err(FileOperationError::SourceInvalid)
+    }
+}
+
+pub(crate) fn revalidate_indexed_file(
+    entry: &IndexEntry,
+    expected: &Metadata,
+) -> Result<(PathBuf, Metadata), FileOperationError> {
+    revalidate_indexed_entry(entry, expected).and_then(|result| {
+        if entry.kind == "folder" {
+            Err(FileOperationError::SourceInvalid)
+        } else {
+            Ok(result)
+        }
+    })
+}
+
+pub(crate) fn revalidate_indexed_entry(
+    entry: &IndexEntry,
+    expected: &Metadata,
+) -> Result<(PathBuf, Metadata), FileOperationError> {
+    let result = validate_indexed_entry(entry)?;
+    if !same_file_metadata(expected, &result.1) {
+        return Err(FileOperationError::SourceChanged);
+    }
+    Ok(result)
 }
 
 pub(crate) fn validate_new_name(
@@ -84,25 +122,39 @@ pub(crate) fn validate_new_name(
     }
 }
 
-pub(crate) fn rename_file(source: &Path, target: &Path) -> Result<(), FileOperationError> {
-    ensure_regular_file(source).map_err(map_source_io_error)?;
+pub(crate) fn rename_file(
+    source: &Path,
+    target: &Path,
+    expected: &Metadata,
+) -> Result<(), FileOperationError> {
+    ensure_regular_file_matches(source, expected)?;
     let parent = target
         .parent()
         .ok_or(FileOperationError::DestinationInvalid)?;
     ensure_directory(parent)?;
     ensure_target_is_available(target)?;
+    ensure_regular_file_matches(source, expected)?;
     fs::rename(source, target).map_err(|_| FileOperationError::RenameFailed)
 }
 
-pub(crate) fn restore_renamed_file(source: &Path, target: &Path) -> bool {
-    if ensure_regular_file(source).is_err() || fs::symlink_metadata(target).is_ok() {
+pub(crate) fn restore_renamed_file(source: &Path, target: &Path, expected: &Metadata) -> bool {
+    if ensure_regular_file_matches(source, expected).is_err()
+        || fs::symlink_metadata(target).is_ok()
+    {
+        return false;
+    }
+    if ensure_regular_file_matches(source, expected).is_err() {
         return false;
     }
     fs::rename(source, target).is_ok()
 }
 
-pub(crate) fn delete_to_recycle_bin(path: &Path) -> Result<(), FileOperationError> {
-    ensure_regular_file(path).map_err(map_source_io_error)?;
+pub(crate) fn delete_to_recycle_bin(
+    path: &Path,
+    expected: &Metadata,
+) -> Result<(), FileOperationError> {
+    ensure_regular_file_matches(path, expected)?;
+    ensure_regular_file_matches(path, expected)?;
     trash::delete(path).map_err(|_| FileOperationError::RecycleFailed)
 }
 
@@ -182,6 +234,17 @@ fn ensure_regular_file(path: &Path) -> Result<Metadata, io::Error> {
             io::ErrorKind::InvalidInput,
             "not a regular file",
         ));
+    }
+    Ok(metadata)
+}
+
+fn ensure_regular_file_matches(
+    path: &Path,
+    expected: &Metadata,
+) -> Result<Metadata, FileOperationError> {
+    let metadata = ensure_regular_file(path).map_err(map_source_io_error)?;
+    if !same_file_metadata(expected, &metadata) {
+        return Err(FileOperationError::SourceChanged);
     }
     Ok(metadata)
 }
@@ -277,6 +340,26 @@ mod tests {
             Err(FileOperationError::SourceMissing)
         ));
         assert!(super::validate_directory_path(&root.join("不存在").to_string_lossy()).is_err());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn rejects_a_replaced_source_before_a_file_action() {
+        let root = unique_temp_dir();
+        fs::create_dir_all(&root).expect("test directory should be created");
+        let source = root.join("资料.txt");
+        fs::write(&source, "原始文件内容").expect("source file should be written");
+        let entry = crate::filesystem::index_selected_path(&source.to_string_lossy())
+            .expect("source should be indexable");
+        let (_, expected) = super::validate_indexed_file(&entry).expect("source should validate");
+
+        fs::remove_file(&source).expect("original source should be removed");
+        fs::write(&source, "被替换后的不同长度文件内容").expect("replacement should be written");
+
+        assert!(matches!(
+            super::revalidate_indexed_file(&entry, &expected),
+            Err(FileOperationError::SourceChanged)
+        ));
         let _ = fs::remove_dir_all(root);
     }
 

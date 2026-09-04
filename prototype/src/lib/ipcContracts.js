@@ -32,6 +32,7 @@ const OPERATION_MESSAGES = Object.freeze({
   "entry-not-found": "资料已不存在，请刷新索引",
   "invalid-id": "资料标识无效，请重新选择资料",
   "source-missing": "原文件已不存在，请先刷新或移除索引记录",
+  "source-changed": "原文件在操作前发生变化，请刷新索引后重试",
   "source-permission-denied": "没有访问原文件的权限",
   "source-invalid": "原文件路径不可用，请重新定位",
   "destination-invalid": "目标路径不可用，请重试",

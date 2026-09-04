@@ -11,6 +11,7 @@ pub(crate) mod floating_ball;
 pub(crate) mod lifecycle;
 pub(crate) mod lifecycle_policy;
 pub(crate) mod monitor;
+pub(crate) mod single_instance;
 pub(crate) mod tray;
 pub(crate) mod tray_model;
 
@@ -78,14 +79,15 @@ impl FloatingBallState {
             .and_then(|current| current.is_visible().ok())
             .unwrap_or(false);
         let available = !self.desired_visible() || window.is_some();
+        let creation_error = self
+            .creation_error
+            .lock()
+            .ok()
+            .and_then(|current| current.clone());
         let error = if available {
-            None
+            creation_error
         } else {
-            self.creation_error
-                .lock()
-                .ok()
-                .and_then(|current| current.clone())
-                .or_else(|| Some("悬浮球不可用，请重试".to_string()))
+            creation_error.or_else(|| Some("悬浮球不可用，请重试".to_string()))
         };
         FloatingWindowStatus {
             visible,
@@ -134,9 +136,27 @@ pub fn create_floating_ball<R: Runtime>(
     }
     state.stop();
     let areas = monitor::available_work_areas(app);
-    let placement = crate::storage::floating_ball::load_placement(placement_path)
-        .map(|placement| monitor::normalize_placement(placement, &areas))
-        .unwrap_or_else(|_| monitor::safe_default(&areas));
+    let placement = match crate::storage::floating_ball::load_placement(placement_path) {
+        Ok(placement) => monitor::normalize_placement(placement, &areas),
+        Err(crate::storage::floating_ball::PlacementError::Missing) => {
+            monitor::safe_default(&areas)
+        }
+        Err(_) => {
+            let fallback = monitor::safe_default(&areas);
+            let backup_created = crate::storage::app_data::backup(
+                placement_path,
+                crate::storage::app_data::AppDataFile::FloatingPlacement,
+            );
+            let repaired = backup_created
+                && crate::storage::floating_ball::save_placement(placement_path, &fallback).is_ok();
+            state.set_creation_error(Some(if repaired {
+                "悬浮球位置文件异常，已备份并使用安全默认位置".to_string()
+            } else {
+                "悬浮球位置文件异常，原文件未被覆盖，已使用安全默认位置".to_string()
+            }));
+            fallback
+        }
+    };
     let physical_position = monitor::window_position_physical(&placement, &areas);
     let window = floating_ball::build_window(app)?;
     if window

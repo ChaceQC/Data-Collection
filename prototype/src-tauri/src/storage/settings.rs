@@ -1,16 +1,14 @@
 use std::{
-    fs,
-    io::Write,
     path::{Path, PathBuf},
     sync::{Mutex, RwLock},
-    time::{SystemTime, UNIX_EPOCH},
 };
 
-use atomic_write_file::AtomicWriteFile;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::filesystem;
+
+use super::app_data::{self, AppDataError, AppDataFile};
 
 pub const SETTINGS_FORMAT_VERSION: u32 = 3;
 const LEGACY_SETTINGS_FORMAT_VERSION: u32 = 1;
@@ -141,56 +139,56 @@ struct SettingsStateData {
 
 impl SettingsState {
     pub fn initialize(&self, settings_path: PathBuf) -> Result<(), SettingsError> {
-        let parent = settings_path.parent().ok_or(SettingsError::DataDirectory)?;
-        fs::create_dir_all(parent).map_err(|_| SettingsError::DataDirectory)?;
+        app_data::ensure_parent(&settings_path).map_err(|_| SettingsError::DataDirectory)?;
 
         let mut warning = None;
-        let settings = if settings_path.exists() {
-            match read_settings(&settings_path) {
-                Ok(read_result) => {
-                    if read_result.needs_migration
+        let settings = match read_settings(&settings_path) {
+            Ok(Some(read_result)) => {
+                if read_result.needs_migration {
+                    let backup_created = backup_settings_file(&settings_path);
+                    let migrated = backup_created
                         && save_settings(
                             &settings_path,
                             &read_result.settings,
                             read_result.revision,
                         )
-                        .is_err()
-                    {
-                        warning = Some("设置已迁移到当前格式，但修复文件未写入".to_string());
+                        .is_ok();
+                    if !migrated {
+                        warning = Some("设置已迁移到当前格式，但原文件未被覆盖".to_string());
                     }
-                    read_result.settings
                 }
-                Err(
-                    SettingsError::Corrupt
-                    | SettingsError::UnsupportedVersion
-                    | SettingsError::InvalidValue,
-                ) => {
-                    let backup_created = backup_settings_file(&settings_path);
-                    let settings = PersistedSettings::default();
-                    let repaired = save_settings(&settings_path, &settings, 0).is_ok();
-                    warning = Some(if repaired {
-                        if backup_created {
-                            "设置文件损坏，已备份并使用默认设置".to_string()
-                        } else {
-                            "设置文件损坏，已使用默认设置".to_string()
-                        }
-                    } else {
-                        "设置文件损坏，已使用默认设置；修复文件未写入".to_string()
-                    });
-                    settings
-                }
-                Err(_) => {
-                    warning = Some("设置文件无法读取，已使用默认设置".to_string());
-                    PersistedSettings::default()
-                }
+                read_result.settings
             }
-        } else {
-            let settings = PersistedSettings::default();
-            save_settings(&settings_path, &settings, 0)?;
-            settings
+            Ok(None) => {
+                let settings = PersistedSettings::default();
+                save_settings(&settings_path, &settings, 0)?;
+                settings
+            }
+            Err(
+                SettingsError::Corrupt
+                | SettingsError::UnsupportedVersion
+                | SettingsError::InvalidValue,
+            ) => {
+                let backup_created = backup_settings_file(&settings_path);
+                let settings = PersistedSettings::default();
+                let repaired =
+                    backup_created && save_settings(&settings_path, &settings, 0).is_ok();
+                warning = Some(if repaired {
+                    "设置文件损坏，已备份并使用默认设置".to_string()
+                } else {
+                    "设置文件损坏，已使用默认设置；原文件未被覆盖".to_string()
+                });
+                settings
+            }
+            Err(_) => {
+                warning = Some("设置文件无法读取，已使用默认设置".to_string());
+                PersistedSettings::default()
+            }
         };
 
         let revision = read_settings(&settings_path)
+            .ok()
+            .flatten()
             .map(|result| result.revision)
             .unwrap_or(0);
 
@@ -281,8 +279,11 @@ struct ReadSettings {
     needs_migration: bool,
 }
 
-fn read_settings(path: &Path) -> Result<ReadSettings, SettingsError> {
-    let bytes = fs::read(path).map_err(|_| SettingsError::Read)?;
+fn read_settings(path: &Path) -> Result<Option<ReadSettings>, SettingsError> {
+    let Some(bytes) = app_data::read(path, AppDataFile::Settings).map_err(map_app_data_error)?
+    else {
+        return Ok(None);
+    };
     let document =
         serde_json::from_slice::<SettingsDocument>(&bytes).map_err(|_| SettingsError::Corrupt)?;
     let needs_migration = document.version == LEGACY_SETTINGS_FORMAT_VERSION
@@ -298,11 +299,11 @@ fn read_settings(path: &Path) -> Result<ReadSettings, SettingsError> {
         show_floating_window: document.settings.show_floating_window,
         expected_revision: None,
     })?;
-    Ok(ReadSettings {
+    Ok(Some(ReadSettings {
         settings,
         revision: document.revision,
         needs_migration,
-    })
+    }))
 }
 
 fn save_settings(
@@ -316,38 +317,18 @@ fn save_settings(
         settings: settings.clone(),
     };
     let encoded = serde_json::to_vec_pretty(&document).map_err(|_| SettingsError::Write)?;
-    let mut file = AtomicWriteFile::open(path).map_err(|_| SettingsError::Write)?;
-    file.as_file_mut()
-        .write_all(&encoded)
-        .map_err(|_| SettingsError::Write)?;
-    file.commit().map_err(|_| SettingsError::Write)
+    app_data::write(path, AppDataFile::Settings, &encoded).map_err(|_| SettingsError::Write)
 }
 
 fn backup_settings_file(path: &Path) -> bool {
-    let Ok(metadata) = fs::symlink_metadata(path) else {
-        return false;
-    };
-    if crate::filesystem::is_unsafe_metadata(&metadata) || !metadata.is_file() {
-        return false;
+    app_data::backup(path, AppDataFile::Settings)
+}
+
+fn map_app_data_error(error: AppDataError) -> SettingsError {
+    match error {
+        AppDataError::TooLarge | AppDataError::Unsafe => SettingsError::Corrupt,
+        AppDataError::Read | AppDataError::Write | AppDataError::Directory => SettingsError::Read,
     }
-    let timestamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_nanos())
-        .unwrap_or_default();
-    for attempt in 0..3_u32 {
-        let backup = path.with_file_name(format!(
-            "{}.recovery-{}-{}.bak",
-            path.file_name()
-                .and_then(|name| name.to_str())
-                .unwrap_or("settings"),
-            timestamp,
-            attempt
-        ));
-        if !backup.exists() && fs::copy(path, backup).is_ok() {
-            return true;
-        }
-    }
-    false
 }
 
 fn validate_update(update: SettingsUpdate) -> Result<PersistedSettings, SettingsError> {

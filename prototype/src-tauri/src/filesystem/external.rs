@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::{fs::Metadata, path::Path};
 
 use thiserror::Error;
 
@@ -9,27 +9,34 @@ pub(crate) enum ExternalOpenError {
     Unsupported,
     #[error("系统默认程序无法打开该文件")]
     LaunchFailed,
+    #[error("目标文件在操作前发生变化，请刷新索引后重试")]
+    TargetChanged,
     #[error("Windows 资源管理器不可用")]
     ExplorerUnavailable,
 }
 
-pub(crate) fn open_with_default(path: &Path) -> Result<(), ExternalOpenError> {
+pub(crate) fn open_with_default(path: &Path, expected: &Metadata) -> Result<(), ExternalOpenError> {
     #[cfg(windows)]
     {
-        execute_shell_open(path, None)
+        execute_shell_open(path, None, Some((path, expected, false)))
     }
     #[cfg(not(windows))]
     {
-        let _ = path;
+        let _ = (path, expected);
         Err(ExternalOpenError::Unsupported)
     }
 }
 
-pub(crate) fn reveal_in_explorer(path: &Path, is_directory: bool) -> Result<(), ExternalOpenError> {
+pub(crate) fn reveal_in_explorer(
+    path: &Path,
+    is_directory: bool,
+    expected: &Metadata,
+) -> Result<(), ExternalOpenError> {
     #[cfg(windows)]
     {
+        confirm_target(path, is_directory, expected)?;
         if is_directory {
-            return execute_shell_open(path, None);
+            return execute_shell_open(path, None, None);
         }
 
         let system_root = std::env::var_os("SystemRoot")
@@ -41,21 +48,28 @@ pub(crate) fn reveal_in_explorer(path: &Path, is_directory: bool) -> Result<(), 
         if super::is_unsafe_metadata(&metadata) || !metadata.is_file() {
             return Err(ExternalOpenError::ExplorerUnavailable);
         }
-        execute_shell_open(&explorer, explorer_parameters(path, false).as_deref())
+        execute_shell_open(&explorer, explorer_parameters(path, false).as_deref(), None)
     }
     #[cfg(not(windows))]
     {
-        let _ = (path, is_directory);
+        let _ = (path, is_directory, expected);
         Err(ExternalOpenError::Unsupported)
     }
 }
 
 #[cfg(windows)]
-fn execute_shell_open(path: &Path, parameters: Option<&str>) -> Result<(), ExternalOpenError> {
+fn execute_shell_open(
+    path: &Path,
+    parameters: Option<&str>,
+    expected: Option<(&Path, &Metadata, bool)>,
+) -> Result<(), ExternalOpenError> {
     use std::{os::windows::ffi::OsStrExt, ptr::null_mut};
 
     use windows_sys::Win32::UI::{Shell::ShellExecuteW, WindowsAndMessaging::SW_SHOWNORMAL};
 
+    if let Some((target, metadata, is_directory)) = expected {
+        confirm_target(target, is_directory, metadata)?;
+    }
     let operation: Vec<u16> = std::ffi::OsStr::new("open")
         .encode_wide()
         .chain([0])
@@ -82,6 +96,23 @@ fn execute_shell_open(path: &Path, parameters: Option<&str>) -> Result<(), Exter
     };
     if (result as isize) <= 32 {
         return Err(ExternalOpenError::LaunchFailed);
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+fn confirm_target(
+    path: &Path,
+    is_directory: bool,
+    expected: &Metadata,
+) -> Result<(), ExternalOpenError> {
+    let metadata = std::fs::symlink_metadata(path).map_err(|_| ExternalOpenError::TargetChanged)?;
+    if super::is_unsafe_metadata(&metadata)
+        || metadata.is_dir() != is_directory
+        || metadata.is_file() == is_directory
+        || !super::same_file_metadata(expected, &metadata)
+    {
+        return Err(ExternalOpenError::TargetChanged);
     }
     Ok(())
 }

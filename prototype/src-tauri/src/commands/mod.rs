@@ -176,6 +176,14 @@ fn normalize_recursive_paths(paths: Vec<String>) -> Result<Vec<String>, CommandE
         }
         normalized.push(path.to_string());
     }
+    filesystem::validate_scan_paths(&normalized).map_err(|error| {
+        command_error(
+            "recursive-root-invalid",
+            error.to_string(),
+            false,
+            "unchanged",
+        )
+    })?;
     Ok(normalized)
 }
 
@@ -209,7 +217,7 @@ fn emit_recursive_import_progress<R: Runtime>(
     let _ = app.emit_to("main", "recursive-import-progress", event);
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct IndexImportResult {
     pub revision: u64,
@@ -450,8 +458,14 @@ pub async fn reveal_directory_child(
         .ok_or_else(|| "文件夹子项名称不可用".to_string())?
         .to_string();
     tauri::async_runtime::spawn_blocking(move || {
-        crate::filesystem::external::reveal_in_explorer(&path, is_directory)
-            .map_err(|_| "无法在资源管理器中定位，请检查路径".to_string())
+        crate::filesystem::external::reveal_in_explorer(&path, is_directory, &metadata).map_err(
+            |error| match error {
+                crate::filesystem::external::ExternalOpenError::TargetChanged => {
+                    "文件夹子项在操作前发生变化，请刷新索引后重试".to_string()
+                }
+                _ => "无法在资源管理器中定位，请检查路径".to_string(),
+            },
+        )
     })
     .await
     .map_err(|_| "定位文件夹子项任务未完成，请重试".to_string())??;
@@ -463,6 +477,22 @@ pub async fn index_paths(
     paths: Vec<String>,
     state: State<'_, AppState>,
     app: AppHandle,
+) -> Result<IndexImportResult, String> {
+    index_paths_impl(paths, state.inner(), &app).await
+}
+
+pub(crate) async fn index_paths_from_single_instance<R: Runtime>(
+    paths: Vec<String>,
+    app: AppHandle<R>,
+) -> Result<IndexImportResult, String> {
+    let state = app.state::<AppState>();
+    index_paths_impl(paths, state.inner(), &app).await
+}
+
+async fn index_paths_impl<R: Runtime>(
+    paths: Vec<String>,
+    state: &AppState,
+    app: &AppHandle<R>,
 ) -> Result<IndexImportResult, String> {
     if paths.is_empty() {
         return Err("请选择文件或文件夹".to_string());
@@ -476,7 +506,7 @@ pub async fn index_paths(
     let skipped_count = scan.skipped_count;
     let skipped_reasons = scan.skipped_reasons.clone();
     let truncated = scan.truncated;
-    let repository = IndexRepository::new(state.inner());
+    let repository = IndexRepository::new(state);
     let outcome = repository
         .merge_entries(scan.entries, storage::IndexMergeMode::RegularImport)
         .map_err(storage_message)?;
@@ -484,7 +514,7 @@ pub async fn index_paths(
 
     if !merge_stats.affected_ids.is_empty() {
         emit_index_changed(
-            &app,
+            app,
             outcome.revision,
             merge_stats.affected_ids.clone(),
             "import",

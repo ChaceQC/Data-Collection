@@ -4,16 +4,18 @@ use std::{
     io::Read,
     path::{Path, PathBuf},
     sync::{Arc, Mutex, RwLock},
-    time::{SystemTime, UNIX_EPOCH},
+    time::UNIX_EPOCH,
 };
 
-use atomic_write_file::AtomicWriteFile;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::{filesystem, preview};
 
-use super::content_search::{self, ContentSearchError, ContentSearchResult};
+use super::{
+    app_data::{self, AppDataError, AppDataFile},
+    content_search::{self, ContentSearchError, ContentSearchResult},
+};
 
 pub const MAX_CONTENT_FILE_BYTES: u64 = 2 * 1024 * 1024;
 pub const MAX_CONTENT_INDEX_BYTES: u64 = 64 * 1024 * 1024;
@@ -211,48 +213,63 @@ impl ContentIndexState {
     }
 
     pub fn initialize(&self, path: PathBuf) {
-        let (documents, status) = match load_document(&path) {
-            Ok(Some(document)) => {
-                let documents = document
-                    .documents
-                    .into_iter()
-                    .map(|item| (item.file_id.clone(), item))
-                    .collect::<HashMap<_, _>>();
-                let status = make_status(
-                    "ready",
-                    document.source_revision,
-                    &documents,
-                    document.failed_count,
-                    document.last_error,
-                );
-                (documents, status)
-            }
-            Ok(None) => (
-                HashMap::new(),
-                make_status("ready", 0, &HashMap::new(), 0, None),
-            ),
-            Err(_error @ (ContentIndexError::Corrupt | ContentIndexError::UnsupportedVersion)) => {
-                let backup_created = backup_file(&path);
-                let message = if backup_created {
-                    "正文索引损坏，原文件已保留备份，请重建正文索引"
-                } else {
-                    "正文索引损坏，请重建正文索引"
-                };
-                (
-                    HashMap::new(),
-                    make_status("recovery", 0, &HashMap::new(), 0, Some(message.to_string())),
-                )
-            }
-            Err(error) => (
+        let (documents, status) = if app_data::ensure_parent(&path).is_err() {
+            (
                 HashMap::new(),
                 make_status(
                     "unavailable",
                     0,
                     &HashMap::new(),
                     0,
-                    Some(error.to_string()),
+                    Some("正文索引目录不可用".to_string()),
                 ),
-            ),
+            )
+        } else {
+            match load_document(&path) {
+                Ok(Some(document)) => {
+                    let documents = document
+                        .documents
+                        .into_iter()
+                        .map(|item| (item.file_id.clone(), item))
+                        .collect::<HashMap<_, _>>();
+                    let status = make_status(
+                        "ready",
+                        document.source_revision,
+                        &documents,
+                        document.failed_count,
+                        document.last_error,
+                    );
+                    (documents, status)
+                }
+                Ok(None) => (
+                    HashMap::new(),
+                    make_status("ready", 0, &HashMap::new(), 0, None),
+                ),
+                Err(
+                    _error @ (ContentIndexError::Corrupt | ContentIndexError::UnsupportedVersion),
+                ) => {
+                    let backup_created = backup_file(&path);
+                    let message = if backup_created {
+                        "正文索引损坏，原文件已保留备份，请重建正文索引"
+                    } else {
+                        "正文索引损坏，请重建正文索引"
+                    };
+                    (
+                        HashMap::new(),
+                        make_status("recovery", 0, &HashMap::new(), 0, Some(message.to_string())),
+                    )
+                }
+                Err(error) => (
+                    HashMap::new(),
+                    make_status(
+                        "unavailable",
+                        0,
+                        &HashMap::new(),
+                        0,
+                        Some(error.to_string()),
+                    ),
+                ),
+            }
         };
         if let Ok(mut target) = self.path.lock() {
             *target = Some(path);
@@ -638,18 +655,11 @@ fn make_status(
 }
 
 fn load_document(path: &Path) -> Result<Option<ContentIndexDocument>, ContentIndexError> {
-    let metadata = match fs::symlink_metadata(path) {
-        Ok(metadata) => metadata,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(_) => return Err(ContentIndexError::Read),
+    let Some(bytes) =
+        app_data::read(path, AppDataFile::ContentIndex).map_err(map_app_data_error)?
+    else {
+        return Ok(None);
     };
-    if filesystem::is_unsafe_metadata(&metadata) || !metadata.is_file() {
-        return Err(ContentIndexError::Corrupt);
-    }
-    if metadata.len() > MAX_CONTENT_INDEX_FILE_BYTES {
-        return Err(ContentIndexError::Corrupt);
-    }
-    let bytes = fs::read(path).map_err(|_| ContentIndexError::Read)?;
     let document = serde_json::from_slice::<ContentIndexDocument>(&bytes)
         .map_err(|_| ContentIndexError::Corrupt)?;
     if document.version != CONTENT_INDEX_FORMAT_VERSION {
@@ -703,25 +713,20 @@ fn save_document(
     if encoded.len() as u64 > MAX_CONTENT_INDEX_FILE_BYTES {
         return Err(ContentIndexError::Write);
     }
-    let mut file = AtomicWriteFile::open(path).map_err(|_| ContentIndexError::Write)?;
-    std::io::Write::write_all(file.as_file_mut(), &encoded)
-        .map_err(|_| ContentIndexError::Write)?;
-    file.commit().map_err(|_| ContentIndexError::Write)
+    app_data::write(path, AppDataFile::ContentIndex, &encoded).map_err(|_| ContentIndexError::Write)
 }
 
 fn backup_file(path: &Path) -> bool {
-    let Some(name) = path.file_name().and_then(|value| value.to_str()) else {
-        return false;
-    };
-    let timestamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_millis())
-        .unwrap_or_default();
-    fs::rename(
-        path,
-        path.with_file_name(format!("{name}.recovery-{timestamp}")),
-    )
-    .is_ok()
+    app_data::backup(path, AppDataFile::ContentIndex)
+}
+
+fn map_app_data_error(error: AppDataError) -> ContentIndexError {
+    match error {
+        AppDataError::TooLarge | AppDataError::Unsafe => ContentIndexError::Corrupt,
+        AppDataError::Read | AppDataError::Write | AppDataError::Directory => {
+            ContentIndexError::Read
+        }
+    }
 }
 
 fn valid_id(value: &str) -> bool {
