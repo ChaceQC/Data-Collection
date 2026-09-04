@@ -15,7 +15,7 @@
 
 #### 进行中
 
-- 阶段 D 代码、针对性测试、文档、五个版本入口、NSIS 候选构建和 loader 校验已完成；阶段分支尚未 commit、快进合并到 `dev` 或清理。
+- 阶段 D 代码、针对性测试、文档、五个版本入口、NSIS 候选构建和 loader 校验已完成；阶段提交为 `3ceba8b`，已通过 ancestry 检查并使用 `git merge --ff-only` 本地合并到 `dev`，阶段分支已删除，合并未产生额外代码变化。
 
 #### 用户验收
 
@@ -29,7 +29,7 @@
 #### 下一步
 
 - 已完成 `npm.cmd run build`、版本一致性检查、NSIS 构建和 `npm.cmd run verify:loader`；安装包绝对路径、大小、SHA-256、主程序版本和 loader 结果已记录在下方验证项。
-- 在阶段分支提交当前阶段文件，核对 `git diff --check` 和工作树后执行 `git merge --ff-only` 本地并入 `dev`，复核合并后的 `dev` 并删除已收口阶段分支；不执行 push、Tag 或 GitHub Release。
+- 用户下一步在 Windows 11/Tauri/WebView2 环境验收 20,000 条登记记录上的批量操作、撤销、刷新、重复拖放和正文索引容量行为；不执行 push、Tag 或 GitHub Release。
 
 #### 涉及文件
 
