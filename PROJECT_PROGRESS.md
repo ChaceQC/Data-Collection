@@ -2,7 +2,7 @@
 
 ## 2026-09-05
 
-### 阶段 E：app data 安全和单实例保护（0.3.37 代码候选，自动门禁和 NSIS 已完成）
+### 阶段 E：app data 安全和单实例保护（0.3.37 代码候选，自动门禁、NSIS 和本地合并已完成）
 
 #### 已完成
 
@@ -14,7 +14,7 @@
 
 #### 进行中
 
-- 阶段 E 代码、针对性测试、生产构建、版本同步、NSIS 候选构建和 loader 校验已完成；正在执行阶段分支 Git 收口。
+- 阶段 E 代码、针对性测试、生产构建、版本同步、NSIS 候选构建和 loader 校验已完成；阶段提交 `b0e91cd` 已通过 ancestry 检查并使用 `git merge --ff-only` 本地合并到 `dev`，阶段分支已删除。
 
 #### 用户验收
 
@@ -28,8 +28,8 @@
 
 #### 下一步
 
-- 在阶段分支提交并通过 ancestry 检查后使用 `git merge --ff-only` 本地并入 `dev`，删除已合并阶段分支；不执行 push、Tag 或 GitHub Release。
-- 用户安装候选后验收双实例、app data 替换、重启/升级和真实外部文件操作，验收通过后再决定后续阶段。
+- 用户安装 `0.3.37` 候选后验收双实例、app data 替换、重启/升级和真实外部文件操作；验收通过后再决定后续阶段。
+- 在用户原生验收完成前不执行 push、Tag 或 GitHub Release；后续代码工作从阶段 F `0.3.38` 开始。
 
 #### 涉及文件
 
@@ -55,7 +55,7 @@
 #### 验证
 
 - `cargo fmt --all -- --check`：通过。
-- `cargo check --tests`：通过。
+- `cargo check --locked`：通过；`cargo check --tests --locked`：通过。
 - `cargo test --locked`：103 项通过。
 - `cargo clippy --locked --all-targets --all-features -- -D warnings`：通过。
 - `npm.cmd run test:library`：26 项通过；`npm.cmd run test:contracts`：19 项通过；`npm.cmd run test:settings`：5 项通过；`npm.cmd run test:operations`：3 项通过；`npm.cmd run test:floating-ball`：30 项通过；`npm.cmd run test:sites`：4 项通过。
