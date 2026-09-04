@@ -7,6 +7,35 @@ export const LIBRARY_ACTION_TYPES = Object.freeze({
 });
 
 export const MAX_TAGS_PER_ENTRY = 32;
+export const MAX_DIRECT_INPUT_PATHS = 256;
+export const MAX_DIRECT_INPUT_PATH_BYTES = 32 * 1024;
+export const MAX_DIRECT_INPUT_TOTAL_BYTES = 4 * 1024 * 1024;
+
+export function validateDirectPathInput(paths) {
+  if (!Array.isArray(paths) || paths.length === 0) {
+    return { valid: false, message: "请选择文件或文件夹", paths: [] };
+  }
+  if (paths.length > MAX_DIRECT_INPUT_PATHS) {
+    return { valid: false, message: `一次最多处理 ${MAX_DIRECT_INPUT_PATHS} 条路径`, paths: [] };
+  }
+
+  const encoder = new TextEncoder();
+  let totalBytes = 0;
+  for (const path of paths) {
+    if (typeof path !== "string" || path.length === 0) {
+      return { valid: false, message: "路径输入包含空路径", paths: [] };
+    }
+    const byteLength = encoder.encode(path).length;
+    if (byteLength > MAX_DIRECT_INPUT_PATH_BYTES) {
+      return { valid: false, message: "单条路径长度超过上限", paths: [] };
+    }
+    totalBytes += byteLength;
+    if (totalBytes > MAX_DIRECT_INPUT_TOTAL_BYTES) {
+      return { valid: false, message: "路径输入总大小超过上限", paths: [] };
+    }
+  }
+  return { valid: true, message: "", paths: [...paths] };
+}
 
 export function createBrowserEntries(fileList, now = Date.now()) {
   const timestamp = Math.floor(now / 1000);

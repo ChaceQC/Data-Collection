@@ -81,9 +81,11 @@ pub async fn record_floating_paths(
         return Err("请拖入文件或文件夹".to_string());
     }
 
+    filesystem::validate_scan_paths(&paths).map_err(|error| error.to_string())?;
     let scan = tauri::async_runtime::spawn_blocking(move || filesystem::scan_paths(&paths))
         .await
-        .map_err(|_| "悬浮球记录任务未完成，请重试".to_string())?;
+        .map_err(|_| "悬浮球记录任务未完成，请重试".to_string())?
+        .map_err(|error| error.to_string())?;
     let skipped_count = scan.skipped_count;
     let skipped_reasons = scan.skipped_reasons.clone();
     let scan_truncated = scan.truncated;

@@ -15,6 +15,7 @@ import {
   normalizeTagList,
   removeTagFromList,
   summarizeBatchResult,
+  validateDirectPathInput,
   validateRename,
   validateTagInput,
 } from "./libraryControllerModel.js";
@@ -713,12 +714,18 @@ export function useLibraryActions({
 
   async function indexRealPaths(paths) {
     if (!isTauriRuntime || !paths?.length || indexingRef.current || batchBusyRef.current) return;
+    const pathInput = validateDirectPathInput(paths);
+    if (!pathInput.valid) {
+      showToast(pathInput.message);
+      return;
+    }
+    const acceptedPaths = pathInput.paths;
     const operationId = createOperationId("import");
-    operationReporter?.startOperation({ id: operationId, operation: "import", totalCount: paths.length });
+    operationReporter?.startOperation({ id: operationId, operation: "import", totalCount: acceptedPaths.length });
     indexingRef.current = true;
     setIndexing(true);
     try {
-      const result = await libraryRepository.indexPaths(paths);
+      const result = await libraryRepository.indexPaths(acceptedPaths);
       const snapshot = await libraryRepository.loadIndex();
       applyIndexSnapshot(snapshot);
       setDirectoryView(null);

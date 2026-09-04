@@ -2,6 +2,63 @@
 
 ## 2026-09-04
 
+### 阶段 D：索引和撤销性能（0.3.36 代码候选）
+
+#### 已完成
+
+- 按 `AGENT.md` 和 `PROJECT_PLAN.md` 在独立分支 `codex/phase-0.3.36-index-undo-performance` 实现阶段 D，保持 `index.json` v5、`content-index.json` 和操作历史格式不变，不需要数据迁移或回滚脚本。
+- `diff_entries`、`diff_groups`、撤销冲突校验、撤销应用、索引去重、导入合并和刷新映射改为一次构造的 ID/路径 `HashMap`/`HashSet`，避免对 20,000 条索引和批量受影响 ID 重复线性查找。
+- 批量收藏、标签、分组和索引移除在一次索引遍历后按受影响 ID更新；批量 ID 去重使用集合，并在进入 mutation 前限制原始输入不超过 500 项，保留取消、部分成功和逐项结果语义。
+- `index_paths` 与 `record_floating_paths` 在扫描前共享校验：最多 256 条路径、单路径最多 32 KiB、总输入最多 4 MiB；`scan_paths` 自身也拒绝越界输入，扫描结果、跳过原因和路径集合保持有界。主窗口导入入口同步提供即时反馈。
+- 正文索引增加按 revision 合并的 pending 队列和单 worker 消费模型，连续索引变更只保留最新待处理 revision/entries；旧任务在读取后、提交前检查更新 revision，正文同步失败仍与主索引隔离。
+- 正文索引在读取文件正文前使用 metadata size 做总容量可行性判断，避免明显超出容量的文件进入完整读取；实际正文大小仍在读取后再次校验。
+
+#### 进行中
+
+- 阶段 D 代码、针对性测试、文档、五个版本入口、NSIS 候选构建和 loader 校验已完成；阶段分支尚未 commit、快进合并到 `dev` 或清理。
+
+#### 用户验收
+
+- 尚未执行。本阶段不能用 Rust/前端测试、生产构建或 NSIS 生成替代 Windows 11/Tauri/WebView2 原生验收；20,000 条登记记录上的批量收藏、标签、分组、移除、撤销、刷新、重复拖放和正文索引容量行为仍需用户在桌面环境确认。
+
+#### 阻塞与风险
+
+- 安装包未签名且不内置 WebView2 Runtime，目标 Windows 11 机器需要已有 WebView2；DOC 预览仍依赖目标机 LibreOffice。
+- 阶段 D 未改变持久化格式和原文件操作边界；本地安装包属于代码候选，不能描述为已安装、已启动或已完成原生验收。
+
+#### 下一步
+
+- 已完成 `npm.cmd run build`、版本一致性检查、NSIS 构建和 `npm.cmd run verify:loader`；安装包绝对路径、大小、SHA-256、主程序版本和 loader 结果已记录在下方验证项。
+- 在阶段分支提交当前阶段文件，核对 `git diff --check` 和工作树后执行 `git merge --ff-only` 本地并入 `dev`，复核合并后的 `dev` 并删除已收口阶段分支；不执行 push、Tag 或 GitHub Release。
+
+#### 涉及文件
+
+- `prototype/src-tauri/src/storage/mod.rs`
+- `prototype/src-tauri/src/storage/repository.rs`
+- `prototype/src-tauri/src/storage/content_index.rs`
+- `prototype/src-tauri/src/commands/mod.rs`
+- `prototype/src-tauri/src/commands/library.rs`
+- `prototype/src-tauri/src/commands/floating_ball.rs`
+- `prototype/src-tauri/src/filesystem/mod.rs`
+- `prototype/src/features/library/libraryControllerModel.js`
+- `prototype/src/features/library/useLibraryActions.js`
+- `prototype/tests/library-controller.test.mjs`
+- 五个版本入口、`README.md`、`prototype/README.md`、`PROJECT_PLAN.md`
+
+#### 验证
+
+- `npm.cmd run test:library`：26 项通过。
+- `npm.cmd run test:contracts`：19 项通过。
+- `npm.cmd run test:content`：5 项通过。
+- `cargo fmt --all -- --check`：通过；`cargo check --locked`：通过；`cargo test --locked`：94 项通过；`cargo clippy --locked --all-targets --all-features -- -D warnings`：通过。
+- 已通过 20,000 条 synthetic entries 的 500 条差分和 20,000 条路径合并回归，以及直接导入数量/单路径/总字节上限和正文 pending revision 队列测试。
+- `npm.cmd run build`：通过，生成 Sites 所需的 `dist/client/index.html`、`dist/server/index.js` 和 `dist/.openai/hosting.json`。
+- `npm.cmd run tauri:build`：通过，生成 Windows x64 NSIS 候选 `E:\Project\test\prototype\src-tauri\target\release\bundle\nsis\本地资料工作台_0.3.36_x64-setup.exe`，大小 `8917932` bytes，SHA-256 `58C48ED8D1B6FC756E378578CD0E04306E4450865CCD8FB7677026E8D61CAA4C`；release 主程序版本 `0.3.36`，大小 `35969022` bytes，SHA-256 `2470F2172D2AD88D582F58F4D8DC1DCBE17D1644BD016D60ED271D539F8366F7`。
+- `npm.cmd run verify:loader`：通过；`WebView2Loader.dll` 为 `160320` bytes，SHA-256 `8427B1FC58EC707813E5C0A51EB5D69397BB333250A7B891BE4D3B123F1E0F1C`，Windows x64，与 release 主程序位于同一目录。
+- 未执行浏览器截图或 Windows 原生手工验收。
+
+## 2026-09-04
+
 ### 阶段 C：搜索安全和响应性能（0.3.35 代码候选）
 ### 阶段 C：搜索安全和响应性能（0.3.35 代码候选，自动门禁和 NSIS 已完成）
 

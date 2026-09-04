@@ -1,5 +1,5 @@
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     fs,
     path::{Path, PathBuf},
     sync::{Mutex, RwLock},
@@ -480,23 +480,88 @@ impl AppState {
             .map(|change| change.file_id.clone())
             .collect::<Vec<_>>();
         changed_ids.extend(record.groups.iter().map(|change| change.group_id.clone()));
+        let current_entry_positions = current
+            .entries
+            .iter()
+            .enumerate()
+            .map(|(position, entry)| (entry.id.clone(), position))
+            .collect::<HashMap<_, _>>();
+        let current_group_positions = current
+            .groups
+            .iter()
+            .enumerate()
+            .map(|(position, group)| (group.id.clone(), position))
+            .collect::<HashMap<_, _>>();
         for change in &record.entries {
-            if next.entries.iter().find(|entry| entry.id == change.file_id) != change.after.as_ref()
-            {
+            let current = current_entry_positions
+                .get(&change.file_id)
+                .and_then(|position| current.entries.get(*position));
+            if current != change.after.as_ref() {
                 return Err(StorageError::UndoConflict);
             }
         }
         for change in &record.groups {
-            if next.groups.iter().find(|group| group.id == change.group_id) != change.after.as_ref()
-            {
+            let current = current_group_positions
+                .get(&change.group_id)
+                .and_then(|position| current.groups.get(*position));
+            if current != change.after.as_ref() {
                 return Err(StorageError::UndoConflict);
             }
         }
+
+        let removed_entry_ids = record
+            .entries
+            .iter()
+            .filter(|change| change.before.is_none())
+            .map(|change| change.file_id.as_str())
+            .collect::<HashSet<_>>();
+        next.entries
+            .retain(|entry| !removed_entry_ids.contains(entry.id.as_str()));
+        let removed_group_ids = record
+            .groups
+            .iter()
+            .filter(|change| change.before.is_none())
+            .map(|change| change.group_id.as_str())
+            .collect::<HashSet<_>>();
+        next.groups
+            .retain(|group| !removed_group_ids.contains(group.id.as_str()));
+
+        let mut next_entry_positions = next
+            .entries
+            .iter()
+            .enumerate()
+            .map(|(position, entry)| (entry.id.clone(), position))
+            .collect::<HashMap<_, _>>();
         for change in &record.entries {
-            apply_undo_entry_change(&mut next.entries, change)?;
+            let Some(entry) = change.before.as_ref() else {
+                continue;
+            };
+            if let Some(position) = next_entry_positions.get(&change.file_id).copied() {
+                next.entries[position] = entry.clone();
+            } else {
+                let position = next.entries.len();
+                next.entries.push(entry.clone());
+                next_entry_positions.insert(change.file_id.clone(), position);
+            }
         }
+
+        let mut next_group_positions = next
+            .groups
+            .iter()
+            .enumerate()
+            .map(|(position, group)| (group.id.clone(), position))
+            .collect::<HashMap<_, _>>();
         for change in &record.groups {
-            apply_undo_group_change(&mut next.groups, change)?;
+            let Some(group) = change.before.as_ref() else {
+                continue;
+            };
+            if let Some(position) = next_group_positions.get(&change.group_id).copied() {
+                next.groups[position] = group.clone();
+            } else {
+                let position = next.groups.len();
+                next.groups.push(group.clone());
+                next_group_positions.insert(change.group_id.clone(), position);
+            }
         }
         sort_entries(&mut next.entries);
         sort_groups(&mut next.groups);
@@ -599,8 +664,12 @@ impl AppState {
             )?;
         }
         if !resolved_ids.is_empty() {
+            let resolved_id_set = resolved_ids
+                .iter()
+                .map(String::as_str)
+                .collect::<HashSet<_>>();
             next.pending_operations
-                .retain(|operation| !resolved_ids.contains(&operation.file_id));
+                .retain(|operation| !resolved_id_set.contains(operation.file_id.as_str()));
             let pending_path = self.pending_operations_path()?;
             if let Err(error) = save_pending_operations(&pending_path, &next.pending_operations) {
                 if changed && save_index_state(&index_path, &current).is_err() {
@@ -794,11 +863,21 @@ pub fn merge_index_entries(
     mode: IndexMergeMode,
 ) -> MergeStats {
     let mut stats = MergeStats::default();
-    for (input_index, mut incoming) in incoming.into_iter().enumerate() {
-        let existing = entries
-            .iter_mut()
-            .find(|entry| crate::filesystem::same_path(&entry.path, &incoming.path));
-        if let Some(existing) = existing {
+    let mut path_positions = HashMap::with_capacity(entries.len());
+    for (position, entry) in entries.iter().enumerate() {
+        path_positions
+            .entry(crate::filesystem::path_identity(&entry.path))
+            .or_insert(position);
+    }
+    let mut incoming = incoming.into_iter();
+    for input_index in 0..crate::filesystem::MAX_INDEX_ENTRIES {
+        let Some(mut incoming) = incoming.next() else {
+            break;
+        };
+        let path_key = crate::filesystem::path_identity(&incoming.path);
+        let existing_position = path_positions.get(&path_key).copied();
+        if let Some(existing_position) = existing_position {
+            let existing = &mut entries[existing_position];
             let id = existing.id.clone();
             let favorite = existing.favorite;
             let preview_status = existing.preview_status.clone();
@@ -841,7 +920,12 @@ pub fn merge_index_entries(
         stats.affected_ids.push(incoming.id.clone());
         stats.added_count += 1;
         stats.accepted_count += 1;
+        let position = entries.len();
         entries.push(incoming);
+        path_positions.insert(path_key, position);
+    }
+    if incoming.next().is_some() {
+        stats.truncated = true;
     }
     sort_entries(entries);
     stats
@@ -1165,17 +1249,26 @@ fn normalize_added_at(entries: &mut [IndexEntry]) -> bool {
 }
 
 fn deduplicate_entries(entries: &mut Vec<IndexEntry>) -> bool {
-    let original = entries.to_vec();
+    let original = entries.clone();
     let mut deduplicated = Vec::with_capacity(entries.len());
+    let mut id_positions: HashMap<String, usize> = HashMap::with_capacity(entries.len());
+    let mut path_positions: HashMap<String, usize> = HashMap::with_capacity(entries.len());
     for entry in original {
-        let duplicate_index = deduplicated.iter().position(|current: &IndexEntry| {
-            current.id == entry.id
-                || crate::filesystem::path_identity(&current.path)
-                    == crate::filesystem::path_identity(&entry.path)
-        });
+        let path_key = crate::filesystem::path_identity(&entry.path);
+        let duplicate_index = match (
+            id_positions.get(&entry.id).copied(),
+            path_positions.get(&path_key).copied(),
+        ) {
+            (Some(id_position), Some(path_position)) => Some(id_position.min(path_position)),
+            (Some(position), None) | (None, Some(position)) => Some(position),
+            (None, None) => None,
+        };
         if let Some(index) = duplicate_index {
             merge_duplicate_metadata(&mut deduplicated[index], &entry);
         } else {
+            let position = deduplicated.len();
+            id_positions.insert(entry.id.clone(), position);
+            path_positions.insert(path_key, position);
             deduplicated.push(entry);
         }
     }
@@ -1432,9 +1525,19 @@ fn append_undo_record(
 }
 
 fn diff_entries(before: &[IndexEntry], after: &[IndexEntry]) -> Vec<UndoEntryChange> {
-    let mut changes = Vec::new();
+    let after_by_id = after
+        .iter()
+        .fold(HashMap::with_capacity(after.len()), |mut index, entry| {
+            index.entry(entry.id.as_str()).or_insert(entry);
+            index
+        });
+    let before_ids = before
+        .iter()
+        .map(|entry| entry.id.as_str())
+        .collect::<HashSet<_>>();
+    let mut changes = Vec::with_capacity(before.len().min(after.len()));
     for entry in before {
-        let current = after.iter().find(|candidate| candidate.id == entry.id);
+        let current = after_by_id.get(entry.id.as_str()).copied();
         if current != Some(entry) {
             changes.push(UndoEntryChange {
                 file_id: entry.id.clone(),
@@ -1444,7 +1547,7 @@ fn diff_entries(before: &[IndexEntry], after: &[IndexEntry]) -> Vec<UndoEntryCha
         }
     }
     for entry in after {
-        if !before.iter().any(|candidate| candidate.id == entry.id) {
+        if !before_ids.contains(entry.id.as_str()) {
             changes.push(UndoEntryChange {
                 file_id: entry.id.clone(),
                 before: None,
@@ -1456,9 +1559,19 @@ fn diff_entries(before: &[IndexEntry], after: &[IndexEntry]) -> Vec<UndoEntryCha
 }
 
 fn diff_groups(before: &[Group], after: &[Group]) -> Vec<UndoGroupChange> {
-    let mut changes = Vec::new();
+    let after_by_id = after
+        .iter()
+        .fold(HashMap::with_capacity(after.len()), |mut index, group| {
+            index.entry(group.id.as_str()).or_insert(group);
+            index
+        });
+    let before_ids = before
+        .iter()
+        .map(|group| group.id.as_str())
+        .collect::<HashSet<_>>();
+    let mut changes = Vec::with_capacity(before.len().min(after.len()));
     for group in before {
-        let current = after.iter().find(|candidate| candidate.id == group.id);
+        let current = after_by_id.get(group.id.as_str()).copied();
         if current != Some(group) {
             changes.push(UndoGroupChange {
                 group_id: group.id.clone(),
@@ -1468,7 +1581,7 @@ fn diff_groups(before: &[Group], after: &[Group]) -> Vec<UndoGroupChange> {
         }
     }
     for group in after {
-        if !before.iter().any(|candidate| candidate.id == group.id) {
+        if !before_ids.contains(group.id.as_str()) {
             changes.push(UndoGroupChange {
                 group_id: group.id.clone(),
                 before: None,
@@ -1477,50 +1590,6 @@ fn diff_groups(before: &[Group], after: &[Group]) -> Vec<UndoGroupChange> {
         }
     }
     changes
-}
-
-fn apply_undo_entry_change(
-    entries: &mut Vec<IndexEntry>,
-    change: &UndoEntryChange,
-) -> Result<(), StorageError> {
-    let position = entries.iter().position(|entry| entry.id == change.file_id);
-    match &change.before {
-        Some(entry) => {
-            if let Some(position) = position {
-                entries[position] = entry.clone();
-            } else {
-                entries.push(entry.clone());
-            }
-        }
-        None => {
-            if let Some(position) = position {
-                entries.remove(position);
-            }
-        }
-    }
-    Ok(())
-}
-
-fn apply_undo_group_change(
-    groups: &mut Vec<Group>,
-    change: &UndoGroupChange,
-) -> Result<(), StorageError> {
-    let position = groups.iter().position(|group| group.id == change.group_id);
-    match &change.before {
-        Some(group) => {
-            if let Some(position) = position {
-                groups[position] = group.clone();
-            } else {
-                groups.push(group.clone());
-            }
-        }
-        None => {
-            if let Some(position) = position {
-                groups.remove(position);
-            }
-        }
-    }
-    Ok(())
 }
 
 const MAX_TIMESTAMP_SECONDS: i64 = 4_102_444_800;
@@ -1813,6 +1882,33 @@ mod tests {
         assert_eq!(recent.len(), 5);
         assert_eq!(recent[0].id, "recent-5");
         assert!(!recent.iter().any(|entry| entry.name == "主窗口导入.txt"));
+    }
+
+    #[test]
+    fn handles_twenty_thousand_entry_diff_and_merge_with_bounded_lookups() {
+        let mut before = (0..20_000)
+            .map(|index| sample_entry(&format!("批量-{index}.txt"), index as i64))
+            .collect::<Vec<_>>();
+        let mut after = before.clone();
+        for entry in after.iter_mut().take(500) {
+            entry.favorite = true;
+            entry.size = 2;
+        }
+
+        let changes = super::diff_entries(&before, &after);
+        assert_eq!(changes.len(), 500);
+        assert!(changes.iter().all(|change| change.after.is_some()));
+
+        let incoming = after.into_iter().map(|mut entry| {
+            entry.modified_at = entry.modified_at.saturating_add(1);
+            entry
+        });
+        let stats = merge_index_entries(&mut before, incoming, IndexMergeMode::RegularImport);
+        assert_eq!(stats.added_count, 0);
+        assert_eq!(stats.refreshed_count, 20_000);
+        assert_eq!(stats.accepted_count, 20_000);
+        assert_eq!(before.len(), 20_000);
+        assert_eq!(before.iter().filter(|entry| entry.size == 2).count(), 500);
     }
 
     #[test]

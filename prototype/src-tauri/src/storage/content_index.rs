@@ -30,6 +30,7 @@ pub struct ContentIndexState {
     path: Arc<Mutex<Option<PathBuf>>>,
     snapshot: Arc<RwLock<ContentIndexSnapshot>>,
     mutation_lock: Arc<Mutex<()>>,
+    sync_queue: Arc<Mutex<ContentSyncQueue>>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -44,8 +45,22 @@ impl Default for ContentIndexState {
             path: Arc::new(Mutex::new(None)),
             snapshot: Arc::new(RwLock::new(ContentIndexSnapshot::default())),
             mutation_lock: Arc::new(Mutex::new(())),
+            sync_queue: Arc::new(Mutex::new(ContentSyncQueue::default())),
         }
     }
+}
+
+#[derive(Debug, Default)]
+struct ContentSyncQueue {
+    latest_revision: Option<u64>,
+    pending: Option<PendingContentSync>,
+    running: bool,
+}
+
+#[derive(Debug)]
+struct PendingContentSync {
+    source_revision: u64,
+    entries: Vec<filesystem::IndexEntry>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -134,6 +149,67 @@ struct ContentIndexDocument {
 }
 
 impl ContentIndexState {
+    pub(crate) fn enqueue_sync(
+        &self,
+        source_revision: u64,
+        entries: Vec<filesystem::IndexEntry>,
+    ) -> bool {
+        let Ok(mut queue) = self.sync_queue.lock() else {
+            return false;
+        };
+        if queue
+            .latest_revision
+            .is_some_and(|latest| source_revision <= latest)
+        {
+            return false;
+        }
+        queue.latest_revision = Some(source_revision);
+        queue.pending = Some(PendingContentSync {
+            source_revision,
+            entries,
+        });
+        if queue.running {
+            false
+        } else {
+            queue.running = true;
+            true
+        }
+    }
+
+    pub(crate) fn take_pending_sync(&self) -> Option<(u64, Vec<filesystem::IndexEntry>)> {
+        self.sync_queue.lock().ok().and_then(|mut queue| {
+            queue
+                .pending
+                .take()
+                .map(|pending| (pending.source_revision, pending.entries))
+        })
+    }
+
+    pub(crate) fn has_pending_sync_after(&self, source_revision: u64) -> bool {
+        self.sync_queue
+            .lock()
+            .ok()
+            .and_then(|queue| {
+                queue
+                    .pending
+                    .as_ref()
+                    .map(|pending| pending.source_revision)
+            })
+            .is_some_and(|pending_revision| pending_revision > source_revision)
+    }
+
+    pub(crate) fn finish_sync_worker(&self) -> bool {
+        let Ok(mut queue) = self.sync_queue.lock() else {
+            return false;
+        };
+        if queue.pending.is_some() {
+            true
+        } else {
+            queue.running = false;
+            false
+        }
+    }
+
     pub fn initialize(&self, path: PathBuf) {
         let (documents, status) = match load_document(&path) {
             Ok(Some(document)) => {
@@ -221,12 +297,22 @@ impl ContentIndexState {
         })
     }
 
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn sync_entries(
         &self,
         entries: &[filesystem::IndexEntry],
         source_revision: u64,
     ) -> Result<ContentSyncResult, ContentIndexError> {
         self.sync_entries_internal(entries, source_revision, false, &|| false)
+    }
+
+    pub(crate) fn sync_entries_with_stop(
+        &self,
+        entries: &[filesystem::IndexEntry],
+        source_revision: u64,
+        should_stop: &dyn Fn() -> bool,
+    ) -> Result<ContentSyncResult, ContentIndexError> {
+        self.sync_entries_internal(entries, source_revision, false, should_stop)
     }
 
     pub fn rebuild(
@@ -291,6 +377,12 @@ impl ContentIndexState {
         if source_revision < current_status.source_revision {
             return Err(ContentIndexError::Stale);
         }
+        if should_stop() {
+            return Ok(ContentSyncResult {
+                cancelled: true,
+                ..ContentSyncResult::default()
+            });
+        }
         if current_status.state == "recovery" && !replace_all {
             return Err(ContentIndexError::RecoveryRequired);
         }
@@ -340,6 +432,17 @@ impl ContentIndexState {
                 continue;
             }
 
+            let old_size = previous
+                .as_ref()
+                .map(|document| document.content.len() as u64)
+                .unwrap_or(0);
+            if content_size_exceeds_limit(total_bytes, old_size, metadata.len()) {
+                remove_document(&mut next, &entry.id, &mut total_bytes, &mut result);
+                result.truncated = true;
+                record_failure(&mut result, &mut failed_reasons, "已达到正文索引总大小上限");
+                continue;
+            }
+
             let content = match read_content(&path_value, metadata.len()) {
                 Ok(content) => content,
                 Err(reason) => {
@@ -348,14 +451,7 @@ impl ContentIndexState {
                     continue;
                 }
             };
-            let old_size = previous
-                .as_ref()
-                .map(|document| document.content.len() as u64)
-                .unwrap_or(0);
-            let projected = total_bytes
-                .saturating_sub(old_size)
-                .saturating_add(content.len() as u64);
-            if projected > MAX_CONTENT_INDEX_BYTES {
+            if content_size_exceeds_limit(total_bytes, old_size, content.len() as u64) {
                 remove_document(&mut next, &entry.id, &mut total_bytes, &mut result);
                 result.truncated = true;
                 record_failure(&mut result, &mut failed_reasons, "已达到正文索引总大小上限");
@@ -380,6 +476,9 @@ impl ContentIndexState {
             next.insert(entry.id.clone(), document);
         }
 
+        if should_stop() {
+            result.cancelled = true;
+        }
         if result.cancelled && replace_all {
             self.replace_snapshot(ContentIndexSnapshot {
                 status: make_status(
@@ -400,6 +499,10 @@ impl ContentIndexState {
             return Ok(result);
         }
 
+        if should_stop() {
+            result.cancelled = true;
+            return Ok(result);
+        }
         result.skipped_reasons = failed_reasons.into_iter().map(str::to_string).collect();
         let last_error = (result.skipped_count > 0)
             .then(|| "部分纯文本资料未能建立正文索引，请重建后重试".to_string());
@@ -445,6 +548,13 @@ impl ContentIndexState {
             .map_err(|_| ContentIndexError::Unavailable)? = snapshot;
         Ok(())
     }
+}
+
+fn content_size_exceeds_limit(total_bytes: u64, old_size: u64, next_size: u64) -> bool {
+    total_bytes
+        .saturating_sub(old_size)
+        .saturating_add(next_size)
+        > MAX_CONTENT_INDEX_BYTES
 }
 
 fn is_indexable_entry(entry: &filesystem::IndexEntry) -> bool {
@@ -635,7 +745,9 @@ fn modified_timestamp_nanos(metadata: &fs::Metadata) -> u128 {
 
 #[cfg(test)]
 mod tests {
-    use super::{ContentIndexError, ContentIndexState, MAX_CONTENT_FILE_BYTES};
+    use super::{
+        ContentIndexError, ContentIndexState, MAX_CONTENT_FILE_BYTES, MAX_CONTENT_INDEX_BYTES,
+    };
     use crate::filesystem::IndexEntry;
     use std::{fs, path::PathBuf, time::SystemTime};
 
@@ -790,5 +902,86 @@ mod tests {
         assert_eq!(state.status().unwrap().indexed_count, 0);
         let _ = fs::remove_file(source);
         let _ = fs::remove_file(index);
+    }
+
+    #[test]
+    fn coalesces_pending_syncs_and_stops_an_older_revision_before_commit() {
+        let state = ContentIndexState::default();
+        let first_entry = IndexEntry {
+            id: "file-first".to_string(),
+            path: "C:\\资料\\first.txt".to_string(),
+            name: "first.txt".to_string(),
+            kind: "text".to_string(),
+            file_type: "文本文件".to_string(),
+            size: 1,
+            modified_at: 1,
+            status: "已登记".to_string(),
+            invalid: false,
+            favorite: false,
+            added_at: 1,
+            preview_status: "idle".to_string(),
+            last_recorded_at: None,
+            last_opened_at: None,
+            tags: Vec::new(),
+            group_id: None,
+        };
+        assert!(state.enqueue_sync(1, vec![first_entry]));
+        let _ = state
+            .take_pending_sync()
+            .expect("first sync should be queued");
+
+        let latest_entry = IndexEntry {
+            id: "file-latest".to_string(),
+            path: "C:\\资料\\latest.txt".to_string(),
+            name: "latest.txt".to_string(),
+            kind: "text".to_string(),
+            file_type: "文本文件".to_string(),
+            size: 1,
+            modified_at: 1,
+            status: "已登记".to_string(),
+            invalid: false,
+            favorite: false,
+            added_at: 1,
+            preview_status: "idle".to_string(),
+            last_recorded_at: None,
+            last_opened_at: None,
+            tags: Vec::new(),
+            group_id: None,
+        };
+        assert!(!state.enqueue_sync(2, vec![latest_entry.clone()]));
+        assert!(state.has_pending_sync_after(1));
+        assert!(
+            state
+                .sync_entries_with_stop(&[], 1, &|| { state.has_pending_sync_after(1) })
+                .unwrap()
+                .cancelled
+        );
+        assert!(state.finish_sync_worker());
+
+        let (revision, entries) = state
+            .take_pending_sync()
+            .expect("only the latest pending sync should remain");
+        assert_eq!(revision, 2);
+        assert_eq!(entries, vec![latest_entry]);
+        assert!(!state.finish_sync_worker());
+    }
+
+    #[test]
+    fn checks_metadata_size_before_reading_when_content_capacity_is_exceeded() {
+        assert!(super::content_size_exceeds_limit(
+            MAX_CONTENT_INDEX_BYTES,
+            0,
+            1
+        ));
+        assert!(!super::content_size_exceeds_limit(
+            MAX_CONTENT_INDEX_BYTES,
+            1,
+            1
+        ));
+        assert!(super::content_size_exceeds_limit(
+            MAX_CONTENT_INDEX_BYTES - 10,
+            0,
+            11
+        ));
     }
 }

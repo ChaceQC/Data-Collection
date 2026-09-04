@@ -1857,7 +1857,7 @@ checksum = "47d9d19d1d6efa0109d2f65ff4c85cddd50bd572e5a00127ab10987290bcefae"
 
 [[package]]
 name = "local-material-workbench"
-version = "0.3.35"
+version = "0.3.36"
 dependencies = [
  "atomic-write-file",
  "encoding_rs",

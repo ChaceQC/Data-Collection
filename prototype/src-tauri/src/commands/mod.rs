@@ -468,9 +468,11 @@ pub async fn index_paths(
         return Err("请选择文件或文件夹".to_string());
     }
 
+    filesystem::validate_scan_paths(&paths).map_err(|error| error.to_string())?;
     let scan = tauri::async_runtime::spawn_blocking(move || filesystem::scan_paths(&paths))
         .await
-        .map_err(|_| "索引任务未完成，请重试".to_string())?;
+        .map_err(|_| "索引任务未完成，请重试".to_string())?
+        .map_err(|error| error.to_string())?;
     let skipped_count = scan.skipped_count;
     let skipped_reasons = scan.skipped_reasons.clone();
     let truncated = scan.truncated;
@@ -1245,10 +1247,27 @@ pub(crate) fn schedule_content_index_sync<R: Runtime>(
         .state::<storage::content_index::ContentIndexState>()
         .inner()
         .clone();
+    if !content_state.enqueue_sync(revision, entries) {
+        return;
+    }
     let app_for_task = app.clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        match content_state.sync_entries(&entries, revision) {
-            Ok(_) => emit_content_index_status(&app_for_task, &content_state),
+    tauri::async_runtime::spawn_blocking(move || loop {
+        let Some((source_revision, entries)) = content_state.take_pending_sync() else {
+            if !content_state.finish_sync_worker() {
+                break;
+            }
+            continue;
+        };
+        let result = content_state.sync_entries_with_stop(&entries, source_revision, &|| {
+            content_state.has_pending_sync_after(source_revision)
+        });
+        match result {
+            Ok(result)
+                if !result.cancelled && !content_state.has_pending_sync_after(source_revision) =>
+            {
+                emit_content_index_status(&app_for_task, &content_state);
+            }
+            Ok(_) => {}
             Err(
                 storage::content_index::ContentIndexError::RecoveryRequired
                 | storage::content_index::ContentIndexError::Stale,
@@ -1257,6 +1276,9 @@ pub(crate) fn schedule_content_index_sync<R: Runtime>(
                 content_state.mark_unavailable(&error.to_string());
                 emit_content_index_status(&app_for_task, &content_state);
             }
+        }
+        if !content_state.finish_sync_worker() {
+            break;
         }
     });
 }

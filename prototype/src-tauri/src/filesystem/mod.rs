@@ -16,6 +16,9 @@ pub(crate) mod operations;
 pub(crate) mod recursive_import;
 
 pub const MAX_INDEX_ENTRIES: usize = 20_000;
+pub const MAX_DIRECT_INPUT_PATHS: usize = 256;
+pub const MAX_DIRECT_INPUT_PATH_BYTES: usize = recursive_import::MAX_PATH_BYTES;
+pub const MAX_DIRECT_INPUT_TOTAL_BYTES: usize = 4 * 1024 * 1024;
 
 #[derive(Debug, Error)]
 pub enum FileSystemError {
@@ -23,6 +26,20 @@ pub enum FileSystemError {
     InvalidFile,
     #[error("请选择可访问的文件夹")]
     InvalidDirectory,
+}
+
+#[derive(Clone, Copy, Debug, Eq, Error, PartialEq)]
+pub enum ScanInputError {
+    #[error("请选择文件或文件夹")]
+    Empty,
+    #[error("路径输入包含空路径")]
+    EmptyPath,
+    #[error("一次最多处理 256 条路径")]
+    TooManyPaths,
+    #[error("单条路径长度超过上限")]
+    PathTooLong,
+    #[error("路径输入总大小超过上限")]
+    TotalTooLarge,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -189,9 +206,37 @@ fn default_added_at() -> i64 {
     0
 }
 
-pub fn scan_paths(paths: &[String]) -> ScanResult {
-    let mut result = ScanResult::default();
-    let mut seen_paths = HashSet::new();
+pub fn validate_scan_paths(paths: &[String]) -> Result<(), ScanInputError> {
+    if paths.is_empty() {
+        return Err(ScanInputError::Empty);
+    }
+    if paths.len() > MAX_DIRECT_INPUT_PATHS {
+        return Err(ScanInputError::TooManyPaths);
+    }
+
+    let mut total_bytes = 0usize;
+    for path in paths {
+        if path.is_empty() {
+            return Err(ScanInputError::EmptyPath);
+        }
+        if path.len() > MAX_DIRECT_INPUT_PATH_BYTES {
+            return Err(ScanInputError::PathTooLong);
+        }
+        total_bytes = total_bytes.saturating_add(path.len());
+        if total_bytes > MAX_DIRECT_INPUT_TOTAL_BYTES {
+            return Err(ScanInputError::TotalTooLarge);
+        }
+    }
+    Ok(())
+}
+
+pub fn scan_paths(paths: &[String]) -> Result<ScanResult, ScanInputError> {
+    validate_scan_paths(paths)?;
+    let mut result = ScanResult {
+        entries: Vec::with_capacity(paths.len().min(MAX_INDEX_ENTRIES)),
+        ..ScanResult::default()
+    };
+    let mut seen_paths = HashSet::with_capacity(paths.len());
 
     for raw_path in paths {
         if result.entries.len() >= MAX_INDEX_ENTRIES {
@@ -226,7 +271,7 @@ pub fn scan_paths(paths: &[String]) -> ScanResult {
         }
     }
 
-    result
+    Ok(result)
 }
 
 pub fn list_directory(raw_path: &str) -> Result<Vec<IndexEntry>, FileSystemError> {
@@ -693,7 +738,8 @@ fn is_reparse_point(_metadata: &Metadata) -> bool {
 mod tests {
     use super::{
         list_directory, preview_limits, resolve_directory_child, same_path, scan_paths,
-        type_info_for_extension,
+        type_info_for_extension, ScanInputError, MAX_DIRECT_INPUT_PATHS,
+        MAX_DIRECT_INPUT_PATH_BYTES, MAX_DIRECT_INPUT_TOTAL_BYTES,
     };
     use std::{fs, path::PathBuf, time::SystemTime};
 
@@ -714,7 +760,8 @@ mod tests {
         let file = nested.join("研究 计划.md");
         assert!(fs::write(&file, "# 资料").is_ok());
 
-        let result = scan_paths(&[root.to_string_lossy().into_owned()]);
+        let result = scan_paths(&[root.to_string_lossy().into_owned()])
+            .expect("direct scan input should be accepted");
 
         assert_eq!(result.entries.len(), 1);
         assert_eq!(
@@ -725,6 +772,28 @@ mod tests {
         assert_eq!(result.entries[0].file_type, "文件夹");
         assert!(!result.entries[0].invalid);
         assert!(fs::remove_dir_all(root).is_ok());
+    }
+
+    #[test]
+    fn rejects_direct_scan_input_before_touching_the_filesystem() {
+        let too_many = vec!["missing".to_string(); MAX_DIRECT_INPUT_PATHS + 1];
+        assert!(matches!(
+            scan_paths(&too_many),
+            Err(ScanInputError::TooManyPaths)
+        ));
+
+        let too_long = vec!["x".repeat(MAX_DIRECT_INPUT_PATH_BYTES + 1)];
+        assert!(matches!(
+            scan_paths(&too_long),
+            Err(ScanInputError::PathTooLong)
+        ));
+
+        let total_limit_count = MAX_DIRECT_INPUT_TOTAL_BYTES / MAX_DIRECT_INPUT_PATH_BYTES + 1;
+        let too_large = vec!["x".repeat(MAX_DIRECT_INPUT_PATH_BYTES); total_limit_count];
+        assert!(matches!(
+            scan_paths(&too_large),
+            Err(ScanInputError::TotalTooLarge)
+        ));
     }
 
     #[test]

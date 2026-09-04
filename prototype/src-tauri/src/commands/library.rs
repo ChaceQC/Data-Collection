@@ -1,4 +1,7 @@
-use std::path::PathBuf;
+use std::{
+    collections::{HashMap, HashSet},
+    path::PathBuf,
+};
 
 use serde::Serialize;
 use tauri::{AppHandle, Manager, State};
@@ -251,16 +254,22 @@ pub async fn batch_set_favorite(
         operation_id.clone(),
         "batch-favorite",
         move |entries, _groups, control| {
+            let positions = entries
+                .iter()
+                .enumerate()
+                .map(|(position, entry)| (entry.id.clone(), position))
+                .collect::<HashMap<_, _>>();
             let mut results = Vec::with_capacity(ids_for_mutation.len());
             for (index, id) in ids_for_mutation.iter().enumerate() {
                 if let Some(reason) = control.stop_reason() {
                     append_stopped_results(&mut results, &ids_for_mutation[index..], reason);
                     break;
                 }
-                let Some(entry) = entries.iter_mut().find(|entry| entry.id == *id) else {
+                let Some(position) = positions.get(id).copied() else {
                     results.push(batch_skipped(id, "资料已不存在"));
                     continue;
                 };
+                let entry = &mut entries[position];
                 if entry.favorite == favorite {
                     results.push(batch_skipped(id, "收藏状态未变化"));
                     continue;
@@ -302,18 +311,26 @@ pub async fn batch_remove_index_entries(
         operation_id.clone(),
         "batch-remove-index",
         move |entries, _groups, control| {
+            let existing_ids = entries
+                .iter()
+                .map(|entry| entry.id.clone())
+                .collect::<HashSet<_>>();
+            let mut removed_ids = HashSet::with_capacity(ids_for_mutation.len());
             let mut results = Vec::with_capacity(ids_for_mutation.len());
             for (index, id) in ids_for_mutation.iter().enumerate() {
                 if let Some(reason) = control.stop_reason() {
                     append_stopped_results(&mut results, &ids_for_mutation[index..], reason);
                     break;
                 }
-                let Some(position) = entries.iter().position(|entry| entry.id == *id) else {
+                if !existing_ids.contains(id) {
                     results.push(batch_skipped(id, "资料已不存在"));
                     continue;
-                };
-                entries.remove(position);
+                }
+                removed_ids.insert(id.clone());
                 results.push(batch_success(id));
+            }
+            if !removed_ids.is_empty() {
+                entries.retain(|entry| !removed_ids.contains(&entry.id));
             }
             Ok((
                 results.iter().any(|result| result.status == "success"),
@@ -356,16 +373,22 @@ pub async fn batch_update_tags(
         operation_id.clone(),
         "batch-tags",
         move |entries, _groups, control| {
+            let positions = entries
+                .iter()
+                .enumerate()
+                .map(|(position, entry)| (entry.id.clone(), position))
+                .collect::<HashMap<_, _>>();
             let mut results = Vec::with_capacity(ids_for_mutation.len());
             for (index, id) in ids_for_mutation.iter().enumerate() {
                 if let Some(reason) = control.stop_reason() {
                     append_stopped_results(&mut results, &ids_for_mutation[index..], reason);
                     break;
                 }
-                let Some(entry) = entries.iter_mut().find(|entry| entry.id == *id) else {
+                let Some(position) = positions.get(id).copied() else {
                     results.push(batch_skipped(id, "资料已不存在"));
                     continue;
                 };
+                let entry = &mut entries[position];
                 let mut next_tags = entry.tags.clone();
                 if add {
                     for tag in &tags_for_mutation {
@@ -430,24 +453,35 @@ pub async fn batch_set_group(
         "batch-group",
         move |entries, groups, control| {
             if let Some(group_id) = group_id.as_deref() {
+                if group_id.trim().is_empty() {
+                    return Err(StorageError::InvalidId);
+                }
                 if !groups.iter().any(|group| group.id == group_id) {
                     return Err(StorageError::GroupNotFound);
                 }
             }
+            let positions = entries
+                .iter()
+                .enumerate()
+                .map(|(position, entry)| (entry.id.clone(), position))
+                .collect::<HashMap<_, _>>();
             let mut results = Vec::with_capacity(ids_for_mutation.len());
             for (index, id) in ids_for_mutation.iter().enumerate() {
                 if let Some(reason) = control.stop_reason() {
                     append_stopped_results(&mut results, &ids_for_mutation[index..], reason);
                     break;
                 }
-                match storage::set_entry_group(entries, groups, id, group_id.as_deref()) {
-                    Ok(true) => results.push(batch_success(id)),
-                    Ok(false) => results.push(batch_skipped(id, "分组状态未变化")),
-                    Err(StorageError::EntryNotFound) => {
-                        results.push(batch_skipped(id, "资料已不存在"))
-                    }
-                    Err(error) => return Err(error),
+                let Some(position) = positions.get(id).copied() else {
+                    results.push(batch_skipped(id, "资料已不存在"));
+                    continue;
+                };
+                let entry = &mut entries[position];
+                if entry.group_id.as_deref() == group_id.as_deref() {
+                    results.push(batch_skipped(id, "分组状态未变化"));
+                    continue;
                 }
+                entry.group_id = group_id.clone();
+                results.push(batch_success(id));
             }
             Ok((
                 results.iter().any(|result| result.status == "success"),
@@ -492,12 +526,21 @@ fn changed_ids_for_single(file_id: &str, changed: bool) -> Vec<String> {
 }
 
 fn normalize_batch_ids(file_ids: Vec<String>) -> Result<Vec<String>, CommandError> {
+    if file_ids.len() > MAX_BATCH_IDS {
+        return Err(command_error(
+            "batch-too-large",
+            format!("一次最多操作 {MAX_BATCH_IDS} 项资料"),
+            false,
+            "unchanged",
+        ));
+    }
+    let mut seen = HashSet::with_capacity(file_ids.len());
     let mut normalized = Vec::with_capacity(file_ids.len());
     for file_id in file_ids {
         if !is_valid_batch_id(&file_id) {
             return Err(structured_storage_error(StorageError::InvalidId));
         }
-        if !normalized.iter().any(|current| current == &file_id) {
+        if seen.insert(file_id.clone()) {
             normalized.push(file_id);
         }
     }
@@ -505,14 +548,6 @@ fn normalize_batch_ids(file_ids: Vec<String>) -> Result<Vec<String>, CommandErro
         return Err(command_error(
             "invalid-batch",
             "请先选择资料",
-            false,
-            "unchanged",
-        ));
-    }
-    if normalized.len() > MAX_BATCH_IDS {
-        return Err(command_error(
-            "batch-too-large",
-            format!("一次最多操作 {MAX_BATCH_IDS} 项资料"),
             false,
             "unchanged",
         ));

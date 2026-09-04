@@ -1,3 +1,5 @@
+use std::collections::{HashMap, HashSet};
+
 use crate::filesystem::{self, IndexEntry};
 
 use super::{
@@ -63,13 +65,20 @@ impl<'a> IndexRepository<'a> {
         checked: Vec<IndexEntry>,
     ) -> Result<MutationResult<Vec<String>>, StorageError> {
         self.update_entries_with(|entries| {
+            let positions = entries
+                .iter()
+                .enumerate()
+                .map(|(position, entry)| (entry.id.clone(), position))
+                .collect::<HashMap<_, _>>();
             let mut changed_ids = Vec::new();
             for refreshed in checked {
-                let Some(current) = entries.iter_mut().find(|entry| {
-                    entry.id == refreshed.id && filesystem::same_path(&entry.path, &refreshed.path)
-                }) else {
+                let Some(position) = positions.get(&refreshed.id).copied() else {
                     continue;
                 };
+                let current = &mut entries[position];
+                if !filesystem::same_path(&current.path, &refreshed.path) {
+                    continue;
+                }
                 if filesystem::apply_refreshed_metadata(current, &refreshed) {
                     changed_ids.push(current.id.clone());
                 }
@@ -105,10 +114,14 @@ impl<'a> IndexRepository<'a> {
                     .collect::<Vec<_>>();
             if sorted_changed {
                 changed = true;
+                let changed_id_set = changed_ids
+                    .iter()
+                    .map(String::as_str)
+                    .collect::<HashSet<_>>();
                 let additional_ids = entries
                     .iter()
                     .map(|entry| entry.id.clone())
-                    .filter(|id| !changed_ids.contains(id))
+                    .filter(|id| !changed_id_set.contains(id.as_str()))
                     .collect::<Vec<_>>();
                 changed_ids.extend(additional_ids);
             }

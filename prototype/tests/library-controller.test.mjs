@@ -10,6 +10,7 @@ import {
   normalizeTagList,
   removeTagFromList,
   summarizeBatchResult,
+  validateDirectPathInput,
   validateRename,
   validateTagInput,
 } from "../src/features/library/libraryControllerModel.js";
@@ -37,6 +38,13 @@ test("summarizes partial batch results and validates tag input", () => {
   assert.equal(validateTagInput("  重点  ").value, "重点");
   assert.equal(validateTagInput("").valid, false);
   assert.equal(validateTagInput("x".repeat(33)).valid, false);
+});
+
+test("bounds direct path imports before sending them to the desktop command", () => {
+  assert.equal(validateDirectPathInput(Array.from({ length: 257 }, () => "x")).valid, false);
+  assert.equal(validateDirectPathInput(["x".repeat(32 * 1024 + 1)]).valid, false);
+  assert.equal(validateDirectPathInput(Array.from({ length: 129 }, () => "x".repeat(32 * 1024))).valid, false);
+  assert.deepEqual(validateDirectPathInput(["C:\\资料\\报告.txt"]).paths, ["C:\\资料\\报告.txt"]);
 });
 
 test("edits tag drafts with normalization, case-insensitive deduplication, and limits", () => {
