@@ -290,9 +290,11 @@ export function FloatingBallWindow() {
       onKeyDown={handleBallKeyDown}
     >
       {status === "recording" ? <SpinnerGap className="is-spinning" size={27} weight="bold" aria-hidden="true" /> : status === "drag-over" ? <DownloadSimple size={28} weight="bold" aria-hidden="true" /> : <Files size={28} weight="regular" aria-hidden="true" />}
-      <span className={"floating-ball-count-badge floating-ball-count-badge-" + count.state} aria-hidden="true" data-testid="floating-ball-count-badge">
-        {count.state === "loading" ? <SpinnerGap className="is-spinning" size={11} weight="bold" /> : count.display}
-      </span>
+      {count.state !== "error" && (
+        <span className={"floating-ball-count-badge floating-ball-count-badge-" + count.state} aria-hidden="true" data-testid="floating-ball-count-badge">
+          {count.state === "loading" ? <SpinnerGap className="is-spinning" size={11} weight="bold" /> : count.display}
+        </span>
+      )}
       {statusMark}
       <span className="sr-only">{feedback || (status === "drag-over" ? "可放置文件" : "准备记录文件")}</span>
     </button>

@@ -33,7 +33,7 @@ export const FLOATING_STATUSES = Object.freeze([
   "moving",
 ]);
 
-export const FLOATING_LIBRARY_COUNT_DISPLAY_LIMIT = 999;
+export const FLOATING_LIBRARY_COUNT_DISPLAY_LIMIT = 99;
 
 export function getFloatingLibraryCountPresentation(count, loadState = "ready") {
   if (loadState === "loading") {
@@ -47,7 +47,7 @@ export function getFloatingLibraryCountPresentation(count, loadState = "ready") 
   if (loadState === "error") {
     return {
       state: "error",
-      display: "!",
+      display: null,
       label: "文件库数量读取失败",
       value: null,
     };
@@ -57,7 +57,7 @@ export function getFloatingLibraryCountPresentation(count, loadState = "ready") 
   if (!Number.isSafeInteger(value) || value < 0) {
     return {
       state: "error",
-      display: "!",
+      display: null,
       label: "文件库数量读取失败",
       value: null,
     };

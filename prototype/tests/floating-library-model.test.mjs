@@ -84,6 +84,7 @@ test("normalizes defaults and rejects unsafe query boundaries", () => {
     limit: 50,
   });
   assert.deepEqual(normalizeFloatingFilesQuery({ query: "  项目   资料  " }).query, "项目 资料");
+  assert.equal(normalizeFloatingFilesQuery({ query: " Ａlpha　资料 " }).query, "Alpha 资料");
   assert.throws(() => normalizeFloatingFilesQuery({ filter: "path" }), TypeError);
   assert.throws(() => normalizeFloatingFilesQuery({ sortKey: "path" }), TypeError);
   assert.throws(() => normalizeFloatingFilesQuery({ direction: "sideways" }), TypeError);
@@ -142,6 +143,33 @@ test("keeps search input safe and formats stable row and page metadata", () => {
     page: 2,
     pageCount: 3,
   });
+});
+
+test("matches NFKC and case-normalized metadata and treats empty open times consistently", () => {
+  const unicodeItems = [
+    { ...items[0], id: "unicode", name: "Ａlpha 资料.txt", lastOpenedAt: 0 },
+    { ...items[1], id: "known", name: "Beta.txt", lastOpenedAt: 20 },
+    { ...items[2], id: "missing", name: "Gamma.txt", lastOpenedAt: null },
+  ];
+  const searched = queryFloatingFiles(unicodeItems, { query: "ａｌｐｈａ　资料" });
+  assert.deepEqual(searched.items.map((item) => item.id), ["unicode"]);
+
+  const sorted = queryFloatingFiles(unicodeItems, { sortKey: "lastOpenedAt", direction: "desc" });
+  assert.deepEqual(sorted.items.map((item) => item.id), ["known", "missing", "unicode"]);
+});
+
+test("sorts NFKC-equivalent names with a deterministic Unicode tie-breaker", () => {
+  const result = queryFloatingFiles([
+    { ...items[0], id: "digits-2", name: "A2.txt" },
+    { ...items[1], id: "digits-10", name: "Ａ１０.txt" },
+  ], { sortKey: "name" });
+  assert.deepEqual(result.items.map((item) => item.id), ["digits-10", "digits-2"]);
+
+  const idTie = queryFloatingFiles([
+    { ...items[0], id: "a-id", name: "相同名称.txt" },
+    { ...items[1], id: "Ａ-id", name: "相同名称.txt" },
+  ], { sortKey: "name" });
+  assert.deepEqual(idTie.items.map((item) => item.id), ["Ａ-id", "a-id"]);
 });
 
 test("paginates the 50-item boundary and entries beyond it", () => {

@@ -1,6 +1,6 @@
 # 本地资料工作台 0.3.x 架构加固、性能和可维护性实施计划
 
-> 计划状态：新计划待开始
+> 计划状态：阶段 A 代码、自动门禁、安装包门禁和原生验收已完成，Git 收口待完成
 > 编制日期：2026-09-04
 > 当前发布基线：v0.3.32
 > 下一候选版本：v0.3.33
@@ -305,6 +305,7 @@ git branch -d <phase-branch>
 - `prototype/src/features/library/useLibraryActions.js`
 - `prototype/src/features/floating-ball/floatingBallModel.js`
 - `prototype/src/features/floating-ball/floatingLibraryModel.js`
+- `prototype/src/features/floating-ball/FloatingBallWindow.jsx`
 - `prototype/src/features/floating-ball/FloatingBallPanel.jsx`
 - `prototype/tests/preview-registry.test.mjs`
 - `prototype/tests/floating-library-model.test.mjs`
@@ -334,7 +335,7 @@ git branch -d <phase-branch>
 
 ### 5.7 阶段完成标准
 
-- 三项确定性问题有代码修复和回归测试。
+- 四项确定性问题有代码修复和回归测试。
 - 版本五根同步为 `0.3.33`。
 - 该阶段独立分支已通过 ancestry 检查，并使用 `git merge --ff-only <phase-branch>` 本地并入 `dev`；合并后的 `dev` 状态已复核。
 - 相关文档和 `PROJECT_PROGRESS.md` 已更新。

@@ -1,5 +1,60 @@
 # 项目进度
 
+## 2026-09-04
+
+### 阶段 A：确定性功能和契约修复（0.3.33 代码候选）
+
+#### 已完成
+
+- 按当前 `AGENT.md` 和 `PROJECT_PLAN.md` 完成阶段 A 的 A1-A4：Rust 图片校验同时接受 `jpg`/`jpeg`；预览层明确区分主索引条目和目录临时子项；悬浮球数量超过两位数字显示 `99+`，数量读取失败时隐藏徽标；JS/Rust 文件库查询统一 NFKC、空白、大小写、空时间和确定性 Unicode 排序语义。
+- JPG 仍然经过共享 manifest、普通文件、真实图片格式和像素上限校验；新增 Rust 测试覆盖真实 JPEG 内容和 `.jpg` 扩展名内容不匹配，未放宽预览安全边界。
+- 目录临时子项只保留其实际可用的预览失败恢复、返回和资源管理器定位能力，不再显示收藏、复制位置、重命名、删除或默认程序打开入口；主索引文件的收藏、复制位置、默认打开和定位能力保持不变。
+- 新增前端预览能力模型、JS 文件库 NFKC/空时间/Unicode 排序回归样本，以及 Rust 端相同语义样本；没有改变 `index.json` 格式、IPC 返回结构、`get_floating_recent` 最近记录语义或外部文件操作边界。
+- `unicode-normalization` 已加入 `prototype/src-tauri/Cargo.toml` 并锁定到 `Cargo.lock` 的 `0.1.25`，仅用于文件库查询文本和排序键规范化。
+- 五个版本入口已同步为 `0.3.33`：`prototype/package.json`、`prototype/package-lock.json` 根包、Tauri 配置、Rust crate 和 `Cargo.lock` 本地 package；计划、根 README 和原型 README 已标明当前仍为未发布候选。
+
+#### 进行中
+
+- 阶段分支的本地 commit、`dev` ancestry 复核、`git merge --ff-only` 和已合并阶段分支删除待本轮最后收口；未执行 push、Tag 或 Release。
+
+#### 用户验收
+
+- 2026-09-04，用户确认阶段 A 的 Windows 11/Tauri/WebView2 原生验收已完成。用户未提供具体 Windows、WebView2、显示器或 DPI 版本信息，本文不补填环境细节。
+
+#### 阻塞与风险
+
+- 首次 `npm.cmd run tauri:build` 在 Tauri 写入 release EXE 时遇到 Windows `os error 32` 文件锁并失败；确认无本地资料工作台、Tauri 或 NSIS 进程后重试成功。第一次生成的部分安装器不作为候选，以下只记录第二次成功构建的产物。
+- 安装包未签名且不内置 WebView2 Runtime，目标 Windows 11 机器需要已有 WebView2；DOC 预览仍依赖目标机 LibreOffice；`xlsx@0.18.5` 的既有 Prototype Pollution/ReDoS 风险保持不变。
+- 本阶段未启动新的浏览器回退服务；自动化证据来自模型/契约/构建测试，不能替代用户已确认的 Windows 11/Tauri/WebView2 原生验收。
+
+#### 下一步
+
+- 完成本阶段分支 commit 后，验证其为 `dev` 的直接后继并使用 `git merge --ff-only codex/phase-0.3.33-correctness` 本地并入 `dev`，删除已合并阶段分支；随后进入阶段 B `0.3.34` 的索引一致快照设计和实现。
+
+#### 涉及文件
+
+- `prototype/src-tauri/src/preview/image.rs`
+- `prototype/src-tauri/src/storage/floating_files.rs`
+- `prototype/src-tauri/Cargo.toml`、`prototype/src-tauri/Cargo.lock`
+- `prototype/src/features/preview/PreviewPane.jsx`、`previewTypes.js`
+- `prototype/src/features/floating-ball/FloatingBallWindow.jsx`、`FloatingBallPanel.jsx`、`floatingBallModel.js`、`floatingLibraryModel.js`
+- `prototype/tests/preview-registry.test.mjs`、`floating-ball-model.test.mjs`、`floating-library-model.test.mjs`
+- `prototype/package.json`、`prototype/package-lock.json`、`prototype/src-tauri/tauri.conf.json`
+- `PROJECT_PLAN.md`、`README.md`、`prototype/README.md`、`PROJECT_PROGRESS.md`
+
+#### 验证
+
+- `npm.cmd run test:preview`：16 项通过；包含 JPG 相关预览注册和目录子项能力模型测试。
+- `npm.cmd run test:floating-ball`：30 项通过；包含 `99`/`100`/`999` 数量边界、失败隐藏状态、NFKC 搜索、空时间和确定性排序测试。
+- `npm.cmd run test:contracts`：16 项通过；目录目标和文件库禁止字段契约保持通过。
+- `npm.cmd run build`：通过，生成 `dist/client/index.html`、`dist/server/index.js` 和 `dist/.openai/hosting.json`；Vite 既有大 chunk 警告未阻断构建。
+- `cargo fmt --all -- --check`：通过；`cargo check --locked`、`cargo check --tests --locked`、`cargo test --locked`：通过，Rust 共 81 项测试通过；`cargo clippy --locked --all-targets --all-features -- -D warnings`：通过。
+- `npm.cmd run tauri:build`：第二次重试通过，完成 Rust release 编译、Windows x64 NSIS 打包和内置 loader 检查。安装器绝对路径为 `E:\Project\test\prototype\src-tauri\target\release\bundle\nsis\本地资料工作台_0.3.33_x64-setup.exe`，大小 `8891516` bytes，SHA-256 `90DBA663B55E2CA494AEF9E8C2C8E46A6E16AE938900EE76409EB300CF325C73`。
+- release 主程序 `E:\Project\test\prototype\src-tauri\target\release\local-material-workbench.exe`：`35866595` bytes，FileVersion/ProductVersion `0.3.33`，SHA-256 `B7370262F983ED44043AB60D89DDD6177FFDAF12CBF7E80E0152DB95CECC5201`。
+- `WebView2Loader.dll` 与 release 主程序同目录：`E:\Project\test\prototype\src-tauri\target\release\WebView2Loader.dll`，`160320` bytes，SHA-256 `8427B1FC58EC707813E5C0A51EB5D69397BB333250A7B891BE4D3B123F1E0F1C`；`npm.cmd run verify:loader` 通过，确认 Windows x64。
+- 浏览器回退检查：本阶段未执行新的浏览器截图/服务检查；不复用旧截图作为本阶段原生证据。
+- 阶段分支：`codex/phase-0.3.33-correctness`，当前尚未提交；开始阶段基线为 `dev`/`97b9368`。当前工作树包含上述阶段 A 改动，commit/merge/push/tag/release 状态待最后 Git 收口。
+
 ## 2026-09-03
 
 ### 阶段 F：完整验收、文档收口和候选发布（0.3.32 已发布）

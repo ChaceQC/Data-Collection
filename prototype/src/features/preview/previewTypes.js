@@ -40,6 +40,25 @@ export function getAdjacentPreviewEntries(entries, entryId) {
   };
 }
 
+export function getPreviewActionCapabilities(entry) {
+  const isDirectoryEntry = isDirectoryEntryTarget(entry);
+  const isIndexEntry = isIndexEntryTarget(entry);
+  return {
+    isIndexEntry,
+    isDirectoryEntry,
+    canUseFileActions: isIndexEntry && !entry?.invalid && entry?.kind !== "folder",
+    canReveal: (isIndexEntry || isDirectoryEntry) && !entry?.invalid,
+  };
+}
+
+export function isDirectoryEntryTarget(entry) {
+  return Boolean(entry?.directoryId && Array.isArray(entry?.relativePath));
+}
+
+export function isIndexEntryTarget(entry) {
+  return Boolean(entry?.id) && !isDirectoryEntryTarget(entry);
+}
+
 export function getPreviewFailureActions(status, { demoOnly = false, isDirectoryEntry = false } = {}) {
   if (demoOnly) return ["close"];
   if (isDirectoryEntry) {

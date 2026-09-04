@@ -5,6 +5,7 @@ import * as XLSX from "xlsx";
 import { getPreviewDefinition } from "../src/features/preview/previewRegistry.js";
 import {
   getAdjacentPreviewEntries,
+  getPreviewActionCapabilities,
   getPreviewFailureActions,
   getPreviewStatusLabel,
 } from "../src/features/preview/previewTypes.js";
@@ -38,6 +39,27 @@ test("keeps browser fallback distinct from format failures", () => {
   assert.deepEqual(getPreviewFailureActions("parse-error"), ["retry", "open-default", "reveal", "close"]);
   assert.deepEqual(getPreviewFailureActions("parse-error", { isDirectoryEntry: true }), ["retry", "reveal", "close"]);
   assert.deepEqual(getPreviewFailureActions("unsupported", { demoOnly: true }), ["close"]);
+});
+
+test("limits directory-child preview actions to their real target capabilities", () => {
+  assert.deepEqual(getPreviewActionCapabilities({
+    id: "child-1",
+    kind: "text",
+    invalid: false,
+    directoryId: "folder-1",
+    relativePath: ["资料.txt"],
+  }), {
+    isIndexEntry: false,
+    isDirectoryEntry: true,
+    canUseFileActions: false,
+    canReveal: true,
+  });
+  assert.deepEqual(getPreviewActionCapabilities({ id: "file-1", kind: "text", invalid: false }), {
+    isIndexEntry: true,
+    isDirectoryEntry: false,
+    canUseFileActions: true,
+    canReveal: true,
+  });
 });
 
 test("calculates adjacent preview entries from the supplied visible snapshot", () => {

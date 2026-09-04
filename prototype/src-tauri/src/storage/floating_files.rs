@@ -5,6 +5,7 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+use unicode_normalization::UnicodeNormalization;
 
 use crate::filesystem::IndexEntry;
 
@@ -226,13 +227,16 @@ fn normalize_query(
     if !(1..=MAX_LIMIT).contains(&request.limit) {
         return Err(FloatingFilesQueryError::Limit);
     }
+    let normalized_query = normalize_query_text(&request.query);
+    if normalized_query.chars().count() > MAX_QUERY_CHARS
+        || normalized_query.chars().any(char::is_control)
+    {
+        return Err(FloatingFilesQueryError::Query);
+    }
     Ok(NormalizedQuery {
-        tokens: request
-            .query
-            .trim()
-            .to_lowercase()
+        tokens: normalized_query
             .split_whitespace()
-            .map(str::to_owned)
+            .map(normalize_text)
             .collect(),
         filter,
         sort_key,
@@ -257,7 +261,24 @@ fn searchable_text(entry: &IndexEntry, group_name: Option<&str>) -> String {
     if let Some(group_name) = group_name {
         fields.push(group_name);
     }
-    fields.join(" ").to_lowercase()
+    fields
+        .into_iter()
+        .map(normalize_text)
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn normalize_query_text(value: &str) -> String {
+    value
+        .nfkc()
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn normalize_text(value: &str) -> String {
+    value.nfkc().collect::<String>().to_lowercase()
 }
 
 fn project_entry(entry: &IndexEntry, group_names: &HashMap<&str, &str>) -> FloatingFileItem {
@@ -309,19 +330,22 @@ fn compare_candidates(
             direction,
         ),
     };
-    primary.then_with(|| left.item.id.cmp(&right.item.id))
+    primary.then_with(|| compare_strings(&left.item.id, &right.item.id, Direction::Asc))
 }
 
 fn compare_strings(left: &str, right: &str, direction: Direction) -> Ordering {
-    let ordering = left
-        .to_lowercase()
-        .cmp(&right.to_lowercase())
-        .then_with(|| left.cmp(right));
+    let ordering = normalize_text(left)
+        .cmp(&normalize_text(right))
+        .then_with(|| normalize_nfkc(left).cmp(&normalize_nfkc(right)));
     if direction == Direction::Desc {
         ordering.reverse()
     } else {
         ordering
     }
+}
+
+fn normalize_nfkc(value: &str) -> String {
+    value.nfkc().collect()
 }
 
 fn compare_optional_numbers(
@@ -426,5 +450,84 @@ mod tests {
         assert_eq!(result.items[0].id, "file-1");
         request.limit = MAX_LIMIT + 1;
         assert!(query_floating_files(&[], &[], 2, &request).is_err());
+    }
+
+    #[test]
+    fn normalizes_unicode_queries_and_nullable_open_times_like_the_frontend() {
+        let mut unicode = entry("unicode", "Ａlpha 资料.txt", "text");
+        unicode.last_opened_at = Some(0);
+        let mut known = entry("known", "Beta.txt", "text");
+        known.last_opened_at = Some(20);
+        let missing = entry("missing", "Gamma.txt", "text");
+        let entries = [unicode, known, missing];
+
+        let searched = query_floating_files(
+            &entries,
+            &[],
+            3,
+            &FloatingFilesQuery {
+                query: "ａｌｐｈａ　资料".to_string(),
+                ..FloatingFilesQuery::default()
+            },
+        )
+        .expect("normalized query should match");
+        assert_eq!(
+            searched
+                .items
+                .iter()
+                .map(|item| item.id.as_str())
+                .collect::<Vec<_>>(),
+            ["unicode"]
+        );
+
+        let sorted = query_floating_files(
+            &entries,
+            &[],
+            3,
+            &FloatingFilesQuery {
+                sort_key: "lastOpenedAt".to_string(),
+                direction: "desc".to_string(),
+                ..FloatingFilesQuery::default()
+            },
+        )
+        .expect("nullable timestamp sort should succeed");
+        assert_eq!(
+            sorted
+                .items
+                .iter()
+                .map(|item| item.id.as_str())
+                .collect::<Vec<_>>(),
+            ["known", "missing", "unicode"]
+        );
+    }
+
+    #[test]
+    fn sorts_nfkc_equivalent_digit_names_deterministically() {
+        let first = entry("digits-2", "A2.txt", "text");
+        let second = entry("digits-10", "Ａ１０.txt", "text");
+        let result = query_floating_files(&[first, second], &[], 4, &FloatingFilesQuery::default())
+            .expect("name sort should succeed");
+
+        assert_eq!(
+            result
+                .items
+                .iter()
+                .map(|item| item.id.as_str())
+                .collect::<Vec<_>>(),
+            ["digits-10", "digits-2"]
+        );
+
+        let first = entry("a-id", "相同名称.txt", "text");
+        let second = entry("Ａ-id", "相同名称.txt", "text");
+        let id_tie = query_floating_files(&[first, second], &[], 4, &FloatingFilesQuery::default())
+            .expect("ID tie-break should succeed");
+        assert_eq!(
+            id_tie
+                .items
+                .iter()
+                .map(|item| item.id.as_str())
+                .collect::<Vec<_>>(),
+            ["Ａ-id", "a-id"]
+        );
     }
 }

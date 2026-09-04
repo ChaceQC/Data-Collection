@@ -107,14 +107,16 @@ export function FloatingBallPanel({
           <h2>文件库</h2>
         </div>
         <div className="floating-ball-header-actions">
-          <span
-            className={"floating-ball-count floating-ball-count-" + count.state}
-            aria-label={count.label}
-            title={count.label}
-            data-testid="floating-ball-count"
-          >
-            {count.state === "loading" ? <SpinnerGap className="is-spinning" size={13} weight="bold" aria-hidden="true" /> : count.display}
-          </span>
+          {count.state !== "error" && (
+            <span
+              className={"floating-ball-count floating-ball-count-" + count.state}
+              aria-label={count.label}
+              title={count.label}
+              data-testid="floating-ball-count"
+            >
+              {count.state === "loading" ? <SpinnerGap className="is-spinning" size={13} weight="bold" aria-hidden="true" /> : count.display}
+            </span>
+          )}
           <button
             type="button"
             className="floating-ball-panel-close"

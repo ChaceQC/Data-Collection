@@ -86,8 +86,12 @@ export function normalizeFloatingFilesQuery(value = {}) {
     throw new TypeError("文件库分页数量无效");
   }
 
+  const normalizedQuery = query.normalize("NFKC").split(/\p{White_Space}+/u).filter(Boolean).join(" ");
+  if ([...normalizedQuery].length > FLOATING_LIBRARY_MAX_QUERY_CHARS) {
+    throw new TypeError("文件库搜索内容无效");
+  }
   return {
-    query: query.normalize("NFKC").trim().replace(/\s+/g, " "),
+    query: normalizedQuery,
     filter,
     sortKey,
     direction,
@@ -139,13 +143,12 @@ function matchesFilter(item, filter) {
 function matchesQuery(item, groupName, query) {
   const searchable = [item.name, item.type, ...(Array.isArray(item.tags) ? item.tags : []), groupName]
     .filter((value) => typeof value === "string" && value)
-    .join(" ")
-    .normalize("NFKC")
-    .toLocaleLowerCase("zh-CN");
+    .map(normalizeComparableText)
+    .join(" ");
   return query
-    .toLocaleLowerCase("zh-CN")
-    .split(/\s+/)
+    .split(" ")
     .filter(Boolean)
+    .map((token) => normalizeComparableText(token))
     .every((token) => searchable.includes(token));
 }
 
@@ -154,17 +157,42 @@ function compareCandidates(left, right, sortKey, direction) {
     ? compareStrings(left.item.name, right.item.name, direction)
     : sortKey === "type"
       ? compareStrings(left.item.type, right.item.type, direction)
-      : compareNullableNumbers(left.item[sortKey], right.item[sortKey], direction);
+      : compareNullableNumbers(getSortableNumber(left.item, sortKey), getSortableNumber(right.item, sortKey), direction);
   return primary || compareStrings(left.item.id, right.item.id, "asc");
 }
 
 function compareStrings(left, right, direction) {
-  const leftValue = String(left || "").normalize("NFKC").toLocaleLowerCase("zh-CN");
-  const rightValue = String(right || "").normalize("NFKC").toLocaleLowerCase("zh-CN");
-  const compared = leftValue === rightValue
-    ? String(left || "") === String(right || "") ? 0 : String(left || "") < String(right || "") ? -1 : 1
-    : leftValue < rightValue ? -1 : 1;
+  const leftValue = normalizeComparableText(left);
+  const rightValue = normalizeComparableText(right);
+  const compared = compareUnicodeStrings(leftValue, rightValue)
+    || compareUnicodeStrings(normalizeComparableOriginal(left), normalizeComparableOriginal(right));
   return direction === "desc" ? -compared : compared;
+}
+
+function normalizeComparableText(value) {
+  return normalizeComparableOriginal(value).toLowerCase();
+}
+
+function normalizeComparableOriginal(value) {
+  return String(value ?? "").normalize("NFKC");
+}
+
+function compareUnicodeStrings(left, right) {
+  const leftCodePoints = Array.from(left, (character) => character.codePointAt(0));
+  const rightCodePoints = Array.from(right, (character) => character.codePointAt(0));
+  const length = Math.min(leftCodePoints.length, rightCodePoints.length);
+  for (let index = 0; index < length; index += 1) {
+    if (leftCodePoints[index] !== rightCodePoints[index]) return leftCodePoints[index] < rightCodePoints[index] ? -1 : 1;
+  }
+  return leftCodePoints.length === rightCodePoints.length ? 0 : leftCodePoints.length < rightCodePoints.length ? -1 : 1;
+}
+
+function getSortableNumber(item, sortKey) {
+  const value = item?.[sortKey];
+  const valid = sortKey === "lastOpenedAt"
+    ? Number.isSafeInteger(value) && value > 0
+    : Number.isSafeInteger(value) && value >= 0;
+  return valid ? value : null;
 }
 
 function compareNullableNumbers(left, right, direction) {

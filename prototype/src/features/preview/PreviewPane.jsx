@@ -19,6 +19,7 @@ import {
 import { getPreviewDefinition } from "./previewRegistry";
 import {
   getAdjacentPreviewEntries,
+  getPreviewActionCapabilities,
   getPreviewStatusLabel,
 } from "./previewTypes";
 import { isTextEntryTarget } from "../../lib/keyboardModel.js";
@@ -70,7 +71,7 @@ export function PreviewPane({
   const activeTaskId = useRef("");
   const definition = getPreviewDefinition(entry);
   const effectiveRetryNonce = retryNonce ?? localRetryNonce;
-  const isDirectoryEntry = Boolean(entry?.directoryId && Array.isArray(entry.relativePath));
+  const { canReveal, canUseFileActions, isDirectoryEntry, isIndexEntry } = getPreviewActionCapabilities(entry);
   const previewEntries = useMemo(
     () => (Array.isArray(navigationEntries) ? navigationEntries : []).filter((item) => item?.id && item.kind !== "folder" && !item.invalid),
     [navigationEntries],
@@ -186,17 +187,20 @@ export function PreviewPane({
   }, [definition, effectiveRetryNonce, entry?.id, entry?.invalid, entry?.kind, entry?.name, entry?.path]);
 
   const isReady = result.status === "ready" && result.content;
-  const canUseFileActions = Boolean(!isDirectoryEntry && !entry.invalid && entry.kind !== "folder");
   const failureActions = {
     demoOnly: Boolean(result.demoOnly),
     isDirectoryEntry,
     onRetry: requestRetry,
-    onReposition: !isDirectoryEntry ? () => onReposition?.(entry) : undefined,
+    onReposition: isIndexEntry ? () => onReposition?.(entry) : undefined,
     onOpenDefault: canUseFileActions ? () => onOpenDefault?.(entry) : undefined,
-    onReveal: !entry.invalid ? () => onReveal?.(entry, directoryView) : undefined,
+    onReveal: canReveal ? () => onReveal?.(entry, directoryView) : undefined,
     onClose,
     onFailure: reportContentFailure,
   };
+  const hasHeaderActions = Boolean(
+    (canUseFileActions && (onFavorite || onCopyLocation || onOpenDefault))
+    || (canReveal && onReveal),
+  );
 
   const handlePreviewKeyDown = useCallback((event) => {
     if (event.defaultPrevented || event.isComposing || isTextEntryTarget(event.target)) return;
@@ -233,11 +237,11 @@ export function PreviewPane({
               <CaretRight size={17} weight="bold" aria-hidden="true" />
             </button>
           </div>
-          {isReady && (canUseFileActions || (isDirectoryEntry && onReveal)) && (
+          {isReady && hasHeaderActions && (
             <div className="preview-dialog-actions" role="group" aria-label="预览操作">
-              {onFavorite && <button type="button" className={`preview-header-action ${entry.favorite ? "is-favorite" : ""}`} aria-label={entry.favorite ? "取消收藏" : "收藏"} aria-pressed={Boolean(entry.favorite)} title={entry.favorite ? "取消收藏" : "收藏"} onClick={() => onFavorite(entry)}><Star size={17} weight={entry.favorite ? "fill" : "regular"} aria-hidden="true" /></button>}
+              {canUseFileActions && onFavorite && <button type="button" className={`preview-header-action ${entry.favorite ? "is-favorite" : ""}`} aria-label={entry.favorite ? "取消收藏" : "收藏"} aria-pressed={Boolean(entry.favorite)} title={entry.favorite ? "取消收藏" : "收藏"} onClick={() => onFavorite(entry)}><Star size={17} weight={entry.favorite ? "fill" : "regular"} aria-hidden="true" /></button>}
               {canUseFileActions && onCopyLocation && <button type="button" className="preview-header-action" aria-label="复制资料位置" title="复制资料位置" onClick={() => onCopyLocation(entry, directoryView)}><Copy size={17} weight="regular" aria-hidden="true" /></button>}
-              {onReveal && <button type="button" className="preview-header-action" aria-label="在资源管理器中定位" title="在资源管理器中定位" onClick={() => onReveal(entry, directoryView)}><FolderOpen size={17} weight="regular" aria-hidden="true" /></button>}
+              {canReveal && onReveal && <button type="button" className="preview-header-action" aria-label="在资源管理器中定位" title="在资源管理器中定位" onClick={() => onReveal(entry, directoryView)}><FolderOpen size={17} weight="regular" aria-hidden="true" /></button>}
               {canUseFileActions && onOpenDefault && <button type="button" className="preview-header-action" aria-label="用默认程序打开" title="用默认程序打开" onClick={() => onOpenDefault(entry)}><ArrowSquareOut size={17} weight="regular" aria-hidden="true" /></button>}
             </div>
           )}

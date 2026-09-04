@@ -1,6 +1,6 @@
 [package]
 name = "local-material-workbench"
-version = "0.3.32"
+version = "0.3.33"
 description = "本地资料工作台 Tauri 桌面应用"
 authors = ["Local Material Workbench"]
 edition = "2021"
@@ -24,6 +24,7 @@ tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-dialog = "2"
 thiserror = "2"
 regex = "1.13.1"
+unicode-normalization = "0.1.24"
 trash = "5.2.6"
 windows-sys = { version = "0.61.2", features = [
     "Win32_Foundation",

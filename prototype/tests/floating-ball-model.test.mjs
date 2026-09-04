@@ -47,7 +47,7 @@ test("keeps library count badge states stable while loading, failing, and exceed
   });
   assert.deepEqual(getFloatingLibraryCountPresentation(null, "error"), {
     state: "error",
-    display: "!",
+    display: null,
     label: "文件库数量读取失败",
     value: null,
   });
@@ -57,8 +57,10 @@ test("keeps library count badge states stable while loading, failing, and exceed
     label: "文件库共 12 项资料",
     value: 12,
   });
+  assert.equal(getFloatingLibraryCountPresentation(99).display, "99");
   assert.equal(getFloatingLibraryCountPresentation(1000).state, "overflow");
-  assert.equal(getFloatingLibraryCountPresentation(1000).display, "999+");
+  assert.equal(getFloatingLibraryCountPresentation(100).display, "99+");
+  assert.equal(getFloatingLibraryCountPresentation(999).display, "99+");
 });
 
 test("uses hysteresis thresholds for near and leave transitions", () => {
