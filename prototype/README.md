@@ -136,6 +136,6 @@ cargo test
 cargo clippy --all-targets --all-features -- -D warnings
 ```
 
-`npm.cmd run build` 会生成 Sites 所需的 `dist/client/index.html`、`dist/server/index.js` 和 `dist/.openai/hosting.json`。浏览器/Sites 模式不会调用真实文件预览、托盘、窗口、递归导入或正文索引 command；此前 Windows 桌面预览、资料库操作、阶段 F、悬浮球基础能力和阶段 H-J 验收记录在根目录 `PROJECT_PROGRESS.md`，新的阶段 A `0.3.27`、阶段 B `0.3.28`、阶段 C `0.3.29`、阶段 D `0.3.30`、阶段 E `0.3.31`、已发布阶段 F `0.3.32` 和当前阶段 B `0.3.34` 的代码、自动验证、NSIS 构建结果及用户原生验收记录也记录在同一进度文档中。
+`npm.cmd run build` 会生成 Sites 所需的 `dist/client/index.html`、`dist/server/index.js` 和 `dist/.openai/hosting.json`。浏览器/Sites 模式不会调用真实文件预览、托盘、窗口、递归导入或正文索引 command；此前 Windows 桌面预览、资料库操作、阶段 F、悬浮球基础能力和阶段 H-J 验收记录在根目录 `PROJECT_PROGRESS.md`，新的阶段 A `0.3.27`、阶段 B `0.3.28`、阶段 C `0.3.29`、阶段 D `0.3.30`、阶段 E `0.3.31`、已发布阶段 F `0.3.32` 和当前架构加固阶段 B `0.3.34` 的代码、自动验证、NSIS 构建结果及用户原生验收记录也记录在同一进度文档中。
 
 悬浮球阶段的自动验证使用 `npm.cmd run test:floating-ball`、`cargo test`、`cargo check` 和 `cargo clippy`；真实 Windows 窗口、文件拖放、多显示器位置和关闭/重启行为的验收记录均保留，阶段 F 的完整 Windows 11/Tauri/WebView2 原生验收已由用户完成，代理不以浏览器页面或开发侧命令结果替代该验收。

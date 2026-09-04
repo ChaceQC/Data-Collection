@@ -2,7 +2,7 @@
 
 ## 2026-09-04
 
-### 阶段 B：索引快照原子一致性（0.3.34 代码候选）
+### 阶段 B：索引快照原子一致性（0.3.34 代码候选，已本地合并）
 
 #### 已完成
 
@@ -15,7 +15,7 @@
 
 #### 进行中
 
-- 阶段 B 代码、自动验证、版本同步和本地 NSIS 候选已完成；待本地 commit/合并收口及用户在 Windows 11/Tauri/WebView2 环境执行原生验收。
+- 无；阶段 B 代码、自动验证、版本同步、本地 NSIS 候选和本地 Git 收口已完成，待用户在 Windows 11/Tauri/WebView2 环境执行原生验收。
 
 #### 用户验收
 
@@ -28,7 +28,7 @@
 
 #### 下一步
 
-- 完成本地阶段分支 commit，确认 ancestry 后使用 `git merge --ff-only` 并入 `dev`，复核合并后的工作树；随后由用户执行主窗口/悬浮球/托盘操作、重启恢复和 Windows 11/Tauri/WebView2 安装验收。
+- 由用户执行主窗口/悬浮球/托盘操作、重启恢复和 Windows 11/Tauri/WebView2 安装验收；验收通过后再单独决定是否创建 Tag、push 或 Release。
 
 #### 涉及文件
 
@@ -58,7 +58,8 @@
 - `WebView2Loader.dll` 与 release 主程序同目录：`E:\Project\test\prototype\src-tauri\target\release\WebView2Loader.dll`，`160320` bytes，SHA-256 `8427B1FC58EC707813E5C0A51EB5D69397BB333250A7B891BE4D3B123F1E0F1C`；loader 校验通过，确认 Windows x64。
 - 单独执行 `npm.cmd run verify:loader`：通过，确认 loader 与 release 主程序同目录且为 Windows x64。
 - 未执行新的浏览器截图或服务检查；revision 乱序、重复和跳跃行为由前端纯模型测试覆盖，不宣称为桌面原生验收。
-- 当前阶段分支为 `codex/phase-0.3.34-index-snapshot`，尚未执行 commit、merge、push、Tag 或 Release。
+- 阶段分支为 `codex/phase-0.3.34-index-snapshot`，阶段 HEAD 为 `528a9055aacce1db1c7a8121e18a400c6c705acd`；开始阶段的 `dev` 基线为 `61ec93d367439f878c4322d9700b7a589c067da0`，已通过 `git merge-base --is-ancestor dev codex/phase-0.3.34-index-snapshot`。合并前 `dev` HEAD 为 `61ec93d367439f878c4322d9700b7a589c067da0`，已执行 `git merge --ff-only codex/phase-0.3.34-index-snapshot`，合并后为 `528a9055aacce1db1c7a8121e18a400c6c705acd`。
+- 阶段分支已通过合并确认并执行 `git branch -d codex/phase-0.3.34-index-snapshot` 删除；删除后本地阶段分支仅保留 `dev`、`main`，未执行 push、Tag 或 Release。
 
 ## 2026-09-04
 
