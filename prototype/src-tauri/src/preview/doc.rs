@@ -28,6 +28,7 @@ pub(crate) enum DocConversionError {
 #[derive(Debug)]
 pub(crate) struct ConvertedPdf {
     pub path: PathBuf,
+    pub metadata: fs::Metadata,
     pub temporary_directory: PathBuf,
     pub byte_length: u64,
 }
@@ -172,15 +173,21 @@ pub(crate) fn convert_to_pdf(
         remove_temporary_directory(&temporary_directory);
         return Err(DocConversionError::Failed);
     };
-    if metadata.len() == 0 || metadata.len() > pdf_limit || !has_pdf_signature(&output_path) {
+    if metadata.len() == 0 || !has_pdf_signature(&output_path) {
+        remove_temporary_directory(&temporary_directory);
+        return Err(DocConversionError::Failed);
+    }
+    if metadata.len() > pdf_limit {
         remove_temporary_directory(&temporary_directory);
         return Err(DocConversionError::OutputTooLarge);
     }
 
+    let byte_length = metadata.len();
     Ok(ConvertedPdf {
         path: output_path,
+        metadata,
         temporary_directory,
-        byte_length: metadata.len(),
+        byte_length,
     })
 }
 

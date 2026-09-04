@@ -381,6 +381,12 @@
           "markdownDescription": "Enables the record_floating_paths command without any pre-configured scope."
         },
         {
+          "description": "Enables the record_preview_outcome command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-record-preview-outcome",
+          "markdownDescription": "Enables the record_preview_outcome command without any pre-configured scope."
+        },
+        {
           "description": "Enables the refresh_index command without any pre-configured scope.",
           "type": "string",
           "const": "allow-refresh-index",
@@ -709,6 +715,12 @@
           "type": "string",
           "const": "deny-record-floating-paths",
           "markdownDescription": "Denies the record_floating_paths command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the record_preview_outcome command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-record-preview-outcome",
+          "markdownDescription": "Denies the record_preview_outcome command without any pre-configured scope."
         },
         {
           "description": "Denies the refresh_index command without any pre-configured scope.",

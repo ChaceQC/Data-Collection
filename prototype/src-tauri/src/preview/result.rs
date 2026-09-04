@@ -41,6 +41,7 @@ pub(super) fn support_failure(kind: String, failure: PreviewFailure) -> PreviewS
         supported: false,
         kind,
         status: failure.status.to_string(),
+        index_revision: 0,
         reason: Some(failure.reason.to_string()),
     }
 }
@@ -54,6 +55,7 @@ pub(super) fn result_failure(
         preview_id,
         kind,
         status: failure.status.to_string(),
+        index_revision: 0,
         content: None,
         byte_length: 0,
         reason: Some(failure.reason.to_string()),
@@ -65,6 +67,7 @@ pub(super) fn result_cancelled(preview_id: String, kind: String) -> PreviewResul
         preview_id,
         kind,
         status: super::STATUS_CANCELLED.to_string(),
+        index_revision: 0,
         content: None,
         byte_length: 0,
         reason: None,
@@ -81,6 +84,7 @@ pub(super) fn result_ready(
         preview_id,
         kind,
         status: STATUS_READY.to_string(),
+        index_revision: 0,
         content: Some(content),
         byte_length,
         reason: None,

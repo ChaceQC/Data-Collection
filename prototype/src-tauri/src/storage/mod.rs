@@ -73,6 +73,10 @@ pub enum StorageError {
     UndoUnavailable,
     #[error("撤销目标已发生变化")]
     UndoConflict,
+    #[error("预览状态无效")]
+    InvalidPreviewStatus,
+    #[error("预览结果已过期，请重新打开资料")]
+    PreviewRevisionConflict,
 }
 
 #[derive(Debug, Default)]
@@ -394,11 +398,24 @@ impl AppState {
         self.update_index_with(|entries, _groups| mutation(entries))
     }
 
+    pub fn record_preview_outcome(
+        &self,
+        file_id: &str,
+        status: &str,
+        expected_revision: u64,
+        opened_at: Option<i64>,
+    ) -> Result<MutationResult<Option<IndexEntry>>, StorageError> {
+        self.update_index_internal(Some(expected_revision), None, |entries, _groups| {
+            let (changed, entry) = record_preview_outcome(entries, file_id, status, opened_at)?;
+            Ok((changed, Some(entry)))
+        })
+    }
+
     pub fn update_index_with<F, T>(&self, mutation: F) -> Result<MutationResult<T>, StorageError>
     where
         F: FnOnce(&mut Vec<IndexEntry>, &mut Vec<Group>) -> Result<(bool, T), StorageError>,
     {
-        self.update_index_internal(None, mutation)
+        self.update_index_internal(None, None, mutation)
     }
 
     pub fn update_index_with_undo<F, T>(
@@ -409,11 +426,12 @@ impl AppState {
     where
         F: FnOnce(&mut Vec<IndexEntry>, &mut Vec<Group>) -> Result<(bool, T), StorageError>,
     {
-        self.update_index_internal(Some(operation), mutation)
+        self.update_index_internal(None, Some(operation), mutation)
     }
 
     fn update_index_internal<F, T>(
         &self,
+        expected_revision: Option<u64>,
         undo_operation: Option<&str>,
         mutation: F,
     ) -> Result<MutationResult<T>, StorageError>
@@ -423,6 +441,9 @@ impl AppState {
         let _guard = self.mutation_lock.lock().map_err(|_| StorageError::State)?;
         let index_path = self.index_path()?;
         let current = self.state_snapshot()?;
+        if expected_revision.is_some_and(|expected| expected != current.revision) {
+            return Err(StorageError::PreviewRevisionConflict);
+        }
         let mut next = current.clone();
         let (changed, value) = mutation(&mut next.entries, &mut next.groups)?;
         let revision = if changed {
@@ -783,15 +804,19 @@ fn read_index_document(path: &Path) -> Result<ReadIndexDocument, StorageError> {
         serde_json::from_slice::<IndexDocument>(&bytes).map_err(|_| StorageError::Corrupt)?;
     let mut entries = document.entries;
     let mut groups = document.groups;
-    let undo_log = document.undo_log;
+    let mut undo_log = document.undo_log;
     let revision = document.revision;
     let needs_save = match document.version {
         INDEX_FORMAT_VERSION => {
-            normalize_entries(&mut entries, &groups)? || normalize_groups(&mut groups)?
+            let entries_changed = normalize_entries(&mut entries, &groups)?;
+            let groups_changed = normalize_groups(&mut groups)?;
+            let undo_changed = normalize_undo_log(&mut undo_log);
+            entries_changed || groups_changed || undo_changed
         }
         LEGACY_INDEX_FORMAT_VERSION | 2 | 3 | PREVIOUS_INDEX_FORMAT_VERSION => {
             normalize_entries(&mut entries, &groups)?;
             normalize_groups(&mut groups)?;
+            normalize_undo_log(&mut undo_log);
             true
         }
         _ => return Err(StorageError::UnsupportedVersion),
@@ -972,6 +997,55 @@ pub fn set_last_opened(
     }
     entry.last_opened_at = Some(opened_at);
     Ok(true)
+}
+
+pub fn record_preview_outcome(
+    entries: &mut [IndexEntry],
+    file_id: &str,
+    status: &str,
+    opened_at: Option<i64>,
+) -> Result<(bool, IndexEntry), StorageError> {
+    if !is_preview_outcome_status(status) {
+        return Err(StorageError::InvalidPreviewStatus);
+    }
+    let entry = find_entry_mut(entries, file_id)?;
+    if entry.kind == "folder" {
+        return Ok((false, entry.clone()));
+    }
+    let mut changed = false;
+    if entry.preview_status != status {
+        entry.preview_status = status.to_string();
+        changed = true;
+    }
+    if status == "ready" {
+        let opened_at = opened_at
+            .filter(|value| (1..=MAX_TIMESTAMP_MILLIS).contains(value))
+            .ok_or(StorageError::InvalidPreviewStatus)?;
+        if !entry.invalid
+            && entry
+                .last_opened_at
+                .is_none_or(|current| current < opened_at)
+        {
+            entry.last_opened_at = Some(opened_at);
+            changed = true;
+        }
+    }
+    Ok((changed, entry.clone()))
+}
+
+fn is_preview_outcome_status(status: &str) -> bool {
+    matches!(
+        status,
+        "ready"
+            | "unsupported"
+            | "missing"
+            | "permission-denied"
+            | "too-large"
+            | "converter-missing"
+            | "parse-error"
+            | "timed-out"
+            | "cancelled"
+    )
 }
 
 pub fn set_favorite(
@@ -1178,6 +1252,10 @@ fn normalize_entries(
 ) -> Result<bool, StorageError> {
     let mut changed = normalize_added_at(entries);
     for entry in entries.iter_mut() {
+        if entry.preview_status == "loading" {
+            entry.preview_status = "idle".to_string();
+            changed = true;
+        }
         if entry.last_recorded_at.is_some_and(|value| value <= 0) {
             entry.last_recorded_at = None;
             changed = true;
@@ -1228,6 +1306,26 @@ fn normalize_groups(groups: &mut Vec<Group>) -> Result<bool, StorageError> {
     }
     validate_groups(groups)?;
     Ok(changed)
+}
+
+fn normalize_undo_log(records: &mut [UndoRecord]) -> bool {
+    let mut changed = false;
+    for record in records {
+        for change in &mut record.entries {
+            for entry in [&mut change.before, &mut change.after] {
+                if entry
+                    .as_ref()
+                    .is_some_and(|value| value.preview_status == "loading")
+                {
+                    if let Some(value) = entry.as_mut() {
+                        value.preview_status = "idle".to_string();
+                        changed = true;
+                    }
+                }
+            }
+        }
+    }
+    changed
 }
 
 fn normalize_added_at(entries: &mut [IndexEntry]) -> bool {
@@ -1368,7 +1466,6 @@ fn validate_entries(entries: &[IndexEntry], groups: &[Group]) -> Result<(), Stor
             || !matches!(
                 entry.preview_status.as_str(),
                 "idle"
-                    | "loading"
                     | "ready"
                     | "unsupported"
                     | "missing"
@@ -1377,6 +1474,7 @@ fn validate_entries(entries: &[IndexEntry], groups: &[Group]) -> Result<(), Stor
                     | "converter-missing"
                     | "parse-error"
                     | "timed-out"
+                    | "cancelled"
             )
         {
             return Err(StorageError::Corrupt);
@@ -1476,7 +1574,6 @@ fn validate_entry_shape(entry: &IndexEntry) -> Result<(), StorageError> {
         || !matches!(
             entry.preview_status.as_str(),
             "idle"
-                | "loading"
                 | "ready"
                 | "unsupported"
                 | "missing"
@@ -1485,6 +1582,7 @@ fn validate_entry_shape(entry: &IndexEntry) -> Result<(), StorageError> {
                 | "converter-missing"
                 | "parse-error"
                 | "timed-out"
+                | "cancelled"
         )
     {
         return Err(StorageError::Corrupt);
@@ -1819,6 +1917,85 @@ mod tests {
         entries[0].invalid = false;
         entries[0].kind = "folder".to_string();
         assert!(!super::set_last_opened(&mut entries, "可打开.txt", 2_000).unwrap());
+    }
+
+    #[test]
+    fn records_preview_status_and_last_opened_at_as_one_entry_mutation() {
+        let mut entries = vec![sample_entry("预览资料.txt", 42)];
+        let (changed, entry) =
+            super::record_preview_outcome(&mut entries, "预览资料.txt", "ready", Some(2_000))
+                .expect("preview outcome should be recorded");
+        assert!(changed);
+        assert_eq!(entry.preview_status, "ready");
+        assert_eq!(entry.last_opened_at, Some(2_000));
+
+        let (changed, _) =
+            super::record_preview_outcome(&mut entries, "预览资料.txt", "ready", Some(2_000))
+                .expect("duplicate preview outcome should be accepted");
+        assert!(!changed);
+        assert!(matches!(
+            super::record_preview_outcome(&mut entries, "预览资料.txt", "loading", None),
+            Err(StorageError::InvalidPreviewStatus)
+        ));
+        let (changed, entry) =
+            super::record_preview_outcome(&mut entries, "预览资料.txt", "cancelled", None)
+                .expect("cancelled preview outcome should be recorded");
+        assert!(changed);
+        assert_eq!(entry.preview_status, "cancelled");
+        assert_eq!(entry.last_opened_at, Some(2_000));
+    }
+
+    #[test]
+    fn rejects_stale_preview_outcomes_without_changing_the_index() {
+        let index_path = unique_temp_path();
+        let state = AppState::default();
+        state
+            .initialize(index_path.clone())
+            .expect("state should initialize");
+        let entry = sample_entry("过期预览.txt", 42);
+        state
+            .update_entries_with(|entries| {
+                entries.push(entry.clone());
+                Ok((true, ()))
+            })
+            .expect("entry should be saved");
+        let outcome = state
+            .record_preview_outcome("过期预览.txt", "ready", 1, Some(2_000))
+            .expect("preview outcome should be saved");
+        assert_eq!(outcome.revision, 2);
+        assert_eq!(outcome.value.as_ref().unwrap().preview_status, "ready");
+        assert!(matches!(
+            state.record_preview_outcome("过期预览.txt", "parse-error", 1, None),
+            Err(StorageError::PreviewRevisionConflict)
+        ));
+        let snapshot = state.snapshot().expect("snapshot should remain readable");
+        assert_eq!(snapshot.revision, 2);
+        assert_eq!(snapshot.entries[0].preview_status, "ready");
+        let _ = fs::remove_file(index_path);
+    }
+
+    #[test]
+    fn normalizes_an_interrupted_loading_preview_to_idle() {
+        let path = unique_temp_path();
+        let mut entry = sample_entry("中断预览.txt", 42);
+        entry.preview_status = "loading".to_string();
+        let document = serde_json::json!({
+            "version": INDEX_FORMAT_VERSION,
+            "entries": [entry]
+        });
+        fs::write(
+            &path,
+            serde_json::to_vec(&document).expect("index should serialize"),
+        )
+        .expect("index should be written");
+
+        let loaded = load_entries(&path).expect("loading state should recover");
+        assert_eq!(loaded[0].preview_status, "idle");
+        let persisted: serde_json::Value =
+            serde_json::from_slice(&fs::read(&path).expect("index should persist"))
+                .expect("persisted index should be valid");
+        assert_eq!(persisted["entries"][0]["previewStatus"], "idle");
+        cleanup_recovery_artifacts(&path);
     }
 
     #[test]

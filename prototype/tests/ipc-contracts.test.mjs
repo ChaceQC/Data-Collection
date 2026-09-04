@@ -18,6 +18,7 @@ import {
   parseFloatingFilesResult,
   parseMetadataSearchResponse,
   parsePreviewResult,
+  parsePreviewSupport,
 } from "../src/lib/ipcContracts.js";
 
 const entry = {
@@ -78,6 +79,28 @@ test("rejects unsafe target components and malformed event payloads", () => {
 test("validates preview status and maps structured operation errors", () => {
   assert.equal(parsePreviewResult({ previewId: "", kind: "text", status: "unsupported", content: null, byteLength: 0 }).status, "unsupported");
   assert.throws(() => parsePreviewResult({ previewId: "", kind: "text", status: "broken", content: null, byteLength: 0 }), IpcContractError);
+  const previewId = `preview-${"a".repeat(32)}`;
+  const resource = parsePreviewResult({
+    previewId,
+    kind: "image",
+    status: "ready",
+    indexRevision: 8,
+    byteLength: 42,
+    content: {
+      type: "resource",
+      resourceUrl: `preview://localhost/${previewId}`,
+      mediaType: "image/png",
+      byteLength: 42,
+      supportsRange: true,
+      width: 10,
+      height: 20,
+    },
+  });
+  assert.equal(resource.indexRevision, 8);
+  assert.equal(resource.content.resourceUrl, `preview://localhost/${previewId}`);
+  assert.equal(parsePreviewSupport({ supported: false, kind: "text", status: "cancelled", indexRevision: 8, reason: "已取消" }).status, "cancelled");
+  assert.throws(() => parsePreviewResult({ previewId, kind: "image", status: "ready", byteLength: 42, content: { type: "resource", resourceUrl: `preview://localhost/${previewId}?path=C:\\secret`, mediaType: "image/png", byteLength: 42, supportsRange: true } }), IpcContractError);
+  assert.throws(() => parsePreviewResult({ previewId, kind: "image", status: "ready", byteLength: 42, content: null }), IpcContractError);
   assert.equal(getOperationError({ code: "partial-success", message: "internal" }, "fallback"), "文件操作已部分完成，请刷新索引确认状态");
 });
 

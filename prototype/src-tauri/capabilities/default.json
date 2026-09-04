@@ -58,6 +58,7 @@
     "allow-can-preview",
     "allow-load-preview",
     "allow-dispose-preview",
-    "allow-cancel-preview-task"
+    "allow-cancel-preview-task",
+    "allow-record-preview-outcome"
   ]
 }

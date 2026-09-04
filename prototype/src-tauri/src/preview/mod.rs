@@ -79,6 +79,7 @@ pub(crate) struct PreviewSupport {
     pub supported: bool,
     pub kind: String,
     pub status: String,
+    pub index_revision: u64,
     pub reason: Option<String>,
 }
 
@@ -88,6 +89,7 @@ pub(crate) struct PreviewResult {
     pub preview_id: String,
     pub kind: String,
     pub status: String,
+    pub index_revision: u64,
     pub content: Option<PreviewContent>,
     pub byte_length: u64,
     pub reason: Option<String>,

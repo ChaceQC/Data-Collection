@@ -650,6 +650,15 @@ pub(crate) fn same_file_metadata(left: &Metadata, right: &Metadata) -> bool {
     }
 }
 
+pub(crate) fn same_file_snapshot(left: &Metadata, right: &Metadata) -> bool {
+    same_file_metadata(left, right)
+        && left.len() == right.len()
+        && left.modified().ok() == right.modified().ok()
+        && left.created().ok() == right.created().ok()
+        && left.file_type().is_file() == right.file_type().is_file()
+        && left.file_type().is_dir() == right.file_type().is_dir()
+}
+
 pub(crate) fn canonicalize_existing_path(raw_path: &str) -> Result<PathBuf, PathValidationError> {
     let trimmed = raw_path.trim();
     if trimmed.is_empty() {

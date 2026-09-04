@@ -1,9 +1,9 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::{
     collections::HashMap,
-    fs,
+    fs::{self, Metadata},
     path::PathBuf,
-    sync::{Arc, Mutex},
+    sync::{Arc, Condvar, Mutex},
     time::{Duration, SystemTime},
 };
 
@@ -20,12 +20,14 @@ pub(crate) struct PreviewResourceStore {
     pub(super) sessions: Arc<Mutex<HashMap<String, PreviewResource>>>,
     cleanup_started: Arc<AtomicBool>,
     cleanup_stop: Arc<AtomicBool>,
+    cleanup_wakeup: Arc<(Mutex<()>, Condvar)>,
     closed: Arc<AtomicBool>,
 }
 
 #[derive(Clone, Debug)]
 pub(super) struct PreviewResource {
     pub(super) path: PathBuf,
+    pub(super) source_metadata: Metadata,
     pub(super) media_type: String,
     pub(super) byte_length: u64,
     pub(super) supports_range: bool,
@@ -38,6 +40,7 @@ impl PreviewResourceStore {
         &self,
         preview_id: String,
         path: PathBuf,
+        source_metadata: Metadata,
         media_type: String,
         byte_length: u64,
         temporary_directory: Option<PathBuf>,
@@ -51,6 +54,7 @@ impl PreviewResourceStore {
             preview_id,
             PreviewResource {
                 path,
+                source_metadata,
                 media_type,
                 byte_length,
                 supports_range: true,
@@ -131,11 +135,15 @@ impl PreviewResourceStore {
             return;
         }
         let stop = self.cleanup_stop.clone();
+        let wakeup = self.cleanup_wakeup.clone();
         // 资源表由应用状态持有，清理线程只负责定期回收过期会话。
         let store = self.clone();
         std::thread::spawn(move || {
             while !stop.load(Ordering::Acquire) {
-                std::thread::sleep(RESOURCE_CLEANUP_INTERVAL);
+                let Ok(lock) = wakeup.0.lock() else {
+                    break;
+                };
+                let _ = wakeup.1.wait_timeout(lock, RESOURCE_CLEANUP_INTERVAL);
                 if !stop.load(Ordering::Acquire) {
                     store.cleanup_expired();
                 }
@@ -145,6 +153,7 @@ impl PreviewResourceStore {
 
     pub(crate) fn stop_cleanup_task(&self) {
         self.cleanup_stop.store(true, Ordering::Release);
+        self.cleanup_wakeup.1.notify_all();
     }
 }
 
@@ -154,6 +163,7 @@ impl Default for PreviewResourceStore {
             sessions: Arc::new(Mutex::new(HashMap::new())),
             cleanup_started: Arc::new(AtomicBool::new(false)),
             cleanup_stop: Arc::new(AtomicBool::new(false)),
+            cleanup_wakeup: Arc::new((Mutex::new(()), Condvar::new())),
             closed: Arc::new(AtomicBool::new(false)),
         }
     }
@@ -208,6 +218,8 @@ mod tests {
             .insert(
                 preview_id.clone(),
                 path,
+                fs::metadata(directory.join("preview.pdf"))
+                    .expect("resource metadata should be readable"),
                 "application/pdf".to_string(),
                 5,
                 Some(directory.clone()),
@@ -229,5 +241,40 @@ mod tests {
             .lock()
             .expect("resource store should be available")
             .contains_key(&preview_id));
+    }
+
+    #[test]
+    fn bounds_active_resource_sessions_before_registering_another_source() {
+        let path = std::env::temp_dir().join(format!(
+            "local-material-resource-limit-{}",
+            new_preview_id()
+        ));
+        fs::write(&path, b"resource").expect("resource fixture should be written");
+        let metadata = fs::metadata(&path).expect("resource metadata should be readable");
+        let store = PreviewResourceStore::default();
+        for _ in 0..super::MAX_ACTIVE_RESOURCES {
+            store
+                .insert(
+                    new_preview_id(),
+                    path.clone(),
+                    metadata.clone(),
+                    "text/plain".to_string(),
+                    metadata.len(),
+                    None,
+                )
+                .expect("resource should stay within the active bound");
+        }
+        assert!(store
+            .insert(
+                new_preview_id(),
+                path.clone(),
+                metadata,
+                "text/plain".to_string(),
+                7,
+                None,
+            )
+            .is_err());
+        store.dispose_all();
+        let _ = fs::remove_file(path);
     }
 }

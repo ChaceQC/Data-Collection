@@ -13,7 +13,7 @@ function columnLabel(index) {
   return label;
 }
 
-export function SpreadsheetPreviewer({ content, onFailure, ...failureActions }) {
+export function SpreadsheetPreviewer({ content, onFailure, onReady, ...failureActions }) {
   const [state, setState] = useState({ status: "loading", workbook: null, reason: "" });
   const [selectedSheet, setSelectedSheet] = useState(0);
   const workerRef = useRef(null);
@@ -61,6 +61,7 @@ export function SpreadsheetPreviewer({ content, onFailure, ...failureActions }) 
         const response = await fetch(normalizePreviewResourceUrl(content.resourceUrl), { signal: controller.signal });
         if (!response.ok) throw new Error("resource unavailable");
         const arrayBuffer = await response.arrayBuffer();
+        if (cancelled || controller.signal.aborted) return;
         worker.postMessage({ type: "load", buffer: arrayBuffer, requestId: 0 }, [arrayBuffer]);
       } catch (error) {
         if (cancelled || error?.name === "AbortError") return;
@@ -84,6 +85,7 @@ export function SpreadsheetPreviewer({ content, onFailure, ...failureActions }) 
           },
           reason: "",
         });
+        if (!event.data.sheetNames.length) onReady?.();
       } else if (event.data.type === "sheet"
         && event.data.requestId === requestIdRef.current
         && event.data.index === selectedSheetRef.current) {
@@ -101,6 +103,7 @@ export function SpreadsheetPreviewer({ content, onFailure, ...failureActions }) 
             : current.workbook,
           reason: "",
         }));
+        onReady?.();
       } else if (event.data.type === "error") {
         window.clearTimeout(workerTimeout);
         worker.terminate();
@@ -118,6 +121,7 @@ export function SpreadsheetPreviewer({ content, onFailure, ...failureActions }) 
     return () => {
       cancelled = true;
       window.clearTimeout(workerTimeout);
+      window.clearTimeout(sheetTimeoutRef.current);
       controller.abort();
       worker.terminate();
       if (workerRef.current === worker) workerRef.current = null;

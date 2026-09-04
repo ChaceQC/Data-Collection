@@ -166,6 +166,7 @@ pub fn run() {
             commands::load_preview,
             commands::dispose_preview,
             commands::cancel_preview_task,
+            commands::record_preview_outcome,
         ])
         .build(tauri::generate_context!())
         .map(|app| {

@@ -8,7 +8,7 @@ import { normalizePreviewResourceUrl } from "./previewTypes";
 import { sanitizeDocxHtmlWithCancellation } from "./previewSecurity";
 import { UnsupportedPreviewer } from "./UnsupportedPreviewer";
 
-export function OfficePreviewer({ content, onFailure, ...failureActions }) {
+export function OfficePreviewer({ content, onFailure, onReady, ...failureActions }) {
   const [state, setState] = useState({
     status: "loading",
     html: "",
@@ -84,6 +84,7 @@ export function OfficePreviewer({ content, onFailure, ...failureActions }) {
           phase: "",
           elapsedMs: elapsedMs(),
         });
+        onReady?.();
       } catch (error) {
         if (stopped || isPreviewAbortError(error)) return;
         if (error?.code === "output-too-large") {
@@ -128,7 +129,7 @@ export function OfficePreviewer({ content, onFailure, ...failureActions }) {
           return;
         }
         const arrayBuffer = await response.arrayBuffer();
-        if (stopped) return;
+        if (stopped || controller.signal.aborted) return;
         setState((current) => ({ ...current, phase: "正在后台转换 Word 文档...", elapsedMs: elapsedMs() }));
         worker?.postMessage({ type: "convert", requestId: 1, buffer: arrayBuffer }, [arrayBuffer]);
       } catch (error) {

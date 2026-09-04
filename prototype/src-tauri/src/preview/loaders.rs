@@ -1,6 +1,6 @@
-use std::{fs::File, io::Read, path::Path};
+use std::{fs, fs::File, io::Read, path::Path};
 
-use crate::filesystem::FileTypeInfo;
+use crate::filesystem::{self, FileTypeInfo};
 
 use super::operations::PreviewFailure;
 use super::{doc, image, result, spreadsheet, video};
@@ -9,14 +9,15 @@ use super::{PreviewCancellation, PreviewContent, PreviewResult, PreviewState};
 pub(super) fn load_text(
     preview_id: String,
     path: std::path::PathBuf,
-    byte_length: u64,
+    source_metadata: std::fs::Metadata,
     info: FileTypeInfo,
     cancellation: &PreviewCancellation,
 ) -> PreviewResult {
     if cancellation.is_cancelled() {
         return result::result_cancelled(preview_id, info.kind.to_string());
     }
-    let bytes = match read_bounded(&path, info.max_bytes) {
+    let byte_length = source_metadata.len();
+    let bytes = match read_bounded(&path, info.max_bytes, &source_metadata) {
         Ok(bytes) => bytes,
         Err(failure) => return result::result_failure(preview_id, info.kind.to_string(), failure),
     };
@@ -51,7 +52,7 @@ pub(super) fn load_text(
 pub(super) fn load_resource(
     preview_id: String,
     path: std::path::PathBuf,
-    byte_length: u64,
+    source_metadata: std::fs::Metadata,
     info: FileTypeInfo,
     state: &PreviewState,
     cancellation: &PreviewCancellation,
@@ -59,6 +60,7 @@ pub(super) fn load_resource(
     if cancellation.is_cancelled() {
         return result::result_cancelled(preview_id, info.kind.to_string());
     }
+    let byte_length = source_metadata.len();
     if (info.kind == "docx" || info.kind == "xlsx")
         && !spreadsheet::has_supported_container(&path, &info.extension).unwrap_or(false)
     {
@@ -126,6 +128,7 @@ pub(super) fn load_resource(
         .insert(
             preview_id.clone(),
             path,
+            source_metadata,
             media_type.to_string(),
             byte_length,
             None,
@@ -164,6 +167,7 @@ pub(super) fn load_resource(
 pub(super) fn load_doc(
     preview_id: String,
     path: std::path::PathBuf,
+    source_metadata: std::fs::Metadata,
     kind: String,
     state: &PreviewState,
     cancellation: &PreviewCancellation,
@@ -219,6 +223,7 @@ pub(super) fn load_doc(
     };
     let doc::ConvertedPdf {
         path: converted_path,
+        metadata,
         temporary_directory,
         byte_length,
     } = converted;
@@ -227,11 +232,30 @@ pub(super) fn load_doc(
         doc::remove_temporary_directory(&cleanup_directory);
         return result::result_cancelled(preview_id, kind);
     }
+    let current_metadata = match fs::symlink_metadata(&path) {
+        Ok(metadata) => metadata,
+        Err(error) => {
+            doc::remove_temporary_directory(&cleanup_directory);
+            return result::result_failure(preview_id, kind, result::read_failure(error));
+        }
+    };
+    if !filesystem::same_file_snapshot(&source_metadata, &current_metadata) {
+        doc::remove_temporary_directory(&cleanup_directory);
+        return result::result_failure(
+            preview_id,
+            kind,
+            PreviewFailure {
+                status: super::STATUS_PARSE_ERROR,
+                reason: "DOC 源文件在转换期间发生变化，请重试",
+            },
+        );
+    }
     if state
         .resources
         .insert(
             preview_id.clone(),
             converted_path,
+            metadata,
             "application/pdf".to_string(),
             byte_length,
             Some(temporary_directory),
@@ -262,12 +286,31 @@ pub(super) fn load_doc(
     )
 }
 
-fn read_bounded(path: &Path, limit: u64) -> Result<Vec<u8>, PreviewFailure> {
-    let file = File::open(path).map_err(result::read_failure)?;
+fn read_bounded(
+    path: &Path,
+    limit: u64,
+    expected_metadata: &fs::Metadata,
+) -> Result<Vec<u8>, PreviewFailure> {
+    let mut file = File::open(path).map_err(result::read_failure)?;
+    let opened_metadata = file.metadata().map_err(result::read_failure)?;
+    if !filesystem::same_file_snapshot(expected_metadata, &opened_metadata) {
+        return Err(PreviewFailure {
+            status: super::STATUS_PARSE_ERROR,
+            reason: "文件在读取期间发生变化，请重试",
+        });
+    }
     let mut bytes = Vec::new();
-    file.take(limit.saturating_add(1))
+    (&mut file)
+        .take(limit.saturating_add(1))
         .read_to_end(&mut bytes)
         .map_err(result::read_failure)?;
+    let current_metadata = fs::symlink_metadata(path).map_err(result::read_failure)?;
+    if !filesystem::same_file_snapshot(expected_metadata, &current_metadata) {
+        return Err(PreviewFailure {
+            status: super::STATUS_PARSE_ERROR,
+            reason: "文件在读取期间发生变化，请重试",
+        });
+    }
     if bytes.len() as u64 > limit {
         return Err(PreviewFailure {
             status: super::STATUS_TOO_LARGE,

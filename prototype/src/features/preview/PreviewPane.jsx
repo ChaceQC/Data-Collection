@@ -15,6 +15,7 @@ import {
   createPreviewTaskId,
   disposePreview,
   loadPreview,
+  recordPreviewOutcome,
 } from "./previewApi";
 import { getPreviewDefinition } from "./previewRegistry";
 import {
@@ -52,6 +53,7 @@ function PreviewContent({ result, entryName, failureActions }) {
 
 export function PreviewPane({
   entry,
+  indexRevision = 0,
   navigationEntries = [],
   directoryView,
   onClose,
@@ -67,6 +69,8 @@ export function PreviewPane({
   const [result, setResult] = useState(() => initialState(entry));
   const [localRetryNonce, setLocalRetryNonce] = useState(0);
   const requestSequence = useRef(0);
+  const previewRevision = useRef(0);
+  const contentReadyReported = useRef(false);
   const activePreviewId = useRef("");
   const activeTaskId = useRef("");
   const definition = getPreviewDefinition(entry);
@@ -93,14 +97,36 @@ export function PreviewPane({
     const previewId = activePreviewId.current;
     activePreviewId.current = "";
     if (previewId) void disposePreview(previewId);
-  }, []);
+    if (isIndexEntry && entry?.id && Number.isSafeInteger(previewRevision.current)) {
+      const expectedRevision = previewRevision.current;
+      void recordPreviewOutcome(entry.id, status, expectedRevision)
+        .then((outcome) => {
+          if (outcome && Number.isSafeInteger(outcome.revision)) previewRevision.current = outcome.revision;
+        })
+        .catch(() => undefined);
+    }
+  }, [entry?.id, isIndexEntry]);
+
+  const reportContentReady = useCallback(() => {
+    if (!isIndexEntry || !entry?.id || contentReadyReported.current) return;
+    contentReadyReported.current = true;
+    const expectedRevision = previewRevision.current;
+    void recordPreviewOutcome(entry.id, "ready", expectedRevision)
+      .then((outcome) => {
+        if (outcome && Number.isSafeInteger(outcome.revision)) previewRevision.current = outcome.revision;
+      })
+      .catch(() => undefined);
+  }, [entry?.id, isIndexEntry]);
 
   useEffect(() => {
     const requestId = requestSequence.current + 1;
     requestSequence.current = requestId;
     let cancelled = false;
+    previewRevision.current = 0;
+    contentReadyReported.current = false;
     setResult(initialState(entry));
     const browserDemo = !canUsePreviewRuntime();
+    previewRevision.current = isIndexEntry && Number.isSafeInteger(indexRevision) ? indexRevision : 0;
 
     if (browserDemo) {
       setResult({
@@ -117,8 +143,12 @@ export function PreviewPane({
     }
 
     if (!definition || entry.invalid || !entry.id) {
+      const terminalStatus = entry.invalid ? "missing" : "unsupported";
+      if (isIndexEntry && entry.id) {
+        void recordPreviewOutcome(entry.id, terminalStatus, previewRevision.current).catch(() => undefined);
+      }
       setResult({
-        status: entry.invalid ? "missing" : "unsupported",
+        status: terminalStatus,
         kind: entry.kind || "other",
         content: null,
         reason: entry.invalid
@@ -139,6 +169,7 @@ export function PreviewPane({
         const support = await canPreview(entry);
         if (cancelled || requestSequence.current !== requestId) return;
         if (!support.supported) {
+          previewRevision.current = support.indexRevision || 0;
           setResult({ ...support, content: null, previewId: "", byteLength: 0, demoOnly: Boolean(support.demoOnly) });
           return;
         }
@@ -159,8 +190,10 @@ export function PreviewPane({
           setResult({ ...loaded, demoOnly: Boolean(loaded.demoOnly) });
           return;
         }
+        previewRevision.current = loaded.indexRevision || 0;
         activePreviewId.current = loaded.previewId || "";
         setResult({ ...loaded, demoOnly: Boolean(loaded.demoOnly) });
+        if (loaded.kind === "text" || loaded.kind === "markdown") reportContentReady();
       } catch {
         if (cancelled || requestSequence.current !== requestId) return;
         setResult({
@@ -184,7 +217,7 @@ export function PreviewPane({
       if (taskId) void cancelPreviewTask(taskId);
       if (previewId) void disposePreview(previewId);
     };
-  }, [definition, effectiveRetryNonce, entry?.id, entry?.invalid, entry?.kind, entry?.name, entry?.path]);
+  }, [definition, effectiveRetryNonce, entry?.id, entry?.invalid, entry?.kind, entry?.name, entry?.path, reportContentReady]);
 
   const isReady = result.status === "ready" && result.content;
   const failureActions = {
@@ -196,6 +229,7 @@ export function PreviewPane({
     onReveal: canReveal ? () => onReveal?.(entry, directoryView) : undefined,
     onClose,
     onFailure: reportContentFailure,
+    onReady: reportContentReady,
   };
   const hasHeaderActions = Boolean(
     (canUseFileActions && (onFavorite || onCopyLocation || onOpenDefault))

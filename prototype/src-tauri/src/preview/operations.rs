@@ -23,6 +23,7 @@ pub(crate) fn can_preview(raw_path: &str, requested_kind: &str) -> PreviewSuppor
             supported: true,
             kind,
             status: super::STATUS_READY.to_string(),
+            index_revision: 0,
             reason: None,
         },
         Err(failure) => result::support_failure(kind, failure),
@@ -65,12 +66,12 @@ pub(crate) fn load_preview_with_cancellation(
     }
 
     if info.kind == "text" || info.kind == "markdown" {
-        return loaders::load_text(preview_id, path, metadata.len(), info, cancellation);
+        return loaders::load_text(preview_id, path, metadata, info, cancellation);
     }
     if info.kind == "doc" {
-        return loaders::load_doc(preview_id, path, kind, state, cancellation);
+        return loaders::load_doc(preview_id, path, metadata, kind, state, cancellation);
     }
-    loaders::load_resource(preview_id, path, metadata.len(), info, state, cancellation)
+    loaders::load_resource(preview_id, path, metadata, info, state, cancellation)
 }
 
 pub(super) fn dispose_preview(state: &PreviewState, preview_id: &str) {

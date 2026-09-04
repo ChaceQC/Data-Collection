@@ -8,7 +8,7 @@ import {
 import { normalizePreviewResourceUrl } from "./previewTypes";
 import { UnsupportedPreviewer } from "./UnsupportedPreviewer";
 
-export function ImagePreviewer({ content, title = "图片", onFailure, ...failureActions }) {
+export function ImagePreviewer({ content, title = "图片", onFailure, onReady, ...failureActions }) {
   const [mode, setMode] = useState("fit");
   const [scale, setScale] = useState(1);
   const [rotation, setRotation] = useState(0);
@@ -50,7 +50,10 @@ export function ImagePreviewer({ content, title = "图片", onFailure, ...failur
           className={`preview-image ${mode === "fit" ? "is-fit" : "is-free"} ${status === "ready" ? "" : "is-hidden"}`}
           src={normalizePreviewResourceUrl(content.resourceUrl)}
           alt={`${title} 图片预览`}
-          onLoad={() => setStatus("ready")}
+          onLoad={() => {
+            setStatus("ready");
+            onReady?.();
+          }}
           onError={() => {
             const reason = "图片无法显示，请检查文件是否损坏。";
             setStatus("parse-error");

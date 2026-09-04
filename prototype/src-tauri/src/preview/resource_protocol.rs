@@ -1,5 +1,5 @@
 use std::{
-    fs::File,
+    fs::{self, File},
     io::{Read, Seek, SeekFrom},
     path::Path,
 };
@@ -22,7 +22,15 @@ impl PreviewResourceStore {
         self.cleanup_expired();
 
         if request.method() == Method::OPTIONS {
-            if request_preview_id(request).is_none() {
+            let Some(preview_id) = request_preview_id(request) else {
+                return response(StatusCode::NOT_FOUND, Vec::new()).finish();
+            };
+            let registered = self
+                .sessions
+                .lock()
+                .ok()
+                .is_some_and(|sessions| sessions.contains_key(preview_id));
+            if !registered {
                 return response(StatusCode::NOT_FOUND, Vec::new()).finish();
             }
             return response(StatusCode::NO_CONTENT, Vec::new())
@@ -65,7 +73,10 @@ impl PreviewResourceStore {
                 Ok(_) | Err(_) => return response(StatusCode::NOT_FOUND, Vec::new()).finish(),
             };
         self.touch(preview_id);
-        if metadata.len() != resource.byte_length {
+        if metadata.len() != resource.byte_length
+            || !filesystem::same_file_snapshot(&resource.source_metadata, &metadata)
+        {
+            self.dispose(preview_id);
             return response(StatusCode::CONFLICT, Vec::new()).finish();
         }
 
@@ -129,9 +140,15 @@ impl PreviewResourceStore {
             return builder.finish();
         }
 
-        let body = match read_range(&safe_path, range) {
+        let body = match read_range(&safe_path, range, &resource.source_metadata) {
             Ok(body) => body,
-            Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => {
+            Err(ReadRangeError::Changed) => {
+                self.dispose(preview_id);
+                return response(StatusCode::CONFLICT, Vec::new()).finish();
+            }
+            Err(ReadRangeError::Io(error))
+                if error.kind() == std::io::ErrorKind::PermissionDenied =>
+            {
                 return response(StatusCode::FORBIDDEN, Vec::new()).finish();
             }
             Err(_) => return response(StatusCode::INTERNAL_SERVER_ERROR, Vec::new()).finish(),
@@ -199,15 +216,35 @@ fn clamp_range(range: ByteRange, byte_length: u64) -> ByteRange {
 }
 
 fn is_large_stream_resource(media_type: &str) -> bool {
-    media_type.starts_with("video/")
+    media_type.starts_with("video/") || media_type == "application/pdf"
 }
 
-fn read_range(path: &Path, range: ByteRange) -> std::io::Result<Vec<u8>> {
+enum ReadRangeError {
+    Changed,
+    Io(std::io::Error),
+}
+
+fn read_range(
+    path: &Path,
+    range: ByteRange,
+    expected_metadata: &fs::Metadata,
+) -> Result<Vec<u8>, ReadRangeError> {
     let length = range.end - range.start + 1;
-    let mut file = File::open(path)?;
-    file.seek(SeekFrom::Start(range.start))?;
+    let mut file = File::open(path).map_err(ReadRangeError::Io)?;
+    let opened_metadata = file.metadata().map_err(ReadRangeError::Io)?;
+    if !filesystem::same_file_snapshot(expected_metadata, &opened_metadata) {
+        return Err(ReadRangeError::Changed);
+    }
+    file.seek(SeekFrom::Start(range.start))
+        .map_err(ReadRangeError::Io)?;
     let mut body = Vec::with_capacity(length as usize);
-    file.take(length).read_to_end(&mut body)?;
+    file.take(length)
+        .read_to_end(&mut body)
+        .map_err(ReadRangeError::Io)?;
+    let current_metadata = fs::symlink_metadata(path).map_err(ReadRangeError::Io)?;
+    if !filesystem::same_file_snapshot(expected_metadata, &current_metadata) {
+        return Err(ReadRangeError::Changed);
+    }
     Ok(body)
 }
 
@@ -291,6 +328,7 @@ mod tests {
             .insert(
                 preview_id.clone(),
                 canonical_path,
+                fs::metadata(&path).expect("resource metadata should be readable"),
                 "text/plain".to_string(),
                 10,
                 None,
@@ -307,19 +345,65 @@ mod tests {
         assert_eq!(response.status(), 206);
         assert_eq!(response.body(), b"2345");
 
+        let complete_request = Request::builder()
+            .method(Method::GET)
+            .uri(resource_url(&preview_id))
+            .body(Vec::new())
+            .expect("request should be valid");
+        let complete = store.handle_request(&complete_request);
+        assert_eq!(complete.status(), 200);
+        assert_eq!(complete.body(), b"0123456789");
+
+        let invalid_range = Request::builder()
+            .method(Method::GET)
+            .uri(resource_url(&preview_id))
+            .header("Range", "bytes=10-")
+            .body(Vec::new())
+            .expect("request should be valid");
+        let invalid_response = store.handle_request(&invalid_range);
+        assert_eq!(invalid_response.status(), 416);
+        assert_eq!(
+            invalid_response
+                .headers()
+                .get("Content-Range")
+                .unwrap()
+                .to_str()
+                .unwrap(),
+            "bytes */10"
+        );
+
+        let options = Request::builder()
+            .method(Method::OPTIONS)
+            .uri(resource_url(&preview_id))
+            .body(Vec::new())
+            .expect("request should be valid");
+        assert_eq!(store.handle_request(&options).status(), 204);
+
         let unknown = Request::builder()
             .uri("preview://localhost/preview-00000000000000000000000000000000")
             .body(Vec::new())
             .expect("request should be valid");
         assert_eq!(store.handle_request(&unknown).status(), 404);
 
+        let unknown_options = Request::builder()
+            .method(Method::OPTIONS)
+            .uri("preview://localhost/preview-00000000000000000000000000000000")
+            .body(Vec::new())
+            .expect("request should be valid");
+        assert_eq!(store.handle_request(&unknown_options).status(), 404);
+
+        fs::remove_file(&path).expect("resource source should be removable");
+        fs::write(&path, b"abcdefghij").expect("replacement source should be written");
+        let replaced = store.handle_request(&complete_request);
+        assert_eq!(replaced.status(), 409);
+        assert_eq!(store.handle_request(&complete_request).status(), 404);
+
         store.dispose(&preview_id);
-        assert_eq!(store.handle_request(&request).status(), 404);
         let _ = fs::remove_file(path);
     }
 
     #[test]
-    fn serves_a_complete_pdf_when_the_initial_request_has_no_range() {
+    fn serves_a_bounded_pdf_chunk_when_the_initial_request_has_no_range() {
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map(|duration| duration.as_nanos())
@@ -335,6 +419,7 @@ mod tests {
             .insert(
                 preview_id.clone(),
                 canonical_path,
+                fs::metadata(&path).expect("resource metadata should be readable"),
                 "application/pdf".to_string(),
                 bytes.len() as u64,
                 None,
@@ -347,9 +432,12 @@ mod tests {
             .body(Vec::new())
             .expect("request should be valid");
         let response = store.handle_request(&request);
-        assert_eq!(response.status(), 200);
-        assert_eq!(response.body().len(), bytes.len());
-        let expected_content_length = bytes.len().to_string();
+        assert_eq!(response.status(), 206);
+        assert_eq!(
+            response.body().len(),
+            super::MAX_PROTOCOL_CHUNK_BYTES as usize
+        );
+        let expected_content_length = super::MAX_PROTOCOL_CHUNK_BYTES.to_string();
         assert_eq!(
             response
                 .headers()
@@ -359,7 +447,19 @@ mod tests {
                 .unwrap(),
             expected_content_length.as_str()
         );
-        assert!(response.headers().get("Content-Range").is_none());
+        assert_eq!(
+            response
+                .headers()
+                .get("Content-Range")
+                .unwrap()
+                .to_str()
+                .unwrap(),
+            format!(
+                "bytes 0-{}/{}",
+                super::MAX_PROTOCOL_CHUNK_BYTES - 1,
+                bytes.len()
+            )
+        );
 
         store.dispose(&preview_id);
         let _ = fs::remove_file(path);

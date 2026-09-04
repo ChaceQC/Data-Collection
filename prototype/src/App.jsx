@@ -577,6 +577,7 @@ function App() {
         return previewEntry ? (
           <PreviewPane
             entry={previewEntry}
+            indexRevision={latestRevision}
             navigationEntries={currentEntries}
             directoryView={directoryView}
             onClose={handlePreviewClose}

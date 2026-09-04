@@ -12,8 +12,9 @@ import { UnsupportedPreviewer } from "./UnsupportedPreviewer";
 pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl;
 
 const MAX_PDF_PAGES = 200;
+const PDF_PREVIEW_TIMEOUT_MS = 30_000;
 
-export function PdfPreviewer({ content, onFailure, ...failureActions }) {
+export function PdfPreviewer({ content, onFailure, onReady, ...failureActions }) {
   const canvasRef = useRef(null);
   const [documentState, setDocumentState] = useState({ status: "loading", document: null, reason: "" });
   const [page, setPage] = useState(1);
@@ -38,13 +39,23 @@ export function PdfPreviewer({ content, onFailure, ...failureActions }) {
       standardFontDataUrl: new URL("pdfjs/standard_fonts/", globalThis.document.baseURI).href,
       maxImageSize: PDF_CANVAS_PIXEL_LIMIT,
     });
+    let timedOut = false;
+    const timeoutId = window.setTimeout(() => {
+      if (cancelled) return;
+      timedOut = true;
+      void loadingTask.destroy().catch(() => undefined);
+      const reason = "PDF 读取超过 30 秒，已终止预览任务，请重试。";
+      setDocumentState({ status: "timed-out", document: null, reason });
+      onFailure?.("timed-out", reason);
+    }, PDF_PREVIEW_TIMEOUT_MS);
     loadingTask.promise
       .then((document) => {
         loadedDocument = document;
-        if (cancelled || loadSequence.current !== sequence) {
+        if (cancelled || timedOut || loadSequence.current !== sequence) {
           void document.destroy().catch(() => undefined);
           return;
         }
+        window.clearTimeout(timeoutId);
         if (!Number.isInteger(document.numPages) || document.numPages < 1 || document.numPages > MAX_PDF_PAGES) {
           void document.destroy().catch(() => undefined);
           const reason = "PDF 页数超过 200 页预览限制。";
@@ -55,7 +66,8 @@ export function PdfPreviewer({ content, onFailure, ...failureActions }) {
         setDocumentState({ status: "ready", document, reason: "" });
       })
       .catch((error) => {
-        if (!cancelled && loadSequence.current === sequence) {
+        window.clearTimeout(timeoutId);
+        if (!cancelled && !timedOut && loadSequence.current === sequence) {
           const reason = error?.name === "PasswordException"
             ? "加密 PDF 暂不支持预览。"
             : "PDF 无法解析，请检查文件是否损坏。";
@@ -65,6 +77,7 @@ export function PdfPreviewer({ content, onFailure, ...failureActions }) {
       });
     return () => {
       cancelled = true;
+      window.clearTimeout(timeoutId);
       void loadingTask.destroy().catch(() => undefined);
       if (loadedDocument) void loadedDocument.destroy().catch(() => undefined);
     };
@@ -76,6 +89,8 @@ export function PdfPreviewer({ content, onFailure, ...failureActions }) {
     let cancelled = false;
     let renderTask;
     let renderedCanvas;
+    let renderTimedOut = false;
+    let renderTimeoutId;
     const sequence = renderSequence.current + 1;
     renderSequence.current = sequence;
     async function renderPage() {
@@ -98,7 +113,16 @@ export function PdfPreviewer({ content, onFailure, ...failureActions }) {
           viewport,
           transform: [metrics.outputScale, 0, 0, metrics.outputScale, 0, 0],
         });
+        renderTimeoutId = window.setTimeout(() => {
+          if (cancelled) return;
+          renderTimedOut = true;
+          renderTask?.cancel();
+          const reason = "PDF 页面绘制超过 30 秒，已终止预览任务，请重试。";
+          setDocumentState((current) => ({ ...current, status: "timed-out", reason }));
+          onFailure?.("timed-out", reason);
+        }, 30_000);
         await renderTask.promise;
+        window.clearTimeout(renderTimeoutId);
         if (cancelled || renderSequence.current !== sequence) return;
         const canvas = canvasRef.current;
         if (!canvas) return;
@@ -109,8 +133,10 @@ export function PdfPreviewer({ content, onFailure, ...failureActions }) {
         const visibleContext = canvas.getContext("2d", { alpha: false, willReadFrequently: true });
         if (!visibleContext) throw new Error("canvas-context");
         visibleContext.drawImage(renderedCanvas, 0, 0);
+        onReady?.();
       } catch (error) {
-        if (!cancelled && renderSequence.current === sequence && error?.name !== "RenderingCancelledException") {
+        window.clearTimeout(renderTimeoutId);
+        if (!cancelled && !renderTimedOut && renderSequence.current === sequence && error?.name !== "RenderingCancelledException") {
           setDocumentState((current) => ({
             ...current,
             status: error?.message === "page-too-large" ? "too-large" : "parse-error",
@@ -131,6 +157,7 @@ export function PdfPreviewer({ content, onFailure, ...failureActions }) {
     return () => {
       cancelled = true;
       renderSequence.current += 1;
+      window.clearTimeout(renderTimeoutId);
       renderTask?.cancel();
       if (renderedCanvas) {
         renderedCanvas.width = 0;

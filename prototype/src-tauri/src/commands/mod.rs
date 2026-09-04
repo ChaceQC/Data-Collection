@@ -331,6 +331,8 @@ pub(crate) fn structured_storage_error(error: StorageError) -> CommandError {
         StorageError::InvalidTag => ("invalid-tag", false, "unchanged"),
         StorageError::UndoUnavailable => ("undo-unavailable", false, "unchanged"),
         StorageError::UndoConflict => ("undo-conflict", false, "unchanged"),
+        StorageError::InvalidPreviewStatus => ("invalid-preview-status", false, "unchanged"),
+        StorageError::PreviewRevisionConflict => ("preview-stale", true, "unchanged"),
         StorageError::Write => ("storage-write", true, "unchanged"),
         StorageError::Recovery => ("recovery-required", true, "unknown"),
         StorageError::DataDirectory | StorageError::Read | StorageError::State => {
@@ -753,13 +755,29 @@ pub async fn can_preview(
     target: PreviewTarget,
     kind: String,
     state: State<'_, AppState>,
+    app: AppHandle,
 ) -> Result<PreviewSupport, String> {
-    let (path, _) = resolve_preview_target(&state, &target)?;
-    tauri::async_runtime::spawn_blocking(move || {
+    let (path, _, index_revision) = resolve_preview_target(&state, &target)?;
+    let mut support = tauri::async_runtime::spawn_blocking(move || {
         preview::can_preview(&path.to_string_lossy(), &kind)
     })
     .await
-    .map_err(|_| "预览检查任务未完成，请重试".to_string())
+    .map_err(|_| "预览检查任务未完成，请重试".to_string())?;
+    support.index_revision = index_revision;
+    if !support.supported {
+        if let Some(file_id) = target.file_id.as_deref() {
+            if let Ok(outcome) = persist_preview_outcome(
+                state.inner(),
+                &app,
+                file_id,
+                &support.status,
+                index_revision,
+            ) {
+                support.index_revision = outcome.revision;
+            }
+        }
+    }
+    Ok(support)
 }
 
 #[tauri::command]
@@ -771,7 +789,7 @@ pub async fn load_preview(
     state: State<'_, PreviewState>,
     app: AppHandle,
 ) -> Result<PreviewResult, String> {
-    let (path, _) = resolve_preview_target(&index_state, &target)?;
+    let (path, _, index_revision) = resolve_preview_target(&index_state, &target)?;
     let preview_state = state.inner().clone();
     let options = options.unwrap_or_default();
     let (task_id, cancellation) = preview_state.begin_task(options.task_id.clone());
@@ -790,10 +808,20 @@ pub async fn load_preview(
     })
     .await;
     match join_result {
-        Ok(result) => {
-            if result.status == "ready" {
+        Ok(mut result) => {
+            result.index_revision = index_revision;
+            if result.status != "ready" && result.status != "cancelled" {
                 if let Some(file_id) = target.file_id.as_deref() {
-                    let _ = record_entry_opened(index_state.inner(), &app, file_id);
+                    let status = result.status.clone();
+                    if let Ok(outcome) = persist_preview_outcome(
+                        index_state.inner(),
+                        &app,
+                        file_id,
+                        &status,
+                        index_revision,
+                    ) {
+                        result.index_revision = outcome.revision;
+                    }
                 }
             }
             Ok(result)
@@ -816,6 +844,28 @@ pub fn dispose_preview(preview_id: String, state: State<'_, PreviewState>) -> Re
 pub fn cancel_preview_task(task_id: String, state: State<'_, PreviewState>) -> Result<(), String> {
     state.cancel_task(&task_id);
     Ok(())
+}
+
+#[tauri::command]
+pub fn record_preview_outcome(
+    file_id: String,
+    status: String,
+    expected_revision: u64,
+    state: State<'_, AppState>,
+    app: AppHandle,
+) -> Result<IndexMutationResult, CommandError> {
+    let outcome =
+        persist_preview_outcome(state.inner(), &app, &file_id, &status, expected_revision)
+            .map_err(structured_storage_error)?;
+    Ok(IndexMutationResult {
+        revision: outcome.revision,
+        changed_ids: if outcome.changed {
+            vec![file_id]
+        } else {
+            Vec::new()
+        },
+        entry: outcome.value,
+    })
 }
 
 #[tauri::command]
@@ -1190,7 +1240,7 @@ fn resolve_registered_directory_child(
 fn resolve_preview_target(
     state: &AppState,
     target: &PreviewTarget,
-) -> Result<(PathBuf, String), String> {
+) -> Result<(PathBuf, String, u64), String> {
     match (
         target.file_id.as_deref().filter(|id| !id.trim().is_empty()),
         target
@@ -1200,9 +1250,9 @@ fn resolve_preview_target(
     ) {
         (Some(_), Some(_)) | (None, None) => Err("预览目标无效，请重新选择资料".to_string()),
         (Some(file_id), None) => {
-            let entry = state
-                .snapshot()
-                .map_err(storage_message)?
+            let snapshot = state.snapshot().map_err(storage_message)?;
+            let revision = snapshot.revision;
+            let entry = snapshot
                 .entries
                 .into_iter()
                 .find(|entry| entry.id == file_id)
@@ -1210,7 +1260,7 @@ fn resolve_preview_target(
             if entry.kind == "folder" {
                 return Err("文件夹不能作为文件预览目标".to_string());
             }
-            Ok((PathBuf::from(entry.path), entry.kind))
+            Ok((PathBuf::from(entry.path), entry.kind, revision))
         }
         (None, Some(directory_id)) => {
             let (_, path) = resolve_registered_directory_child(
@@ -1226,7 +1276,8 @@ fn resolve_preview_target(
             if info.kind == "folder" {
                 return Err("文件夹不能作为文件预览目标".to_string());
             }
-            Ok((path, info.kind.to_string()))
+            let revision = state.snapshot().map_err(storage_message)?.revision;
+            Ok((path, info.kind.to_string(), revision))
         }
     }
 }
@@ -1262,8 +1313,10 @@ pub(crate) fn emit_index_changed<R: Runtime>(
     };
     let _ = app.emit_to("floating-ball", "index-changed", event.clone());
     let _ = app.emit_to("main", "index-changed", event);
-    if let Ok(snapshot) = app.state::<AppState>().snapshot() {
-        schedule_content_index_sync(app, snapshot.revision, snapshot.entries);
+    if change_type != "preview" {
+        if let Ok(snapshot) = app.state::<AppState>().snapshot() {
+            schedule_content_index_sync(app, snapshot.revision, snapshot.entries);
+        }
     }
     crate::windows::tray::refresh_menu(app);
 }
@@ -1320,6 +1373,23 @@ pub(crate) fn emit_content_index_status<R: Runtime>(
     if let Ok(status) = state.status() {
         let _ = app.emit_to("main", "content-index-changed", status);
     }
+}
+
+pub(crate) fn persist_preview_outcome<R: Runtime>(
+    state: &AppState,
+    app: &AppHandle<R>,
+    file_id: &str,
+    status: &str,
+    expected_revision: u64,
+) -> Result<storage::MutationResult<Option<IndexEntry>>, StorageError> {
+    let repository = IndexRepository::new(state);
+    let opened_at = (status == "ready").then(storage::current_timestamp_millis);
+    let outcome =
+        repository.record_preview_outcome(file_id, status, expected_revision, opened_at)?;
+    if outcome.changed {
+        emit_index_changed(app, outcome.revision, vec![file_id.to_string()], "preview");
+    }
+    Ok(outcome)
 }
 
 pub(crate) fn record_entry_opened<R: Runtime>(

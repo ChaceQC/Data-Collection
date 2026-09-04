@@ -4,6 +4,7 @@ import {
   isDesktopRuntime,
   makeDirectoryTarget,
   parseDirectoryEntries,
+  parseMutationResult,
   parsePreviewResult,
   parsePreviewSupport,
 } from "../../lib/ipcContracts.js";
@@ -65,4 +66,13 @@ export function cancelPreviewTask(taskId) {
 export function disposePreview(previewId) {
   if (!canUsePreviewRuntime() || !previewId) return Promise.resolve();
   return invokeCommand("dispose_preview", { previewId });
+}
+
+export function recordPreviewOutcome(fileId, status, expectedRevision) {
+  if (!canUsePreviewRuntime() || !fileId) return Promise.resolve(null);
+  return invokeCommand("record_preview_outcome", {
+    fileId,
+    status,
+    expectedRevision,
+  }, parseMutationResult);
 }

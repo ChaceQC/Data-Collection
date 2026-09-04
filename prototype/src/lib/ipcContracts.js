@@ -14,7 +14,7 @@ export const IPC_COMMANDS = Object.freeze([
   "floating_window_status", "retry_floating_ball", "tray_status", "get_floating_recent", "get_floating_files",
   "record_floating_paths", "open_main_from_floating", "load_floating_placement",
   "save_floating_placement", "set_floating_window_visible", "show_main_window", "exit_app",
-  "can_preview", "load_preview", "dispose_preview", "cancel_preview_task",
+  "can_preview", "load_preview", "dispose_preview", "cancel_preview_task", "record_preview_outcome",
 ]);
 
 export const ENTRY_STATUS = Object.freeze({ registered: "已登记", invalid: "路径失效" });
@@ -49,6 +49,8 @@ const OPERATION_MESSAGES = Object.freeze({
   "invalid-batch": "请先选择资料",
   "undo-unavailable": "撤销不可用，索引已经发生变化",
   "undo-conflict": "撤销目标已经发生变化，请先刷新索引",
+  "invalid-preview-status": "预览状态无效，请重新打开资料",
+  "preview-stale": "预览结果已过期，请重新打开资料",
   "invalid-content-query": "搜索表达式无效，请检查正则语法或缩短搜索内容",
   "invalid-metadata-query": "元数据搜索表达式无效，请检查正则语法、筛选条件或缩短搜索内容",
   "metadata-search-target-invalid": "当前文件夹内容无法搜索，请刷新后重试",
@@ -340,12 +342,72 @@ export function parseContentIndexRebuildResult(value, command = "rebuild_content
 
 export function parsePreviewSupport(value, command = "can_preview") {
   const source = record(value, command);
-  return { ...source, supported: boolean(source.supported, command, "supported"), kind: string(source.kind, command, "kind"), status: previewStatus(source.status, command), reason: source.reason == null ? null : string(source.reason, command, "reason") };
+  return { ...source, supported: boolean(source.supported, command, "supported"), kind: string(source.kind, command, "kind"), status: previewStatus(source.status, command), indexRevision: nonNegativeInteger(source.indexRevision ?? 0, command, "indexRevision"), reason: previewReason(source.reason, command) };
 }
 
 export function parsePreviewResult(value, command = "load_preview") {
   const source = record(value, command);
-  return { ...source, previewId: source.previewId == null ? "" : string(source.previewId, command, "previewId"), kind: string(source.kind, command, "kind"), status: previewStatus(source.status, command), content: source.content == null ? null : record(source.content, command), byteLength: nonNegativeInteger(source.byteLength, command, "byteLength") };
+  const status = previewStatus(source.status, command);
+  const byteLength = nonNegativeInteger(source.byteLength, command, "byteLength");
+  const content = source.content == null ? null : parsePreviewContent(source.content, command, byteLength);
+  if ((status === "ready") !== Boolean(content)) throw contractError(command, "预览结果内容与状态不一致");
+  return { ...source, previewId: parsePreviewId(source.previewId, command), kind: string(source.kind, command, "kind"), status, indexRevision: nonNegativeInteger(source.indexRevision ?? 0, command, "indexRevision"), content, byteLength, reason: previewReason(source.reason, command) };
+}
+
+function parsePreviewContent(value, command, resultByteLength) {
+  const source = record(value, command);
+  const type = string(source.type, command, "content.type");
+  if (type === "text") {
+    const encoding = string(source.encoding, command, "content.encoding");
+    if (!["utf-8", "utf-8-bom", "gb18030"].includes(encoding)) throw contractError(command, "预览文本编码无效");
+    return { ...source, type, value: string(source.value, command, "content.value"), encoding, language: source.language == null ? null : string(source.language, command, "content.language") };
+  }
+  if (type === "resource" || type === "convertedPdf") {
+    const resourceUrl = parsePreviewResourceUrl(source.resourceUrl, command);
+    const mediaType = string(source.mediaType, command, "content.mediaType");
+    if (!mediaType || mediaType.length > 128 || /[\u0000-\u001f\u007f-\u009f]/.test(mediaType)) throw contractError(command, "预览资源 MIME 无效");
+    const byteLength = nonNegativeInteger(source.byteLength, command, "content.byteLength");
+    if (byteLength !== resultByteLength) throw contractError(command, "预览资源大小与结果不一致");
+    const parsed = {
+      ...source,
+      type,
+      resourceUrl,
+      mediaType,
+      byteLength,
+      supportsRange: boolean(source.supportsRange, command, "content.supportsRange"),
+    };
+    if (type === "convertedPdf") {
+      if (source.sourceKind !== "doc") throw contractError(command, "转换 PDF 来源格式无效");
+      return { ...parsed, sourceKind: "doc" };
+    }
+    for (const field of ["width", "height"]) {
+      if (source[field] != null) parsed[field] = positiveInteger(source[field], command, `content.${field}`);
+    }
+    return parsed;
+  }
+  throw contractError(command, "预览内容类型无效");
+}
+
+function parsePreviewId(value, command) {
+  if (value == null || value === "") return "";
+  const id = string(value, command, "previewId");
+  if (!/^preview-[0-9a-f]{32}$/i.test(id)) throw contractError(command, "预览资源标识无效");
+  return id;
+}
+
+function parsePreviewResourceUrl(value, command) {
+  const resourceUrl = string(value, command, "content.resourceUrl");
+  if (!/^(?:preview:\/\/localhost|https?:\/\/preview\.localhost)\/preview-[0-9a-f]{32}$/i.test(resourceUrl)) {
+    throw contractError(command, "预览资源地址无效");
+  }
+  return resourceUrl;
+}
+
+function previewReason(value, command) {
+  if (value == null) return null;
+  const reason = string(value, command, "reason");
+  if (!reason || reason.length > 180 || /[\r\n]/.test(reason)) throw contractError(command, "预览失败原因无效");
+  return reason;
 }
 
 export function parseSettings(value, command = "settings") {
@@ -508,6 +570,7 @@ export function parseIndexEntry(value, command = "index-entry") {
   const source = record(value, command);
   const entry = { ...source, id: assertOpaqueId(source.id), name: string(source.name, command, "name"), kind: string(source.kind, command, "kind"), type: string(source.type ?? source.fileType, command, "type"), status: string(source.status, command, "status"), invalid: optionalBoolean(source.invalid, command, "invalid"), favorite: optionalBoolean(source.favorite, command, "favorite") };
   for (const field of ["size", "modifiedAt", "addedAt", "lastOpenedAt"]) if (source[field] != null) entry[field] = nonNegativeInteger(source[field], command, field);
+  entry.previewStatus = source.previewStatus == null ? "idle" : previewStatus(source.previewStatus, command);
   if (source.path != null && typeof source.path !== "string") throw contractError(command, "路径字段无效");
   entry.tags = stringArray(source.tags ?? [], command, "tags").map((tag) => {
     if (!tag.trim() || /[\u0000-\u001f\u007f-\u009f]/.test(tag)) throw contractError(command, "标签字段无效");

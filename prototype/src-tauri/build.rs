@@ -48,6 +48,7 @@ fn main() {
         "tray_status",
         "exit_app",
         "cancel_preview_task",
+        "record_preview_outcome",
     ]));
     tauri_build::try_build(attributes).expect("failed to run Tauri build script");
 }

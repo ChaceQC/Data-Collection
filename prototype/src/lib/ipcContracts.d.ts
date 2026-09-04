@@ -14,7 +14,7 @@ export type IpcCommand =
   | "floating_window_status" | "retry_floating_ball" | "tray_status" | "get_floating_recent" | "get_floating_files"
   | "record_floating_paths" | "open_main_from_floating" | "load_floating_placement"
   | "save_floating_placement" | "set_floating_window_visible" | "show_main_window" | "exit_app"
-  | "can_preview" | "load_preview" | "dispose_preview" | "cancel_preview_task";
+  | "can_preview" | "load_preview" | "dispose_preview" | "cancel_preview_task" | "record_preview_outcome";
 
 export interface IndexEntry {
   id: string;
@@ -26,6 +26,7 @@ export interface IndexEntry {
   modifiedAt?: number;
   addedAt?: number;
   lastOpenedAt?: number | null;
+  previewStatus?: PreviewStatus;
   status: string;
   invalid?: boolean;
   favorite?: boolean;
@@ -314,6 +315,16 @@ export interface PreviewResult {
   previewId: string;
   kind: EntryKind;
   status: PreviewStatus;
+  indexRevision: number;
   content: Record<string, unknown> | null;
   byteLength: number;
+  reason: string | null;
+}
+
+export interface PreviewSupport {
+  supported: boolean;
+  kind: EntryKind;
+  status: PreviewStatus;
+  indexRevision: number;
+  reason: string | null;
 }
