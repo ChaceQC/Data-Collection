@@ -60,6 +60,7 @@
 - 未执行新的浏览器截图或服务检查；revision 乱序、重复和跳跃行为由前端纯模型测试覆盖，不宣称为桌面原生验收。
 - 阶段分支为 `codex/phase-0.3.34-index-snapshot`，阶段 HEAD 为 `528a9055aacce1db1c7a8121e18a400c6c705acd`；开始阶段的 `dev` 基线为 `61ec93d367439f878c4322d9700b7a589c067da0`，已通过 `git merge-base --is-ancestor dev codex/phase-0.3.34-index-snapshot`。合并前 `dev` HEAD 为 `61ec93d367439f878c4322d9700b7a589c067da0`，已执行 `git merge --ff-only codex/phase-0.3.34-index-snapshot`，合并后为 `528a9055aacce1db1c7a8121e18a400c6c705acd`。
 - 阶段分支已通过合并确认并执行 `git branch -d codex/phase-0.3.34-index-snapshot` 删除；删除后本地阶段分支仅保留 `dev`、`main`，未执行 push、Tag 或 Release。
+- 当前 Git：`dev` HEAD 为 `6b0bf4e5fab12164681bd052843408598b64f048`，工作树干净，较 `origin/dev` ahead 6；本阶段未执行 push、Tag 或 Release。
 
 ## 2026-09-04
 
