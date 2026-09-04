@@ -18,7 +18,7 @@
 
 #### 进行中
 
-- 阶段 C 代码、测试、文档、版本同步、NSIS 候选和 loader 校验已完成；主窗口搜索回归修复已完成，正在执行本地 commit、合并到 `dev` 和阶段分支清理。
+- 阶段 C 代码、测试、文档、版本同步、NSIS 候选和 loader 校验已完成；主窗口搜索回归修复已合并到 `dev`，阶段分支已清理。
 
 #### 用户验收
 
@@ -31,7 +31,7 @@
 
 #### 下一步
 
-- 完成本地 commit、按 ancestry 规则将修复分支快进并入 `dev` 并清理已合并阶段分支；随后由用户执行 Windows 11/Tauri/WebView2 原生验收，不执行 push、Tag 或 GitHub Release。
+- 用户下一步执行 Windows 11/Tauri/WebView2 原生验收，重点确认主窗口搜索、正则安全、快速输入和目录搜索；不执行 push、Tag 或 GitHub Release。
 
 #### 涉及文件
 
