@@ -2,7 +2,7 @@
 
 ## 2026-09-04
 
-### 阶段 A：确定性功能和契约修复（0.3.33 代码候选）
+### 阶段 A：确定性功能和契约修复（0.3.33 已完成）
 
 #### 已完成
 
@@ -15,7 +15,7 @@
 
 #### 进行中
 
-- 阶段分支的本地 commit、`dev` ancestry 复核、`git merge --ff-only` 和已合并阶段分支删除待本轮最后收口；未执行 push、Tag 或 Release。
+- 无；阶段 A 代码、自动门禁、NSIS 候选、用户原生验收和本地 Git 收口均已完成；未执行 push、Tag 或 Release。
 
 #### 用户验收
 
@@ -29,7 +29,7 @@
 
 #### 下一步
 
-- 完成本阶段分支 commit 后，验证其为 `dev` 的直接后继并使用 `git merge --ff-only codex/phase-0.3.33-correctness` 本地并入 `dev`，删除已合并阶段分支；随后进入阶段 B `0.3.34` 的索引一致快照设计和实现。
+- 进入阶段 B `0.3.34`：围绕 entries、groups、undo、recovery 和 revision 建立一致索引快照及原子提交顺序，保持本阶段已确认的 JPG、目录子项和悬浮球查询语义。
 
 #### 涉及文件
 
@@ -53,7 +53,8 @@
 - release 主程序 `E:\Project\test\prototype\src-tauri\target\release\local-material-workbench.exe`：`35866595` bytes，FileVersion/ProductVersion `0.3.33`，SHA-256 `B7370262F983ED44043AB60D89DDD6177FFDAF12CBF7E80E0152DB95CECC5201`。
 - `WebView2Loader.dll` 与 release 主程序同目录：`E:\Project\test\prototype\src-tauri\target\release\WebView2Loader.dll`，`160320` bytes，SHA-256 `8427B1FC58EC707813E5C0A51EB5D69397BB333250A7B891BE4D3B123F1E0F1C`；`npm.cmd run verify:loader` 通过，确认 Windows x64。
 - 浏览器回退检查：本阶段未执行新的浏览器截图/服务检查；不复用旧截图作为本阶段原生证据。
-- 阶段分支：`codex/phase-0.3.33-correctness`，当前尚未提交；开始阶段基线为 `dev`/`97b9368`。当前工作树包含上述阶段 A 改动，commit/merge/push/tag/release 状态待最后 Git 收口。
+- 阶段分支：`codex/phase-0.3.33-correctness`，阶段 HEAD `49cf14104db004801b9ab32f5a89e2438855d25a`；开始阶段基线为 `dev`/`97b93681e2116c4cf2fad6653fd9c77f87a08073`。已通过 ancestry 检查并执行 `git merge --ff-only codex/phase-0.3.33-correctness`，合并前 `dev` HEAD 为 `97b93681e2116c4cf2fad6653fd9c77f87a08073`，合并后为 `49cf14104db004801b9ab32f5a89e2438855d25a`；随后执行 `git branch -d codex/phase-0.3.33-correctness` 成功，删除后本地阶段分支仅保留 `dev`、`main`。
+- 当前 Git：`dev` 已合并阶段 A，工作树在本次进度文档更新提交前保持干净；未执行 commit 以外的 push、Tag 或 Release 操作。
 
 ## 2026-09-03
 
