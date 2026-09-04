@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { FILE_TYPE_DEFINITIONS, PREVIEW_LIMITS } from "../src/lib/fileTypes.js";
+import { getIndexEventDecision, getIndexSnapshotDecision } from "../src/features/library/libraryModel.js";
 import {
   addTagToList,
   createBrowserEntries,
@@ -58,4 +59,22 @@ test("rename validation reports each Windows and index conflict reason", () => {
   assert.equal(validateRename(file, "其他.txt", entries).errors[0].code, "conflict");
   assert.equal(validateRename(file, "CON.txt", entries).errors[0].code, "reserved");
   assert.equal(validateRename(file, "新报告.txt", entries).valid, true);
+});
+
+test("keeps index reloads monotonic across duplicate, out-of-order, and jumped revisions", () => {
+  let observedRevision = 5;
+  assert.deepEqual(getIndexEventDecision(observedRevision, 4), { accepted: false, revision: 5 });
+
+  const first = getIndexEventDecision(observedRevision, 8);
+  assert.deepEqual(first, { accepted: true, revision: 8 });
+  observedRevision = first.revision;
+  assert.deepEqual(getIndexEventDecision(observedRevision, 8), { accepted: false, revision: 8 });
+
+  const jumped = getIndexEventDecision(observedRevision, 12);
+  assert.deepEqual(jumped, { accepted: true, revision: 12 });
+  observedRevision = jumped.revision;
+  assert.equal(getIndexSnapshotDecision(observedRevision, 11), "stale");
+  assert.equal(getIndexSnapshotDecision(observedRevision, 12), "accept");
+  assert.equal(getIndexSnapshotDecision(observedRevision, 13, 13), "accept");
+  assert.equal(getIndexSnapshotDecision(observedRevision, 12, 13), "behind");
 });

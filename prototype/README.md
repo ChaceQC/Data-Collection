@@ -1,6 +1,6 @@
 # 本地资料工作台原型
 
-这是基于 `AGENT.md` 方案 3“收纳入口”实现的本地资料工作台。当前发布版本为 `v0.3.32`，建立在上一正式发布版本 `v0.3.26` 和历史基线 `v0.3.16` 之上；阶段 A `0.3.33` 当前为未发布的代码候选，已修复 JPG 预览、目录子项预览操作、悬浮球数量徽标和查询归一化，Windows 11/Tauri/WebView2 原生验收已由用户确认，发布仍未完成。此前计划阶段 A-J 的代码、最小自动验证、浏览器回退检查和用户 Windows 11/Tauri/WebView2 原生验收均已完成并发布。新的悬浮球“文件库”计划阶段 F 验收已完成，`v0.3.32` 已创建发布 Tag 和 Release；浏览器运行时仍只保留安全的原型回退。
+这是基于 `AGENT.md` 方案 3“收纳入口”实现的本地资料工作台。当前发布版本为 `v0.3.32`，建立在上一正式发布版本 `v0.3.26` 和历史基线 `v0.3.16` 之上；阶段 B `0.3.34` 当前为未发布的代码候选，已将索引、settings 和正文索引的可变状态收敛为一致快照，并在持久化成功后整体替换；阶段 A `0.3.33` 的 JPG 预览、目录子项预览操作、悬浮球数量徽标和查询归一化已保留。阶段 B 的 Windows 11/Tauri/WebView2 原生验收、Tag 和 Release 尚未完成。此前计划阶段 A-J 的代码、最小自动验证、浏览器回退检查和用户 Windows 11/Tauri/WebView2 原生验收均已完成并发布。新的悬浮球“文件库”计划阶段 F 验收已完成，`v0.3.32` 已创建发布 Tag 和 Release；浏览器运行时仍只保留安全的原型回退。
 
 ## 启动
 
@@ -136,6 +136,6 @@ cargo test
 cargo clippy --all-targets --all-features -- -D warnings
 ```
 
-`npm.cmd run build` 会生成 Sites 所需的 `dist/client/index.html`、`dist/server/index.js` 和 `dist/.openai/hosting.json`。浏览器/Sites 模式不会调用真实文件预览、托盘、窗口、递归导入或正文索引 command；此前 Windows 桌面预览、资料库操作、阶段 F、悬浮球基础能力和阶段 H-J 验收记录在根目录 `PROJECT_PROGRESS.md`，新的阶段 A `0.3.27`、阶段 B `0.3.28`、阶段 C `0.3.29`、阶段 D `0.3.30`、阶段 E `0.3.31` 和已发布阶段 F `0.3.32` 的代码、自动验证、NSIS 构建结果及用户原生验收记录也记录在同一进度文档中。
+`npm.cmd run build` 会生成 Sites 所需的 `dist/client/index.html`、`dist/server/index.js` 和 `dist/.openai/hosting.json`。浏览器/Sites 模式不会调用真实文件预览、托盘、窗口、递归导入或正文索引 command；此前 Windows 桌面预览、资料库操作、阶段 F、悬浮球基础能力和阶段 H-J 验收记录在根目录 `PROJECT_PROGRESS.md`，新的阶段 A `0.3.27`、阶段 B `0.3.28`、阶段 C `0.3.29`、阶段 D `0.3.30`、阶段 E `0.3.31`、已发布阶段 F `0.3.32` 和当前阶段 B `0.3.34` 的代码、自动验证、NSIS 构建结果及用户原生验收记录也记录在同一进度文档中。
 
 悬浮球阶段的自动验证使用 `npm.cmd run test:floating-ball`、`cargo test`、`cargo check` 和 `cargo clippy`；真实 Windows 窗口、文件拖放、多显示器位置和关闭/重启行为的验收记录均保留，阶段 F 的完整 Windows 11/Tauri/WebView2 原生验收已由用户完成，代理不以浏览器页面或开发侧命令结果替代该验收。

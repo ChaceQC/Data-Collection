@@ -21,16 +21,8 @@ impl<'a> IndexRepository<'a> {
         Self { state }
     }
 
-    pub fn snapshot(&self) -> Result<Vec<IndexEntry>, StorageError> {
+    pub fn snapshot(&self) -> Result<IndexSnapshot, StorageError> {
         self.state.snapshot()
-    }
-
-    pub fn snapshot_with_revision(&self) -> Result<IndexSnapshot, StorageError> {
-        self.state.snapshot_with_revision()
-    }
-
-    pub fn recovery_status(&self) -> Result<Option<super::IndexRecoveryStatus>, StorageError> {
-        self.state.recovery_status()
     }
 
     pub fn update_entries_with<F, T>(&self, mutation: F) -> Result<MutationResult<T>, StorageError>
@@ -123,7 +115,7 @@ impl<'a> IndexRepository<'a> {
             Ok((changed, changed_ids))
         })?;
         Ok(IndexLoadResult {
-            snapshot: self.snapshot_with_revision()?,
+            snapshot: self.snapshot()?,
             changed: outcome.changed,
             changed_ids: outcome.value,
             recovered_count,

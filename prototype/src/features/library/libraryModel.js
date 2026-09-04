@@ -24,12 +24,39 @@ export const RECENT_OPENED_ENTRY_LIMIT = 50;
 export const SEARCH_MODES = Object.freeze({ metadata: "metadata", content: "content" });
 export const MAX_SEARCH_QUERY_CHARS = 256;
 
+export function getIndexEventDecision(currentRevision = 0, eventRevision) {
+  const current = normalizeRevision(currentRevision);
+  const next = Number(eventRevision);
+  if (!Number.isSafeInteger(next) || next <= current) {
+    return { accepted: false, revision: current };
+  }
+  return { accepted: true, revision: next };
+}
+
+export function getIndexSnapshotDecision(
+  currentRevision = 0,
+  snapshotRevision,
+  requiredRevision = 0,
+) {
+  const current = normalizeRevision(currentRevision);
+  const required = Math.max(current, normalizeRevision(requiredRevision));
+  const incoming = Number(snapshotRevision);
+  if (!Number.isSafeInteger(incoming)) return "invalid";
+  if (incoming < current) return "stale";
+  if (incoming < required) return "behind";
+  return "accept";
+}
+
 export function normalizeSearchQuery(value) {
   return String(value ?? "")
     .normalize("NFKC")
     .trim()
     .replace(/\s+/g, " ")
     .toLocaleLowerCase("zh-CN");
+}
+
+function normalizeRevision(value) {
+  return Number.isSafeInteger(value) && value >= 0 ? value : 0;
 }
 
 export function normalizeRawSearchQuery(value) {

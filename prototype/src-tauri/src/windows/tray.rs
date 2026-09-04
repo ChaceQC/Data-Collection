@@ -179,7 +179,7 @@ fn build_recent_submenu<R: Runtime>(app: &AppHandle<R>) -> Result<Submenu<R>, St
         .state::<AppState>()
         .snapshot()
         .map_err(|_| "最近任务暂时无法读取".to_string())
-        .map(|entries| storage::floating_recent(&entries));
+        .map(|snapshot| storage::floating_recent(&snapshot.entries));
     let submenu = Submenu::with_id(app, "tray-recent-tasks", "最近任务", true)
         .map_err(|_| "托盘菜单无法创建".to_string())?;
     match recent {
@@ -317,7 +317,7 @@ fn open_task<R: Runtime>(app: &AppHandle<R>, file_id: &str) {
     let exists = app
         .state::<AppState>()
         .snapshot()
-        .map(|entries| entries.iter().any(|entry| entry.id == file_id))
+        .map(|snapshot| snapshot.entries.iter().any(|entry| entry.id == file_id))
         .unwrap_or(false);
     if !exists {
         emit_error(app, "最近任务已从资料库移除");
@@ -336,12 +336,17 @@ fn open_task<R: Runtime>(app: &AppHandle<R>, file_id: &str) {
 }
 
 fn toggle_favorite<R: Runtime>(app: &AppHandle<R>, file_id: &str) {
-    let current_favorite = app.state::<AppState>().snapshot().ok().and_then(|entries| {
-        entries
-            .into_iter()
-            .find(|entry| entry.id == file_id)
-            .map(|entry| entry.favorite)
-    });
+    let current_favorite = app
+        .state::<AppState>()
+        .snapshot()
+        .ok()
+        .and_then(|snapshot| {
+            snapshot
+                .entries
+                .into_iter()
+                .find(|entry| entry.id == file_id)
+                .map(|entry| entry.favorite)
+        });
     let Some(current_favorite) = current_favorite else {
         emit_error(app, "最近任务已从资料库移除");
         refresh_menu(app);

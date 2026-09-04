@@ -3,7 +3,7 @@ use std::{
     fs,
     io::Read,
     path::{Path, PathBuf},
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, RwLock},
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -28,17 +28,21 @@ const MAX_FAILURE_REASONS: usize = 16;
 #[derive(Clone, Debug)]
 pub struct ContentIndexState {
     path: Arc<Mutex<Option<PathBuf>>>,
-    documents: Arc<Mutex<HashMap<String, ContentDocument>>>,
-    status: Arc<Mutex<ContentIndexStatus>>,
+    snapshot: Arc<RwLock<ContentIndexSnapshot>>,
     mutation_lock: Arc<Mutex<()>>,
+}
+
+#[derive(Clone, Debug, Default)]
+struct ContentIndexSnapshot {
+    documents: HashMap<String, ContentDocument>,
+    status: ContentIndexStatus,
 }
 
 impl Default for ContentIndexState {
     fn default() -> Self {
         Self {
             path: Arc::new(Mutex::new(None)),
-            documents: Arc::new(Mutex::new(HashMap::new())),
-            status: Arc::new(Mutex::new(ContentIndexStatus::default())),
+            snapshot: Arc::new(RwLock::new(ContentIndexSnapshot::default())),
             mutation_lock: Arc::new(Mutex::new(())),
         }
     }
@@ -110,6 +114,12 @@ pub struct ContentSyncResult {
     pub truncated: bool,
 }
 
+#[derive(Debug)]
+pub struct ContentSearchSnapshot {
+    pub status: ContentIndexStatus,
+    pub results: Vec<ContentSearchResult>,
+}
+
 #[derive(Debug, Deserialize, Serialize)]
 struct ContentIndexDocument {
     version: u32,
@@ -171,40 +181,43 @@ impl ContentIndexState {
         if let Ok(mut target) = self.path.lock() {
             *target = Some(path);
         }
-        if let Ok(mut target) = self.documents.lock() {
-            *target = documents;
-        }
-        if let Ok(mut target) = self.status.lock() {
-            *target = status;
+        if let Ok(mut target) = self.snapshot.write() {
+            *target = ContentIndexSnapshot { documents, status };
         }
     }
 
     pub fn status(&self) -> Result<ContentIndexStatus, ContentIndexError> {
-        self.status
-            .lock()
-            .map(|status| status.clone())
+        self.snapshot
+            .read()
+            .map(|snapshot| snapshot.status.clone())
             .map_err(|_| ContentIndexError::Unavailable)
     }
 
-    pub fn search(
+    pub fn search_snapshot(
         &self,
         query: &str,
         use_regex: bool,
-    ) -> Result<Vec<ContentSearchResult>, ContentIndexError> {
-        let status = self.status()?;
-        if status.state == "recovery" {
-            return Err(ContentIndexError::RecoveryRequired);
-        }
-        if status.state == "unavailable" {
-            return Err(ContentIndexError::Unavailable);
-        }
-        let documents = self
-            .documents
-            .lock()
+    ) -> Result<ContentSearchSnapshot, ContentIndexError> {
+        let snapshot = self
+            .snapshot
+            .read()
             .map_err(|_| ContentIndexError::Unavailable)?
             .clone();
-        content_search::search(&documents, query, use_regex).map_err(|error| match error {
-            ContentSearchError::InvalidQuery => ContentIndexError::InvalidQuery,
+        if snapshot.status.state == "recovery" {
+            return Err(ContentIndexError::RecoveryRequired);
+        }
+        if snapshot.status.state == "unavailable" {
+            return Err(ContentIndexError::Unavailable);
+        }
+        let results =
+            content_search::search(&snapshot.documents, query, use_regex).map_err(|error| {
+                match error {
+                    ContentSearchError::InvalidQuery => ContentIndexError::InvalidQuery,
+                }
+            })?;
+        Ok(ContentSearchSnapshot {
+            status: snapshot.status,
+            results,
         })
     }
 
@@ -233,31 +246,32 @@ impl ContentIndexState {
         let path = self.index_path()?;
         let documents = HashMap::new();
         save_document(&path, source_revision, &documents, 0, None)?;
-        self.replace_documents(documents)?;
-        self.replace_status(make_status(
-            "ready",
-            source_revision,
-            &HashMap::new(),
-            0,
-            None,
-        ))?;
+        self.replace_snapshot(ContentIndexSnapshot {
+            status: make_status("ready", source_revision, &documents, 0, None),
+            documents,
+        })?;
         self.status()
     }
 
     pub fn mark_indexing(&self) -> Result<ContentIndexStatus, ContentIndexError> {
-        let mut status = self
-            .status
+        let _guard = self
+            .mutation_lock
             .lock()
             .map_err(|_| ContentIndexError::Unavailable)?;
-        status.state = "indexing".to_string();
-        status.last_error = None;
-        Ok(status.clone())
+        let mut snapshot = self.state_snapshot()?;
+        snapshot.status.state = "indexing".to_string();
+        snapshot.status.last_error = None;
+        self.replace_snapshot(snapshot.clone())?;
+        Ok(snapshot.status)
     }
 
     pub fn mark_unavailable(&self, message: &str) {
-        if let Ok(mut status) = self.status.lock() {
-            status.state = "unavailable".to_string();
-            status.last_error = Some(message.to_string());
+        let Ok(_guard) = self.mutation_lock.lock() else {
+            return;
+        };
+        if let Ok(mut snapshot) = self.snapshot.write() {
+            snapshot.status.state = "unavailable".to_string();
+            snapshot.status.last_error = Some(message.to_string());
         }
     }
 
@@ -272,7 +286,8 @@ impl ContentIndexState {
             .mutation_lock
             .lock()
             .map_err(|_| ContentIndexError::Unavailable)?;
-        let current_status = self.status()?;
+        let current = self.state_snapshot()?;
+        let current_status = current.status.clone();
         if source_revision < current_status.source_revision {
             return Err(ContentIndexError::Stale);
         }
@@ -280,11 +295,7 @@ impl ContentIndexState {
             return Err(ContentIndexError::RecoveryRequired);
         }
         let path = self.index_path()?;
-        let existing = self
-            .documents
-            .lock()
-            .map_err(|_| ContentIndexError::Unavailable)?
-            .clone();
+        let existing = current.documents;
         let mut next = if replace_all {
             HashMap::new()
         } else {
@@ -370,13 +381,16 @@ impl ContentIndexState {
         }
 
         if result.cancelled && replace_all {
-            self.replace_status(make_status(
-                "ready",
-                current_status.source_revision,
-                &existing,
-                current_status.failed_count,
-                Some("正文索引重建已取消".to_string()),
-            ))?;
+            self.replace_snapshot(ContentIndexSnapshot {
+                status: make_status(
+                    "ready",
+                    current_status.source_revision,
+                    &existing,
+                    current_status.failed_count,
+                    Some("正文索引重建已取消".to_string()),
+                ),
+                documents: existing,
+            })?;
             return Ok(result);
         }
         if !result.cancelled && !replace_all {
@@ -396,14 +410,16 @@ impl ContentIndexState {
             result.skipped_count,
             last_error.clone(),
         )?;
-        self.replace_documents(next.clone())?;
-        self.replace_status(make_status(
-            "ready",
-            source_revision,
-            &next,
-            result.skipped_count,
-            last_error,
-        ))?;
+        self.replace_snapshot(ContentIndexSnapshot {
+            status: make_status(
+                "ready",
+                source_revision,
+                &next,
+                result.skipped_count,
+                last_error,
+            ),
+            documents: next,
+        })?;
         Ok(result)
     }
 
@@ -415,22 +431,18 @@ impl ContentIndexState {
             .ok_or(ContentIndexError::Unavailable)
     }
 
-    fn replace_documents(
-        &self,
-        documents: HashMap<String, ContentDocument>,
-    ) -> Result<(), ContentIndexError> {
-        *self
-            .documents
-            .lock()
-            .map_err(|_| ContentIndexError::Unavailable)? = documents;
-        Ok(())
+    fn state_snapshot(&self) -> Result<ContentIndexSnapshot, ContentIndexError> {
+        self.snapshot
+            .read()
+            .map_err(|_| ContentIndexError::Unavailable)
+            .map(|snapshot| snapshot.clone())
     }
 
-    fn replace_status(&self, status: ContentIndexStatus) -> Result<(), ContentIndexError> {
+    fn replace_snapshot(&self, snapshot: ContentIndexSnapshot) -> Result<(), ContentIndexError> {
         *self
-            .status
-            .lock()
-            .map_err(|_| ContentIndexError::Unavailable)? = status;
+            .snapshot
+            .write()
+            .map_err(|_| ContentIndexError::Unavailable)? = snapshot;
         Ok(())
     }
 }
@@ -669,16 +681,67 @@ mod tests {
         let first = entry("file-a", &source);
         let result = state.sync_entries(std::slice::from_ref(&first), 1).unwrap();
         assert_eq!(result.indexed_count, 1);
-        assert_eq!(state.search("第一版", false).unwrap().len(), 1);
+        let first_search = state.search_snapshot("第一版", false).unwrap();
+        assert_eq!(first_search.status.source_revision, 1);
+        assert_eq!(first_search.status.indexed_count, 1);
+        assert_eq!(first_search.results.len(), 1);
         fs::write(&source, "第二版新增内容").unwrap();
         let mut updated = entry("file-a", &source);
         updated.modified_at = 2;
         let result = state.sync_entries(&[updated], 2).unwrap();
         assert_eq!(result.updated_count, 1);
-        assert_eq!(state.search("第一版", false).unwrap().len(), 0);
-        assert_eq!(state.search("第二版", false).unwrap().len(), 1);
+        assert_eq!(
+            state
+                .search_snapshot("第一版", false)
+                .unwrap()
+                .results
+                .len(),
+            0
+        );
+        assert_eq!(
+            state
+                .search_snapshot("第二版", false)
+                .unwrap()
+                .results
+                .len(),
+            1
+        );
         let _ = fs::remove_file(source);
         let _ = fs::remove_file(&index);
+    }
+
+    #[test]
+    fn failed_content_commit_keeps_documents_and_status_snapshot() {
+        let source = unique_path("stable.txt");
+        let root = unique_path("content-root");
+        fs::create_dir_all(&root).unwrap();
+        let index = root.join("content-index.json");
+        fs::write(&source, "旧版本内容").unwrap();
+        let state = ContentIndexState::default();
+        state.initialize(index);
+        let first = entry("file-a", &source);
+        state.sync_entries(std::slice::from_ref(&first), 1).unwrap();
+        let before = state.search_snapshot("旧版本", false).unwrap();
+
+        fs::write(&source, "新版本内容").unwrap();
+        let mut updated = entry("file-a", &source);
+        updated.modified_at = 2;
+        fs::remove_dir_all(&root).unwrap();
+
+        assert!(matches!(
+            state.sync_entries(&[updated], 2),
+            Err(ContentIndexError::Write)
+        ));
+        let after = state.search_snapshot("旧版本", false).unwrap();
+        assert_eq!(after.status.source_revision, before.status.source_revision);
+        assert_eq!(after.status.indexed_count, before.status.indexed_count);
+        assert_eq!(after.results.len(), before.results.len());
+        assert!(state
+            .search_snapshot("新版本", false)
+            .unwrap()
+            .results
+            .is_empty());
+        let _ = fs::remove_file(source);
     }
 
     #[test]
@@ -689,7 +752,7 @@ mod tests {
         state.initialize(index.clone());
         assert_eq!(state.status().unwrap().state, "recovery");
         assert!(matches!(
-            state.search("内容", false),
+            state.search_snapshot("内容", false),
             Err(ContentIndexError::RecoveryRequired)
         ));
         let source = unique_path("note.txt");

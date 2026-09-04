@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { save } from "@tauri-apps/plugin-dialog";
 import { getOperationError } from "../../lib/ipcContracts.js";
 import { createOperationId } from "../operations/operationModel.js";
+import { getIndexSnapshotDecision } from "./libraryModel.js";
 import { libraryRepository } from "./libraryRepository.js";
 
 export function useIndexController({
@@ -37,7 +38,7 @@ export function useIndexController({
     const revision = Number.isSafeInteger(snapshot?.revision)
       ? snapshot.revision
       : latestRevisionRef.current;
-    if (revision < latestRevisionRef.current) return false;
+    if (getIndexSnapshotDecision(latestRevisionRef.current, revision) === "stale") return false;
     latestRevisionRef.current = revision;
     setFiles(loadedFiles);
     setGroups(Array.isArray(snapshot?.groups) ? snapshot.groups : []);
@@ -65,7 +66,11 @@ export function useIndexController({
       try {
         while (true) {
           const snapshot = await libraryRepository.loadIndex();
-          if (snapshot.revision >= latestRevisionRef.current && snapshot.revision >= requestedRevisionRef.current) {
+          if (getIndexSnapshotDecision(
+            latestRevisionRef.current,
+            snapshot.revision,
+            requestedRevisionRef.current,
+          ) === "accept") {
             applyIndexSnapshot(snapshot);
             const activeDirectory = directoryViewRef.current;
             const folder = activeDirectory?.trail?.at(-1);

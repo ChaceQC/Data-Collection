@@ -2,10 +2,7 @@ use std::{
     collections::HashSet,
     fs,
     path::{Path, PathBuf},
-    sync::{
-        atomic::{AtomicU64, Ordering},
-        Mutex,
-    },
+    sync::{Mutex, RwLock},
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -77,14 +74,60 @@ pub enum StorageError {
 #[derive(Debug, Default)]
 pub struct AppState {
     index_path: Mutex<Option<PathBuf>>,
-    entries: Mutex<Vec<IndexEntry>>,
-    groups: Mutex<Vec<Group>>,
-    undo_log: Mutex<Vec<UndoRecord>>,
     mutation_lock: Mutex<()>,
     pending_operations_path: Mutex<Option<PathBuf>>,
-    pending_operations: Mutex<Vec<PendingOperation>>,
-    recovery: Mutex<Option<RecoveryInfo>>,
-    revision: AtomicU64,
+    snapshot: RwLock<IndexStateData>,
+}
+
+#[derive(Clone, Debug, Default)]
+struct IndexStateData {
+    entries: Vec<IndexEntry>,
+    groups: Vec<Group>,
+    undo_log: Vec<UndoRecord>,
+    recovery: Option<RecoveryInfo>,
+    pending_operations: Vec<PendingOperation>,
+    revision: u64,
+}
+
+impl IndexStateData {
+    fn recovery_status(&self) -> Option<IndexRecoveryStatus> {
+        if self.recovery.is_none() && self.pending_operations.is_empty() {
+            return None;
+        }
+        Some(IndexRecoveryStatus {
+            required: true,
+            issue: self
+                .recovery
+                .as_ref()
+                .map(|value| value.issue.clone())
+                .unwrap_or_else(|| "存在待同步的文件操作，请刷新索引".to_string()),
+            backup_created: self
+                .recovery
+                .as_ref()
+                .map(|value| value.backup_created)
+                .unwrap_or(false),
+            pending_operations: self.pending_operations.len(),
+        })
+    }
+
+    fn public_snapshot(&self) -> IndexSnapshot {
+        let undo = self
+            .undo_log
+            .last()
+            .filter(|record| record.revision == self.revision)
+            .map(|record| UndoStatus {
+                id: record.id.clone(),
+                operation: record.operation.clone(),
+                count: record.entries.len() + record.groups.len(),
+            });
+        IndexSnapshot {
+            entries: self.entries.clone(),
+            groups: self.groups.clone(),
+            revision: self.revision,
+            recovery: self.recovery_status(),
+            undo,
+        }
+    }
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -157,7 +200,7 @@ struct RecoveryInfo {
     backup_created: bool,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct IndexRecoveryStatus {
     pub required: bool,
@@ -166,7 +209,7 @@ pub struct IndexRecoveryStatus {
     pub pending_operations: usize,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct IndexSnapshot {
     pub entries: Vec<IndexEntry>,
@@ -176,7 +219,7 @@ pub struct IndexSnapshot {
     pub undo: Option<UndoStatus>,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UndoStatus {
     pub id: String,
@@ -281,20 +324,19 @@ impl AppState {
             }
             Err(error) => return Err(error),
         };
-        self.revision.store(revision, Ordering::Release);
         *self.index_path.lock().map_err(|_| StorageError::State)? = Some(index_path);
         *self
             .pending_operations_path
             .lock()
             .map_err(|_| StorageError::State)? = Some(pending_path);
-        *self.entries.lock().map_err(|_| StorageError::State)? = entries;
-        *self.groups.lock().map_err(|_| StorageError::State)? = groups;
-        *self.undo_log.lock().map_err(|_| StorageError::State)? = undo_log;
-        *self
-            .pending_operations
-            .lock()
-            .map_err(|_| StorageError::State)? = pending_operations;
-        *self.recovery.lock().map_err(|_| StorageError::State)? = recovery;
+        *self.snapshot.write().map_err(|_| StorageError::State)? = IndexStateData {
+            entries,
+            groups,
+            undo_log,
+            recovery,
+            pending_operations,
+            revision,
+        };
         Ok(())
     }
 
@@ -306,89 +348,29 @@ impl AppState {
             .ok_or(StorageError::DataDirectory)
     }
 
-    pub fn snapshot(&self) -> Result<Vec<IndexEntry>, StorageError> {
-        self.entries
-            .lock()
+    pub fn snapshot(&self) -> Result<IndexSnapshot, StorageError> {
+        self.snapshot
+            .read()
             .map_err(|_| StorageError::State)
-            .map(|entries| entries.clone())
-    }
-
-    pub fn snapshot_groups(&self) -> Result<Vec<Group>, StorageError> {
-        self.groups
-            .lock()
-            .map_err(|_| StorageError::State)
-            .map(|groups| groups.clone())
-    }
-
-    pub fn snapshot_with_revision(&self) -> Result<IndexSnapshot, StorageError> {
-        Ok(IndexSnapshot {
-            entries: self.snapshot()?,
-            groups: self.snapshot_groups()?,
-            revision: self.revision(),
-            recovery: self.recovery_status()?,
-            undo: self.undo_status()?,
-        })
-    }
-
-    fn undo_log_snapshot(&self) -> Result<Vec<UndoRecord>, StorageError> {
-        self.undo_log
-            .lock()
-            .map_err(|_| StorageError::State)
-            .map(|records| records.clone())
-    }
-
-    fn undo_status(&self) -> Result<Option<UndoStatus>, StorageError> {
-        let revision = self.revision();
-        Ok(self
-            .undo_log_snapshot()?
-            .last()
-            .filter(|record| record.revision == revision)
-            .map(|record| UndoStatus {
-                id: record.id.clone(),
-                operation: record.operation.clone(),
-                count: record.entries.len() + record.groups.len(),
-            }))
-    }
-
-    pub fn revision(&self) -> u64 {
-        self.revision.load(Ordering::Acquire)
+            .map(|state| state.public_snapshot())
     }
 
     pub fn recovery_status(&self) -> Result<Option<IndexRecoveryStatus>, StorageError> {
-        let recovery = self
-            .recovery
-            .lock()
-            .map_err(|_| StorageError::State)?
-            .clone();
-        let pending_operations = self
-            .pending_operations
-            .lock()
-            .map_err(|_| StorageError::State)?
-            .len();
-        if recovery.is_none() && pending_operations == 0 {
-            return Ok(None);
-        }
-        Ok(Some(IndexRecoveryStatus {
-            required: true,
-            issue: recovery
-                .as_ref()
-                .map(|value| value.issue.clone())
-                .unwrap_or_else(|| "存在待同步的文件操作，请刷新索引".to_string()),
-            backup_created: recovery
-                .as_ref()
-                .map(|value| value.backup_created)
-                .unwrap_or(false),
-            pending_operations,
-        }))
+        self.snapshot
+            .read()
+            .map_err(|_| StorageError::State)
+            .map(|state| state.recovery_status())
     }
 
-    pub fn replace_entries(&self, entries: Vec<IndexEntry>) -> Result<(), StorageError> {
-        *self.entries.lock().map_err(|_| StorageError::State)? = entries;
-        Ok(())
+    fn state_snapshot(&self) -> Result<IndexStateData, StorageError> {
+        self.snapshot
+            .read()
+            .map_err(|_| StorageError::State)
+            .map(|state| state.clone())
     }
 
-    fn replace_groups(&self, groups: Vec<Group>) -> Result<(), StorageError> {
-        *self.groups.lock().map_err(|_| StorageError::State)? = groups;
+    fn replace_state(&self, state: IndexStateData) -> Result<(), StorageError> {
+        *self.snapshot.write().map_err(|_| StorageError::State)? = state;
         Ok(())
     }
 
@@ -436,42 +418,42 @@ impl AppState {
     {
         let _guard = self.mutation_lock.lock().map_err(|_| StorageError::State)?;
         let index_path = self.index_path()?;
-        let before_entries = self.snapshot()?;
-        let before_groups = self.snapshot_groups()?;
-        let mut next_entries = before_entries.clone();
-        let mut next_groups = before_groups.clone();
-        let (changed, value) = mutation(&mut next_entries, &mut next_groups)?;
+        let current = self.state_snapshot()?;
+        let mut next = current.clone();
+        let (changed, value) = mutation(&mut next.entries, &mut next.groups)?;
         let revision = if changed {
-            let mut next_undo = self.undo_log_snapshot()?;
-            let next_revision = self.revision().saturating_add(1);
+            let next_revision = current.revision.saturating_add(1);
             if let Some(operation) = undo_operation {
                 append_undo_record(
-                    &mut next_undo,
+                    &mut next.undo_log,
                     operation,
                     next_revision,
-                    &before_entries,
-                    &next_entries,
-                    &before_groups,
-                    &next_groups,
+                    &current.entries,
+                    &next.entries,
+                    &current.groups,
+                    &next.groups,
                 );
             }
             save_index_document(
                 &index_path,
-                &next_entries,
-                &next_groups,
-                &next_undo,
+                &next.entries,
+                &next.groups,
+                &next.undo_log,
                 next_revision,
             )?;
-            self.replace_entries(next_entries.clone())?;
-            self.replace_groups(next_groups)?;
-            *self.undo_log.lock().map_err(|_| StorageError::State)? = next_undo;
-            self.revision.fetch_add(1, Ordering::AcqRel) + 1
+            next.revision = next_revision;
+            self.replace_state(next.clone())?;
+            next_revision
         } else {
-            self.revision()
+            current.revision
         };
         Ok(MutationResult {
             value,
-            entries: next_entries,
+            entries: if changed {
+                next.entries
+            } else {
+                current.entries
+            },
             revision,
             changed,
         })
@@ -480,17 +462,17 @@ impl AppState {
     pub fn undo_last(&self) -> Result<MutationResult<Vec<String>>, StorageError> {
         let _guard = self.mutation_lock.lock().map_err(|_| StorageError::State)?;
         let index_path = self.index_path()?;
-        let mut undo_log = self.undo_log_snapshot()?;
-        let record = undo_log
+        let current = self.state_snapshot()?;
+        let record = current
+            .undo_log
             .last()
             .cloned()
             .ok_or(StorageError::UndoUnavailable)?;
-        if self.revision() != record.revision {
+        if current.revision != record.revision {
             return Err(StorageError::UndoUnavailable);
         }
 
-        let mut next_entries = self.snapshot()?;
-        let mut next_groups = self.snapshot_groups()?;
+        let mut next = current.clone();
         let mut changed_ids = record
             .entries
             .iter()
@@ -498,42 +480,40 @@ impl AppState {
             .collect::<Vec<_>>();
         changed_ids.extend(record.groups.iter().map(|change| change.group_id.clone()));
         for change in &record.entries {
-            if next_entries.iter().find(|entry| entry.id == change.file_id) != change.after.as_ref()
+            if next.entries.iter().find(|entry| entry.id == change.file_id) != change.after.as_ref()
             {
                 return Err(StorageError::UndoConflict);
             }
         }
         for change in &record.groups {
-            if next_groups.iter().find(|group| group.id == change.group_id) != change.after.as_ref()
+            if next.groups.iter().find(|group| group.id == change.group_id) != change.after.as_ref()
             {
                 return Err(StorageError::UndoConflict);
             }
         }
         for change in &record.entries {
-            apply_undo_entry_change(&mut next_entries, change)?;
+            apply_undo_entry_change(&mut next.entries, change)?;
         }
         for change in &record.groups {
-            apply_undo_group_change(&mut next_groups, change)?;
+            apply_undo_group_change(&mut next.groups, change)?;
         }
-        sort_entries(&mut next_entries);
-        sort_groups(&mut next_groups);
-        undo_log.pop();
-        let next_revision = self.revision().saturating_add(1);
+        sort_entries(&mut next.entries);
+        sort_groups(&mut next.groups);
+        next.undo_log.pop();
+        let next_revision = current.revision.saturating_add(1);
         save_index_document(
             &index_path,
-            &next_entries,
-            &next_groups,
-            &undo_log,
+            &next.entries,
+            &next.groups,
+            &next.undo_log,
             next_revision,
         )?;
-        self.replace_entries(next_entries.clone())?;
-        self.replace_groups(next_groups)?;
-        *self.undo_log.lock().map_err(|_| StorageError::State)? = undo_log;
-        self.revision.fetch_add(1, Ordering::AcqRel);
+        next.revision = next_revision;
+        self.replace_state(next.clone())?;
         Ok(MutationResult {
             value: changed_ids,
-            entries: next_entries,
-            revision: self.revision(),
+            entries: next.entries,
+            revision: next_revision,
             changed: true,
         })
     }
@@ -541,20 +521,22 @@ impl AppState {
     pub fn reset_index_recovery(&self) -> Result<IndexSnapshot, StorageError> {
         let _guard = self.mutation_lock.lock().map_err(|_| StorageError::State)?;
         let index_path = self.index_path()?;
-        let next_revision = self.revision().saturating_add(1);
-        save_index_document(&index_path, &[], &[], &[], next_revision)?;
-        self.replace_entries(Vec::new())?;
-        self.replace_groups(Vec::new())?;
-        *self.undo_log.lock().map_err(|_| StorageError::State)? = Vec::new();
-        self.revision.fetch_add(1, Ordering::AcqRel);
-        *self.recovery.lock().map_err(|_| StorageError::State)? = None;
-        Ok(IndexSnapshot {
-            entries: Vec::new(),
-            groups: Vec::new(),
-            revision: self.revision(),
-            recovery: self.recovery_status()?,
-            undo: None,
-        })
+        let current = self.state_snapshot()?;
+        let mut next = current.clone();
+        next.entries.clear();
+        next.groups.clear();
+        next.undo_log.clear();
+        next.recovery = None;
+        next.revision = current.revision.saturating_add(1);
+        save_index_document(
+            &index_path,
+            &next.entries,
+            &next.groups,
+            &next.undo_log,
+            next.revision,
+        )?;
+        self.replace_state(next.clone())?;
+        Ok(next.public_snapshot())
     }
 
     pub fn export_recovery_diagnostic(&self, destination: &Path) -> Result<(), StorageError> {
@@ -592,60 +574,63 @@ impl AppState {
     pub fn reconcile_pending_operations(&self) -> Result<bool, StorageError> {
         let _guard = self.mutation_lock.lock().map_err(|_| StorageError::State)?;
         let index_path = self.index_path()?;
-        let mut entries = self.snapshot()?;
-        let pending = self
-            .pending_operations
-            .lock()
-            .map_err(|_| StorageError::State)?
-            .clone();
+        let current = self.state_snapshot()?;
+        let mut next = current.clone();
         let mut resolved_ids = Vec::new();
-        for operation in &pending {
+        for operation in &current.pending_operations {
             if operation.operation != "delete-original" || operation.state != "physical-complete" {
                 continue;
             }
             if !path_exists(&operation.path) {
-                entries.retain(|entry| entry.id != operation.file_id);
+                next.entries.retain(|entry| entry.id != operation.file_id);
                 resolved_ids.push(operation.file_id.clone());
             }
         }
-        let changed = entries != self.snapshot()?;
+        let changed = next.entries != current.entries;
         if changed {
-            let groups = self.snapshot_groups()?;
-            let undo_log = self.undo_log_snapshot()?;
-            let next_revision = self.revision().saturating_add(1);
-            save_index_document(&index_path, &entries, &groups, &undo_log, next_revision)?;
-            self.replace_entries(entries)?;
-            self.revision.fetch_add(1, Ordering::AcqRel);
+            next.revision = current.revision.saturating_add(1);
+            save_index_document(
+                &index_path,
+                &next.entries,
+                &next.groups,
+                &next.undo_log,
+                next.revision,
+            )?;
         }
         if !resolved_ids.is_empty() {
-            let mut operations = self
-                .pending_operations
-                .lock()
-                .map_err(|_| StorageError::State)?;
-            operations.retain(|operation| !resolved_ids.contains(&operation.file_id));
+            next.pending_operations
+                .retain(|operation| !resolved_ids.contains(&operation.file_id));
             let pending_path = self.pending_operations_path()?;
-            save_pending_operations(&pending_path, &operations)?;
+            if let Err(error) = save_pending_operations(&pending_path, &next.pending_operations) {
+                if changed && save_index_state(&index_path, &current).is_err() {
+                    let mut persisted = next;
+                    persisted.pending_operations = current.pending_operations;
+                    self.replace_state(persisted)?;
+                }
+                return Err(error);
+            }
+        }
+        if changed || !resolved_ids.is_empty() {
+            self.replace_state(next)?;
         }
         Ok(changed)
     }
 
     pub fn prepare_delete(&self, file_id: &str, path: &Path) -> Result<(), StorageError> {
         let _guard = self.mutation_lock.lock().map_err(|_| StorageError::State)?;
-        let entry = self
-            .snapshot()?
-            .into_iter()
+        let mut next = self.state_snapshot()?;
+        let entry = next
+            .entries
+            .iter()
             .find(|entry| {
                 entry.id == file_id
                     && crate::filesystem::same_path(&entry.path, &path.to_string_lossy())
             })
+            .cloned()
             .ok_or(StorageError::EntryNotFound)?;
-        let mut operations = self
-            .pending_operations
-            .lock()
-            .map_err(|_| StorageError::State)?
-            .clone();
-        operations.retain(|operation| operation.file_id != entry.id);
-        operations.push(PendingOperation {
+        next.pending_operations
+            .retain(|operation| operation.file_id != entry.id);
+        next.pending_operations.push(PendingOperation {
             file_id: entry.id,
             operation: "delete-original".to_string(),
             path: path.to_string_lossy().into_owned(),
@@ -653,11 +638,8 @@ impl AppState {
             created_at: current_timestamp_millis(),
         });
         let pending_path = self.pending_operations_path()?;
-        save_pending_operations(&pending_path, &operations)?;
-        *self
-            .pending_operations
-            .lock()
-            .map_err(|_| StorageError::State)? = operations;
+        save_pending_operations(&pending_path, &next.pending_operations)?;
+        self.replace_state(next)?;
         Ok(())
     }
 
@@ -667,29 +649,20 @@ impl AppState {
 
     pub fn clear_pending_delete(&self, file_id: &str) -> Result<(), StorageError> {
         let _guard = self.mutation_lock.lock().map_err(|_| StorageError::State)?;
-        let mut operations = self
-            .pending_operations
-            .lock()
-            .map_err(|_| StorageError::State)?
-            .clone();
-        operations.retain(|operation| operation.file_id != file_id);
+        let mut next = self.state_snapshot()?;
+        next.pending_operations
+            .retain(|operation| operation.file_id != file_id);
         let pending_path = self.pending_operations_path()?;
-        save_pending_operations(&pending_path, &operations)?;
-        *self
-            .pending_operations
-            .lock()
-            .map_err(|_| StorageError::State)? = operations;
+        save_pending_operations(&pending_path, &next.pending_operations)?;
+        self.replace_state(next)?;
         Ok(())
     }
 
     fn update_pending_delete(&self, file_id: &str, next_state: &str) -> Result<(), StorageError> {
         let _guard = self.mutation_lock.lock().map_err(|_| StorageError::State)?;
-        let mut operations = self
+        let mut next = self.state_snapshot()?;
+        let Some(operation) = next
             .pending_operations
-            .lock()
-            .map_err(|_| StorageError::State)?
-            .clone();
-        let Some(operation) = operations
             .iter_mut()
             .find(|operation| operation.file_id == file_id)
         else {
@@ -697,11 +670,8 @@ impl AppState {
         };
         operation.state = next_state.to_string();
         let pending_path = self.pending_operations_path()?;
-        save_pending_operations(&pending_path, &operations)?;
-        *self
-            .pending_operations
-            .lock()
-            .map_err(|_| StorageError::State)? = operations;
+        save_pending_operations(&pending_path, &next.pending_operations)?;
+        self.replace_state(next)?;
         Ok(())
     }
 
@@ -795,6 +765,16 @@ fn save_index_document(
     let mut file = AtomicWriteFile::open(path).map_err(|_| StorageError::Write)?;
     std::io::Write::write_all(file.as_file_mut(), &encoded).map_err(|_| StorageError::Write)?;
     file.commit().map_err(|_| StorageError::Write)
+}
+
+fn save_index_state(path: &Path, state: &IndexStateData) -> Result<(), StorageError> {
+    save_index_document(
+        path,
+        &state.entries,
+        &state.groups,
+        &state.undo_log,
+        state.revision,
+    )
 }
 
 pub fn sort_entries(entries: &mut [IndexEntry]) {
@@ -1867,6 +1847,7 @@ mod tests {
         state
             .initialize(index_path)
             .expect("state should initialize");
+        let before = state.snapshot().expect("state should be readable");
         fs::remove_dir_all(&root).expect("test directory should be removable");
 
         let result = state.update_entries(|entries| {
@@ -1875,10 +1856,95 @@ mod tests {
         });
 
         assert!(matches!(result, Err(StorageError::Write)));
-        assert!(state
-            .snapshot()
-            .expect("state should remain readable")
-            .is_empty());
+        assert_eq!(
+            state.snapshot().expect("state should remain readable"),
+            before
+        );
+    }
+
+    #[test]
+    fn returns_entries_groups_undo_and_revision_from_one_commit() {
+        let index_path = unique_temp_path();
+        let source_path = index_path.with_file_name("同点快照.txt");
+        fs::write(&source_path, "内容").expect("source should be written");
+        let entry = crate::filesystem::index_selected_path(&source_path.to_string_lossy())
+            .expect("source should be indexable");
+        let state = AppState::default();
+        state
+            .initialize(index_path.clone())
+            .expect("state should initialize");
+
+        let initial = state.snapshot().expect("initial snapshot should load");
+        assert_eq!(initial.revision, 0);
+        assert!(initial.entries.is_empty());
+        assert!(initial.groups.is_empty());
+        assert!(initial.undo.is_none());
+
+        state
+            .update_entries(|entries| {
+                entries.push(entry.clone());
+                Ok(true)
+            })
+            .expect("entry should be saved");
+        let after_entry = state.snapshot().expect("entry snapshot should load");
+        assert_eq!(after_entry.revision, 1);
+        assert_eq!(after_entry.entries, vec![entry]);
+        assert!(after_entry.groups.is_empty());
+        assert!(after_entry.undo.is_none());
+
+        state
+            .update_index_with_undo("group-create", |_entries, groups| {
+                let group = super::create_group(groups, "项目").expect("group should be valid");
+                Ok((true, group))
+            })
+            .expect("group should be saved");
+        let committed = state.snapshot().expect("committed snapshot should load");
+        assert_eq!(committed.revision, 2);
+        assert_eq!(committed.entries, after_entry.entries);
+        assert_eq!(committed.groups.len(), 1);
+        assert_eq!(committed.undo.as_ref().map(|undo| undo.count), Some(1));
+
+        let persisted: serde_json::Value = serde_json::from_slice(
+            &fs::read(&index_path).expect("persisted index should be readable"),
+        )
+        .expect("persisted index should be valid JSON");
+        assert_eq!(persisted["revision"], 2);
+        assert_eq!(persisted["entries"].as_array().map(Vec::len), Some(1));
+        assert_eq!(persisted["groups"].as_array().map(Vec::len), Some(1));
+        assert_eq!(persisted["undoLog"].as_array().map(Vec::len), Some(1));
+
+        let _ = fs::remove_file(source_path);
+        let _ = fs::remove_file(index_path);
+    }
+
+    #[test]
+    fn failed_group_commit_keeps_the_complete_previous_snapshot() {
+        let root = unique_temp_path().with_extension("");
+        fs::create_dir_all(&root).expect("test directory should be created");
+        let index_path = root.join("index.json");
+        let state = AppState::default();
+        state
+            .initialize(index_path)
+            .expect("state should initialize");
+        state
+            .update_index_with_undo("group-create", |_entries, groups| {
+                let group = super::create_group(groups, "原分组").expect("group should be valid");
+                Ok((true, group))
+            })
+            .expect("group should be saved");
+        let before = state.snapshot().expect("state should be readable");
+        fs::remove_dir_all(&root).expect("test directory should be removable");
+
+        let failed = state.update_index_with_undo("group-rename", |_entries, groups| {
+            groups[0].name = "新分组".to_string();
+            Ok((true, ()))
+        });
+
+        assert!(matches!(failed, Err(StorageError::Write)));
+        assert_eq!(
+            state.snapshot().expect("state should remain readable"),
+            before
+        );
     }
 
     #[test]
@@ -1980,16 +2046,16 @@ mod tests {
             .expect("favorite should be saved with undo");
         assert_eq!(changed.revision, 2);
         assert!(state
-            .snapshot_with_revision()
+            .snapshot()
             .expect("snapshot should load")
             .undo
             .is_some());
 
         let undone = state.undo_last().expect("favorite should be undoable");
         assert_eq!(undone.value, vec![entry.id.clone()]);
-        assert!(!state.snapshot().expect("snapshot should load")[0].favorite);
+        assert!(!state.snapshot().expect("snapshot should load").entries[0].favorite);
         assert!(state
-            .snapshot_with_revision()
+            .snapshot()
             .expect("snapshot should load")
             .undo
             .is_none());
@@ -2081,6 +2147,7 @@ mod tests {
         assert!(state
             .snapshot()
             .expect("snapshot should be readable")
+            .entries
             .is_empty());
         let recovery = state
             .recovery_status()
@@ -2177,6 +2244,7 @@ mod tests {
         assert!(state
             .snapshot()
             .expect("snapshot should be readable")
+            .entries
             .is_empty());
         assert!(state
             .recovery_status()

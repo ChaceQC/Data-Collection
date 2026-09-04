@@ -920,6 +920,7 @@ fn find_entry(repository: &IndexRepository<'_>, file_id: &str) -> Result<IndexEn
     repository
         .snapshot()
         .map_err(structured_storage_error)?
+        .entries
         .into_iter()
         .find(|entry| entry.id == file_id)
         .ok_or_else(|| structured_storage_error(StorageError::EntryNotFound))

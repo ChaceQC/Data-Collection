@@ -2,10 +2,7 @@ use std::{
     fs,
     io::Write,
     path::{Path, PathBuf},
-    sync::{
-        atomic::{AtomicU64, Ordering},
-        Mutex,
-    },
+    sync::{Mutex, RwLock},
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -131,10 +128,15 @@ impl Default for PersistedSettings {
 #[derive(Debug, Default)]
 pub struct SettingsState {
     settings_path: Mutex<Option<PathBuf>>,
-    settings: Mutex<PersistedSettings>,
     mutation_lock: Mutex<()>,
-    warning: Mutex<Option<String>>,
-    revision: AtomicU64,
+    snapshot: RwLock<SettingsStateData>,
+}
+
+#[derive(Clone, Debug, Default)]
+struct SettingsStateData {
+    settings: PersistedSettings,
+    warning: Option<String>,
+    revision: u64,
 }
 
 impl SettingsState {
@@ -196,28 +198,21 @@ impl SettingsState {
             .settings_path
             .lock()
             .map_err(|_| SettingsError::State)? = Some(settings_path);
-        *self.settings.lock().map_err(|_| SettingsError::State)? = settings;
-        *self.warning.lock().map_err(|_| SettingsError::State)? = warning;
-        self.revision.store(revision, Ordering::Release);
+        *self.snapshot.write().map_err(|_| SettingsError::State)? = SettingsStateData {
+            settings,
+            warning,
+            revision,
+        };
         Ok(())
     }
 
     pub fn snapshot(&self) -> Result<AppSettings, SettingsError> {
-        self.settings
-            .lock()
-            .map_err(|_| SettingsError::State)
-            .and_then(|settings| {
-                let warning = self
-                    .warning
-                    .lock()
-                    .map_err(|_| SettingsError::State)?
-                    .clone();
-                Ok(AppSettings::from_persisted(
-                    &settings,
-                    self.revision.load(Ordering::Acquire),
-                    warning,
-                ))
-            })
+        let snapshot = self.snapshot.read().map_err(|_| SettingsError::State)?;
+        Ok(AppSettings::from_persisted(
+            &snapshot.settings,
+            snapshot.revision,
+            snapshot.warning.clone(),
+        ))
     }
 
     pub fn update(&self, update: SettingsUpdate) -> Result<AppSettings, SettingsError> {
@@ -234,16 +229,22 @@ impl SettingsState {
             .clone()
             .ok_or(SettingsError::DataDirectory)?;
 
-        let current_revision = self.revision.load(Ordering::Acquire);
+        let current_revision = self
+            .snapshot
+            .read()
+            .map_err(|_| SettingsError::State)?
+            .revision;
         if expected_revision.is_some_and(|revision| revision != current_revision) {
             return Err(SettingsError::Conflict);
         }
         let next_revision = current_revision.saturating_add(1);
 
         save_settings(&settings_path, &next, next_revision)?;
-        *self.settings.lock().map_err(|_| SettingsError::State)? = next.clone();
-        *self.warning.lock().map_err(|_| SettingsError::State)? = None;
-        self.revision.store(next_revision, Ordering::Release);
+        *self.snapshot.write().map_err(|_| SettingsError::State)? = SettingsStateData {
+            settings: next.clone(),
+            warning: None,
+            revision: next_revision,
+        };
         Ok(AppSettings::from_persisted(&next, next_revision, None))
     }
 }
@@ -440,6 +441,34 @@ mod tests {
                     .to_string_lossy()
                     .contains("settings-corrupt.json.recovery-"))
         );
+        cleanup(path);
+    }
+
+    #[test]
+    fn replaces_settings_warning_and_revision_with_one_snapshot() {
+        let path = unique_path("settings-warning.json");
+        fs::write(&path, b"not-json").expect("corrupt settings should be written");
+        let state = SettingsState::default();
+        state
+            .initialize(path.clone())
+            .expect("settings should recover");
+        let before = state.snapshot().expect("settings should read");
+        assert_eq!(before.revision, 0);
+        assert!(before.warning.is_some());
+
+        let updated = state
+            .update(SettingsUpdate {
+                default_sort: before.default_sort,
+                page_size: before.page_size,
+                confirm_before_remove: before.confirm_before_remove,
+                hide_to_tray: before.hide_to_tray,
+                show_floating_window: before.show_floating_window,
+                expected_revision: Some(before.revision),
+            })
+            .expect("settings should update");
+        assert_eq!(updated.revision, 1);
+        assert!(updated.warning.is_none());
+        assert_eq!(state.snapshot().expect("settings should read"), updated);
         cleanup(path);
     }
 

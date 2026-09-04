@@ -2,6 +2,66 @@
 
 ## 2026-09-04
 
+### 阶段 B：索引快照原子一致性（0.3.34 代码候选）
+
+#### 已完成
+
+- 完成 B1：`AppState` 将 entries、groups、undo、recovery、pending 操作和 revision 收敛到 `IndexStateData` 单一 `RwLock`；`snapshot()` 一次读取并返回同一提交点的完整索引快照，`IndexRepository` 只通过一致快照和明确 mutation API 访问索引。
+- 完成 B2：更新、撤销、恢复重建和 pending delete reconciliation 都先构造并校验下一状态，完成索引原子持久化后再整体替换内存快照；失败写入不会递增 revision 或改变旧快照，groups 与 entries/undo 一起提交。pending 文件提交失败时优先回滚已提交的索引，回滚失败则让内存状态与已提交索引保持一致并保留 pending 状态。
+- 完成 B3：`SettingsState` 使用统一 settings/warning/revision 快照，`ContentIndexState` 使用统一 documents/status 快照；正文搜索结果与 status 由同一次只读快照返回，未改变 settings v3 或 content index v1 的用户可见语义。
+- 完成 B4：主窗口、悬浮球、托盘、刷新、启动同步和记录打开路径均改用统一索引快照；前端以纯模型判定事件和响应的 revision，丢弃低版本、重复和乱序结果并等待跳跃版本，事件只触发 reload，不直接写入 entries。
+- 新增索引同点提交、分组/undo 组合提交、失败写入保持完整快照、正文失败提交和 settings warning/revision 快照测试；磁盘格式保持 `index.json v5`、`settings.json v3`、`content-index.json v1`，无迁移或格式版本变化。
+- 五个版本入口已同步为 `0.3.34`：`prototype/package.json`、`prototype/package-lock.json` 根包、`prototype/src-tauri/tauri.conf.json`、`prototype/src-tauri/Cargo.toml` 和 `prototype/src-tauri/Cargo.lock` 根 package。
+
+#### 进行中
+
+- 阶段 B 代码、自动验证、版本同步和本地 NSIS 候选已完成；待本地 commit/合并收口及用户在 Windows 11/Tauri/WebView2 环境执行原生验收。
+
+#### 用户验收
+
+- 尚未执行。本阶段不能用 Rust/前端测试、生产构建、NSIS 生成或浏览器回退结果替代 Windows 11/Tauri/WebView2 原生验收。
+
+#### 阻塞与风险
+
+- 安装包未签名且不内置 WebView2 Runtime；目标 Windows 11 机器需要已有 WebView2。DOC 预览仍依赖目标机 LibreOffice。
+- 本阶段没有改变持久化格式，未新增迁移风险；浏览器仅覆盖 revision 模型，跨窗口索引最终一致性、应用重启恢复和安装行为仍需用户原生验收。
+
+#### 下一步
+
+- 完成本地阶段分支 commit，确认 ancestry 后使用 `git merge --ff-only` 并入 `dev`，复核合并后的工作树；随后由用户执行主窗口/悬浮球/托盘操作、重启恢复和 Windows 11/Tauri/WebView2 安装验收。
+
+#### 涉及文件
+
+- `prototype/src-tauri/src/storage/mod.rs`
+- `prototype/src-tauri/src/storage/repository.rs`
+- `prototype/src-tauri/src/storage/settings.rs`
+- `prototype/src-tauri/src/storage/content_index.rs`
+- `prototype/src-tauri/src/commands/mod.rs`
+- `prototype/src-tauri/src/commands/floating_ball.rs`
+- `prototype/src-tauri/src/commands/library.rs`
+- `prototype/src-tauri/src/windows/tray.rs`
+- `prototype/src-tauri/src/lib.rs`
+- `prototype/src/features/library/libraryModel.js`
+- `prototype/src/features/library/useIndexController.js`
+- `prototype/tests/library-controller.test.mjs`
+- `PROJECT_PLAN.md`、`README.md`、`prototype/README.md`、`PROJECT_PROGRESS.md`
+- 五个版本入口文件
+
+#### 验证
+
+- `npm.cmd run test:contracts`：17 项通过。
+- `npm.cmd run test:library`：23 项通过；`npm.cmd run test:floating-ball`：30 项通过；`npm.cmd run test:content`：5 项通过。
+- `npm.cmd run build`：通过，生成 `dist/client/index.html`、`dist/server/index.js` 和 `dist/.openai/hosting.json`。
+- `cargo fmt --all -- --check`：通过；`cargo check --locked`、`cargo check --tests --locked`、`cargo test --locked`：通过，Rust 共 85 项测试通过；`cargo clippy --all-targets --all-features --locked -- -D warnings`：通过。
+- `npm.cmd run tauri:build`：通过，完成前端构建、Rust release 编译、Windows x64 NSIS 打包和 loader 检查。安装器绝对路径为 `E:\Project\test\prototype\src-tauri\target\release\bundle\nsis\本地资料工作台_0.3.34_x64-setup.exe`，大小 `8847122` bytes，SHA-256 `997F674D01EECC779025F58444E98E2C0DBE1CCFA9A9BE721BCD8BDC20E35487`。
+- release 主程序 `E:\Project\test\prototype\src-tauri\target\release\local-material-workbench.exe`：`35749433` bytes，FileVersion/ProductVersion `0.3.34`，SHA-256 `3BADB4F5F034827DCA6C29CF5CDC00FC59E24050D861C59B2DDE2402637CAB94`。
+- `WebView2Loader.dll` 与 release 主程序同目录：`E:\Project\test\prototype\src-tauri\target\release\WebView2Loader.dll`，`160320` bytes，SHA-256 `8427B1FC58EC707813E5C0A51EB5D69397BB333250A7B891BE4D3B123F1E0F1C`；loader 校验通过，确认 Windows x64。
+- 单独执行 `npm.cmd run verify:loader`：通过，确认 loader 与 release 主程序同目录且为 Windows x64。
+- 未执行新的浏览器截图或服务检查；revision 乱序、重复和跳跃行为由前端纯模型测试覆盖，不宣称为桌面原生验收。
+- 当前阶段分支为 `codex/phase-0.3.34-index-snapshot`，尚未执行 commit、merge、push、Tag 或 Release。
+
+## 2026-09-04
+
 ### 阶段 A：确定性功能和契约修复（0.3.33 已完成）
 
 #### 已完成

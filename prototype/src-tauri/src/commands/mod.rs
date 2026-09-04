@@ -791,7 +791,10 @@ pub fn get_index_recovery(
     state: State<'_, AppState>,
 ) -> Result<Option<storage::IndexRecoveryStatus>, String> {
     let repository = IndexRepository::new(state.inner());
-    repository.recovery_status().map_err(storage_message)
+    repository
+        .snapshot()
+        .map(|snapshot| snapshot.recovery)
+        .map_err(storage_message)
 }
 
 #[tauri::command]
@@ -822,7 +825,7 @@ pub async fn refresh_index(
     app: AppHandle,
 ) -> Result<IndexRefreshResult, String> {
     let repository = IndexRepository::new(state.inner());
-    let entries = repository.snapshot().map_err(storage_message)?;
+    let entries = repository.snapshot().map_err(storage_message)?.entries;
     let checked = tauri::async_runtime::spawn_blocking(move || {
         entries
             .iter()
@@ -847,12 +850,14 @@ pub fn search_content(
     use_regex: bool,
     state: State<'_, storage::content_index::ContentIndexState>,
 ) -> Result<ContentSearchResponse, CommandError> {
-    let results = state
+    let search = state
         .inner()
-        .search(&query, use_regex)
+        .search_snapshot(&query, use_regex)
         .map_err(content_index_error)?;
-    let status = state.inner().status().map_err(content_index_error)?;
-    Ok(ContentSearchResponse { status, results })
+    Ok(ContentSearchResponse {
+        status: search.status,
+        results: search.results,
+    })
 }
 
 #[tauri::command]
@@ -864,14 +869,15 @@ pub async fn rebuild_content_index(
     app: AppHandle,
 ) -> Result<ContentIndexRebuildResult, CommandError> {
     let control = batch_state.begin_content_index(&operation_id)?;
-    let entries = match state.snapshot() {
-        Ok(entries) => entries,
+    let snapshot = match state.snapshot() {
+        Ok(snapshot) => snapshot,
         Err(error) => {
             batch_state.finish(&operation_id);
             return Err(storage_command_error(error));
         }
     };
-    let revision = state.revision();
+    let entries = snapshot.entries;
+    let revision = snapshot.revision;
     if let Err(error) = content_state.inner().mark_indexing() {
         batch_state.finish(&operation_id);
         return Err(content_index_error(error));
@@ -935,9 +941,10 @@ pub fn clear_content_index(
     content_state: State<'_, storage::content_index::ContentIndexState>,
     app: AppHandle,
 ) -> Result<storage::content_index::ContentIndexStatus, CommandError> {
+    let revision = state.snapshot().map_err(storage_command_error)?.revision;
     let status = content_state
         .inner()
-        .clear(state.revision())
+        .clear(revision)
         .map_err(content_index_error)?;
     emit_content_index_status(&app, content_state.inner());
     Ok(status)
@@ -967,7 +974,7 @@ pub(crate) fn refresh_index_sync<R: Runtime>(
     let reconciled = repository
         .reconcile_pending_operations()
         .map_err(storage_message)?;
-    let entries = repository.snapshot().map_err(storage_message)?;
+    let entries = repository.snapshot().map_err(storage_message)?.entries;
     let checked = entries
         .iter()
         .map(filesystem::refresh_entry_snapshot)
@@ -1076,6 +1083,7 @@ fn resolve_registered_directory_child(
     let root = state
         .snapshot()
         .map_err(storage_message)?
+        .entries
         .into_iter()
         .find(|entry| entry.id == target.directory_id)
         .ok_or_else(|| storage_message(StorageError::EntryNotFound))?;
@@ -1108,6 +1116,7 @@ fn resolve_preview_target(
             let entry = state
                 .snapshot()
                 .map_err(storage_message)?
+                .entries
                 .into_iter()
                 .find(|entry| entry.id == file_id)
                 .ok_or_else(|| storage_message(StorageError::EntryNotFound))?;
@@ -1166,8 +1175,8 @@ pub(crate) fn emit_index_changed<R: Runtime>(
     };
     let _ = app.emit_to("floating-ball", "index-changed", event.clone());
     let _ = app.emit_to("main", "index-changed", event);
-    if let Ok(entries) = app.state::<AppState>().snapshot() {
-        schedule_content_index_sync(app, revision, entries);
+    if let Ok(snapshot) = app.state::<AppState>().snapshot() {
+        schedule_content_index_sync(app, snapshot.revision, snapshot.entries);
     }
     crate::windows::tray::refresh_menu(app);
 }

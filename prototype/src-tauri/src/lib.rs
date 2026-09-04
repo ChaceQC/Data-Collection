@@ -55,14 +55,14 @@ pub fn run() {
                 .map_err(|error| Error::other(error.to_string()))?;
             let content_state = app.state::<storage::content_index::ContentIndexState>();
             content_state.initialize(data_dir.join("content-index.json"));
-            let entries = app
+            let snapshot = app
                 .state::<storage::AppState>()
                 .snapshot()
                 .map_err(|error| Error::other(error.to_string()))?;
             commands::schedule_content_index_sync(
                 app.handle(),
-                app.state::<storage::AppState>().revision(),
-                entries,
+                snapshot.revision,
+                snapshot.entries,
             );
             app.state::<storage::settings::SettingsState>()
                 .initialize(data_dir.join("settings.json"))

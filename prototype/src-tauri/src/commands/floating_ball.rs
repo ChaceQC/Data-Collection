@@ -40,7 +40,7 @@ pub fn get_floating_files(
     // index-changed, so typing a query never rescans the whole index.
     let repository = crate::storage::repository::IndexRepository::new(state.inner());
     let snapshot = repository
-        .snapshot_with_revision()
+        .snapshot()
         .map_err(super::structured_storage_error)?;
     storage::floating_files::query_floating_files(
         &snapshot.entries,
@@ -143,11 +143,11 @@ pub fn get_floating_recent(
     state: State<'_, AppState>,
     app: AppHandle,
 ) -> Result<FloatingRecentResult, String> {
-    let refreshed = super::refresh_index_sync(&state, &app)?;
-    let entries = state.snapshot().map_err(|error| error.to_string())?;
+    super::refresh_index_sync(&state, &app)?;
+    let snapshot = state.snapshot().map_err(|error| error.to_string())?;
     Ok(FloatingRecentResult {
-        revision: refreshed.revision,
-        recent: storage::floating_recent(&entries),
+        revision: snapshot.revision,
+        recent: storage::floating_recent(&snapshot.entries),
     })
 }
 
@@ -164,6 +164,7 @@ pub fn open_main_from_floating(
     let exists = state
         .snapshot()
         .map_err(|error| error.to_string())?
+        .entries
         .iter()
         .any(|entry| entry.id == file_id);
     if !exists {
