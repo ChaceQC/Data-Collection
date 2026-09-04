@@ -200,7 +200,7 @@ export function LibraryPanel({
     const directorySort = sort.key === "addedAt" ? { key: "name", direction: "asc" } : sort;
     if (!directoryView && activeNav === "recent-opened") return filtered;
     return sortEntries(filtered, directoryView ? directorySort : sort);
-  }, [activeNav, contentMatchIds, directoryView, filters, groups, searchMode, searchQuery, sort, sourceEntries, useRegex]);
+  }, [activeNav, contentMatchIds, directoryView, filters, groups, metadataMatchIds, searchMode, searchQuery, sort, sourceEntries, useRegex]);
   const page = useMemo(() => paginateEntries(visibleFiles, currentPage, pageSize), [currentPage, pageSize, visibleFiles]);
   const visiblePageIds = useMemo(() => new Set(page.entries.map((entry) => entry.id)), [page.entries]);
   const metadataResultById = useMemo(

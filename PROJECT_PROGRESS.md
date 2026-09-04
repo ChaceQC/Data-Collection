@@ -8,6 +8,7 @@
 #### 已完成
 
 - 按 `AGENT.md` 和 `PROJECT_PLAN.md` 完成阶段 C：新增 Rust `metadata_search` 服务，桌面元数据查询固定为名称、类型、状态、标签、分组和受控位置摘要字段；不接收前端任意字段名，不向前端返回完整路径或正文。
+- 修复主窗口搜索结果不刷新的回归：`LibraryPanel` 的可见列表派生依赖补齐 `metadataMatchIds`，后端搜索响应到达后会重新计算列表；悬浮球独立的 `get_floating_files` 查询流程不受影响。
 - 正则查询沿用正文搜索的 Rust `regex::RegexBuilder` 64 KiB 编译和 DFA 限制，查询限制为 256 个字符；无效、超限、控制字符、非法导航或非法筛选条件返回结构化 `invalid-metadata-query` 错误。位置摘要限制为 1024 个字符，结果最多覆盖当前 20,000 条索引。
 - 新增 `search_metadata` Tauri command。主索引使用阶段 B 的一致快照；目录视图通过已登记文件夹 ID 和受控相对路径重新校验后读取直接子项，目录子项仍不进入主索引操作。
 - 前端新增 140ms 元数据搜索防抖；输入变化会立即标记旧请求，响应必须同时通过请求序号、搜索上下文和索引 revision 校验。旧结果不会覆盖新查询、筛选、导航、目录或已更新索引。
@@ -17,7 +18,7 @@
 
 #### 进行中
 
-- 阶段 C 代码、测试、文档、版本同步、NSIS 候选和 loader 校验已完成；正在执行本地 commit、合并到 `dev` 和阶段分支清理。
+- 阶段 C 代码、测试、文档、版本同步、NSIS 候选和 loader 校验已完成；主窗口搜索回归修复已完成，正在执行本地 commit、合并到 `dev` 和阶段分支清理。
 
 #### 用户验收
 
@@ -30,7 +31,7 @@
 
 #### 下一步
 
-- 完成本地 commit、按 ancestry 规则将阶段分支快进并入 `dev` 并删除已合并阶段分支；随后由用户执行 Windows 11/Tauri/WebView2 原生验收，不执行 push、Tag 或 GitHub Release。
+- 完成本地 commit、按 ancestry 规则将修复分支快进并入 `dev` 并清理已合并阶段分支；随后由用户执行 Windows 11/Tauri/WebView2 原生验收，不执行 push、Tag 或 GitHub Release。
 
 #### 涉及文件
 
@@ -48,7 +49,8 @@
 - `npm.cmd run test:content`：5 项通过。
 - `npm.cmd run build`：通过，生成 Sites 所需的 `dist/client/index.html`、`dist/server/index.js` 和 `dist/.openai/hosting.json`。
 - `cargo fmt --all -- --check`：通过；`cargo check --locked`、`cargo check --tests --locked`：通过；`cargo test --locked`：90 项通过；`cargo clippy --locked --all-targets --all-features -- -D warnings`：通过。
-- `npm.cmd run tauri:build`：通过，生成 Windows x64 NSIS 候选 `E:\Project\test\prototype\src-tauri\target\release\bundle\nsis\本地资料工作台_0.3.35_x64-setup.exe`，大小 `8902309` bytes，SHA-256 `BCACDBA9C84A7171B91A764C6BDB1F17B98BAA65E5DA265CF9025E5F14EF0510`；release 主程序版本 `0.3.35`，大小 `35926010` bytes，SHA-256 `54DD25AE3A944B6D3B828060AB2C892493BF8164CC0F2202E1680CA7300685B`。
+- `npm.cmd run tauri:build`：通过，生成包含主窗口搜索修复的 Windows x64 NSIS 候选 `E:\Project\test\prototype\src-tauri\target\release\bundle\nsis\本地资料工作台_0.3.35_x64-setup.exe`，大小 `8903003` bytes，SHA-256 `8596DA7182BB82DC1BAE0913110258868F23CAB7C809E0DA1C952BA9A5EEAC08`；release 主程序版本 `0.3.35`，大小 `35926277` bytes，SHA-256 `8287315C18F16CD69A0F70F3E374F7BA6FAE918F37C2F69F458DC7649CC6A85A`。
+- 修复后回归：`npm.cmd run test:library` 26 项通过、`npm.cmd run test:contracts` 18 项通过、`npm.cmd run build` 通过；`npm.cmd run verify:loader` 通过，loader 为 `160320` bytes、Windows x64，与 release 主程序同目录。
 - `npm.cmd run verify:loader`：通过；`WebView2Loader.dll` 为 `160320` bytes、SHA-256 `8427B1FC58EC707813E5C0A51EB5D69397BB333250A7B891BE4D3B123F1E0F1C`，Windows x64，与 release 主程序位于同一目录。
 - generated ACL/schema 已确认包含 `search_metadata`、`allow-search-metadata` 和 `deny-search-metadata`；未执行浏览器截图或 Windows 原生手工验收。
 
