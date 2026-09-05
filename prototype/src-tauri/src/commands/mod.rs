@@ -396,6 +396,7 @@ pub struct ContentIndexRebuildResult {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ContentSearchResponse {
+    pub request_id: String,
     pub status: storage::content_index::ContentIndexStatus,
     pub results: Vec<storage::content_search::ContentSearchResult>,
 }
@@ -926,16 +927,31 @@ pub(crate) fn content_index_status_impl(
     state.inner().status().map_err(content_index_error)
 }
 
-pub(crate) fn search_content_impl(
+pub(crate) async fn search_content_impl(
+    request_id: String,
     query: String,
     use_regex: bool,
     state: State<'_, storage::content_index::ContentIndexState>,
 ) -> Result<ContentSearchResponse, CommandError> {
-    let search = state
-        .inner()
-        .search_snapshot(&query, use_regex)
+    let ticket = state
+        .queries
+        .begin(&request_id)
         .map_err(content_index_error)?;
+    let content = state.inner().clone();
+    let search =
+        tauri::async_runtime::spawn_blocking(move || content.run_query(&query, use_regex, &ticket))
+            .await
+            .map_err(|_| {
+                command_error(
+                    "task-failed",
+                    "正文搜索任务未完成，请重试",
+                    true,
+                    "unchanged",
+                )
+            })?
+            .map_err(content_index_error)?;
     Ok(ContentSearchResponse {
+        request_id,
         status: search.status,
         results: search.results,
     })
@@ -1003,15 +1019,17 @@ pub(crate) async fn rebuild_content_index_impl(
     };
     let entries = snapshot.entries;
     let revision = snapshot.revision;
-    if let Err(error) = content_state.inner().mark_indexing() {
-        batch_state.finish(&operation_id);
-        return Err(content_index_error(error));
-    }
-    emit_content_index_status(&app, content_state.inner());
+    let epoch = match content_state.begin_change() {
+        Ok(epoch) => epoch,
+        Err(error) => {
+            batch_state.finish(&operation_id);
+            return Err(content_index_error(error));
+        }
+    };
     let content_for_task = content_state.inner().clone();
     let control_for_task = control.clone();
     let joined = tauri::async_runtime::spawn_blocking(move || {
-        content_for_task.rebuild(&entries, revision, &|| {
+        content_for_task.rebuild_at(&entries, revision, epoch, &|| {
             control_for_task.stop_reason().is_some()
         })
     })
@@ -1022,12 +1040,6 @@ pub(crate) async fn rebuild_content_index_impl(
     let result = match joined {
         Ok(Ok(result)) => result,
         Ok(Err(error)) => {
-            if !matches!(
-                &error,
-                storage::content_index::ContentIndexError::RecoveryRequired
-            ) {
-                content_state.inner().mark_unavailable(&error.to_string());
-            }
             emit_content_index_status(&app, content_state.inner());
             return Err(content_index_error(error));
         }
@@ -1060,15 +1072,24 @@ pub(crate) async fn rebuild_content_index_impl(
     })
 }
 
-pub(crate) fn clear_content_index_impl(
+pub(crate) async fn clear_content_index_impl(
     state: State<'_, AppState>,
     content_state: State<'_, storage::content_index::ContentIndexState>,
     app: AppHandle,
 ) -> Result<storage::content_index::ContentIndexStatus, CommandError> {
     let revision = state.snapshot().map_err(storage_command_error)?.revision;
-    let status = content_state
-        .inner()
-        .clear(revision)
+    let epoch = content_state.begin_change().map_err(content_index_error)?;
+    let content = content_state.inner().clone();
+    let status = tauri::async_runtime::spawn_blocking(move || content.clear_at(revision, epoch))
+        .await
+        .map_err(|_| {
+            command_error(
+                "task-failed",
+                "正文索引清除任务未完成，请重试",
+                true,
+                "unchanged",
+            )
+        })?
         .map_err(content_index_error)?;
     emit_content_index_status(&app, content_state.inner());
     Ok(status)
@@ -1178,6 +1199,15 @@ fn content_index_error(error: storage::content_index::ContentIndexError) -> Comm
         }
         storage::content_index::ContentIndexError::Stale => {
             ("content-index-stale", true, "unknown")
+        }
+        storage::content_index::ContentIndexError::Cancelled => {
+            ("content-search-cancelled", false, "unchanged")
+        }
+        storage::content_index::ContentIndexError::TimedOut => {
+            ("content-search-timeout", true, "unchanged")
+        }
+        storage::content_index::ContentIndexError::Busy => {
+            ("content-search-busy", true, "unchanged")
         }
     };
     command_error(code, message, retryable, state)
@@ -1361,15 +1391,16 @@ pub(crate) fn schedule_content_index_sync<R: Runtime>(
     }
     let app_for_task = app.clone();
     tauri::async_runtime::spawn_blocking(move || loop {
-        let Some((source_revision, entries)) = content_state.take_pending_sync() else {
+        let Some((source_revision, entries, epoch)) = content_state.take_pending_sync() else {
             if !content_state.finish_sync_worker() {
                 break;
             }
             continue;
         };
-        let result = content_state.sync_entries_with_stop(&entries, source_revision, &|| {
-            content_state.has_pending_sync_after(source_revision)
-        });
+        let result =
+            content_state.sync_entries_with_stop(&entries, source_revision, epoch, &|| {
+                content_state.has_pending_sync_after(source_revision)
+            });
         match result {
             Ok(result)
                 if !result.cancelled && !content_state.has_pending_sync_after(source_revision) =>

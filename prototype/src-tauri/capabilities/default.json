@@ -19,6 +19,7 @@
     "allow-refresh-index",
     "allow-content-index-status",
     "allow-search-content",
+    "allow-cancel-content-search",
     "allow-search-metadata",
     "allow-rebuild-content-index",
     "allow-clear-content-index",

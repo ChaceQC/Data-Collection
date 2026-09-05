@@ -38,8 +38,15 @@ export const libraryRepository = Object.freeze({
   contentIndexStatus() {
     return invokeCommand("content_index_status", undefined, parseContentIndexStatus);
   },
-  searchContent(query, useRegex = false) {
-    return invokeCommand("search_content", { query, useRegex }, parseContentSearchResponse);
+  searchContent(query, useRegex, requestId) {
+    return invokeCommand("search_content", { query, useRegex, requestId }, (value, command) => {
+      const response = parseContentSearchResponse(value, command);
+      if (response.requestId !== requestId) throw new TypeError("正文搜索响应标识不一致");
+      return response;
+    });
+  },
+  cancelContentSearch(requestId) {
+    return invokeCommand("cancel_content_search", { requestId });
   },
   searchMetadata(query) {
     return invokeCommand("search_metadata", { query }, parseMetadataSearchResponse);

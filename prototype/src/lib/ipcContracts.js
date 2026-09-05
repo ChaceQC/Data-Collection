@@ -3,7 +3,7 @@ import { invoke, isTauri } from "@tauri-apps/api/core";
 export const IPC_COMMANDS = Object.freeze([
   "load_file_index", "list_directory", "reveal_directory_child", "index_paths", "import_folders_recursive", "refresh_index", "get_index_recovery",
   "reset_index_recovery", "export_index_diagnostic", "reposition_file", "set_favorite",
-  "content_index_status", "search_content", "rebuild_content_index", "clear_content_index", "cancel_content_index",
+  "content_index_status", "search_content", "cancel_content_search", "rebuild_content_index", "clear_content_index", "cancel_content_index",
   "search_metadata",
   "remove_index_entry", "copy_indexed_file", "open_indexed_file", "reveal_indexed_file",
   "rename_indexed_file", "delete_original_file", "set_entry_tags", "set_entry_group",
@@ -61,6 +61,9 @@ const OPERATION_MESSAGES = Object.freeze({
   "content-index-recovery-required": "正文索引损坏，请重建正文索引",
   "content-index-unavailable": "正文索引暂不可用，请重试或重建正文索引",
   "content-index-stale": "正文索引任务已过期，请重建后重试",
+  "content-search-cancelled": "正文搜索已取消",
+  "content-search-timeout": "正文搜索超时，请缩短表达式后重试",
+  "content-search-busy": "正文搜索繁忙，请稍后重试",
   "settings-conflict": "设置已在其他窗口更新，请检查后重新保存",
   "settings-invalid": "设置值无效，请恢复后重试",
   "settings-unavailable": "本地设置暂时不可用，请重试",
@@ -294,6 +297,7 @@ export function parseContentIndexStatus(value, command = "content_index_status")
     totalBytes: nonNegativeInteger(source.totalBytes, command, "totalBytes"),
     failedCount: nonNegativeInteger(source.failedCount, command, "failedCount"),
     sourceRevision: nonNegativeInteger(source.sourceRevision, command, "sourceRevision"),
+    cacheRevision: nonNegativeInteger(source.cacheRevision, command, "cacheRevision"),
     lastError: source.lastError == null ? null : string(source.lastError, command, "lastError"),
   };
 }
@@ -352,6 +356,7 @@ export function parseContentSearchResponse(value, command = "search_content") {
   const source = record(value, command);
   return {
     ...source,
+    requestId: assertOpaqueId(source.requestId, "requestId"),
     status: parseContentIndexStatus(source.status, command),
     results: array(source.results, command).map((item) => {
       const result = record(item, command);
@@ -687,12 +692,15 @@ function parseRecovery(value, command) {
 function parseContentSnippet(value, command) {
   const source = record(value, command);
   const textValue = string(source.text, command, "text");
-  if (textValue.length > 1024) throw contractError(command, "正文摘要过长");
+  const characterCount = Array.from(textValue).length;
+  if (characterCount > 246) throw contractError(command, "正文摘要过长");
+  let previousEnd = 0;
   const ranges = array(source.ranges, command).map((range) => {
     const item = record(range, command);
     const start = nonNegativeInteger(item.start, command, "start");
     const end = nonNegativeInteger(item.end, command, "end");
-    if (start >= end || end > textValue.length) throw contractError(command, "正文高亮范围无效");
+    if (start < previousEnd || start >= end || end > characterCount) throw contractError(command, "正文高亮范围无效");
+    previousEnd = end;
     return { start, end };
   });
   return { ...source, text: textValue, ranges };

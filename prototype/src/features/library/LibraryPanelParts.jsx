@@ -167,18 +167,19 @@ export function SearchHitSummary({ entry, searchMode, searchResult, metadataSear
 
 function HighlightedText({ text, ranges, characterRanges = false }) {
   const value = String(text ?? "");
+  const characters = characterRanges ? Array.from(value) : null;
   const segments = [];
   let cursor = 0;
   for (const range of ranges || []) {
     const start = Math.max(cursor, Number(range.start) || 0);
     const end = Math.max(start, Number(range.end) || 0);
-    const before = characterRanges ? Array.from(value).slice(cursor, start).join("") : value.slice(cursor, start);
-    const matched = characterRanges ? Array.from(value).slice(start, end).join("") : value.slice(start, end);
+    const before = characters ? characters.slice(cursor, start).join("") : value.slice(cursor, start);
+    const matched = characters ? characters.slice(start, end).join("") : value.slice(start, end);
     if (before) segments.push(<span key={`before-${cursor}`}>{before}</span>);
     if (matched) segments.push(<mark key={`match-${start}-${end}`}>{matched}</mark>);
     cursor = end;
   }
-  const tail = characterRanges ? Array.from(value).slice(cursor).join("") : value.slice(cursor);
+  const tail = characters ? characters.slice(cursor).join("") : value.slice(cursor);
   if (tail) segments.push(<span key={`tail-${cursor}`}>{tail}</span>);
   return <span className="search-hit-snippet">{segments.length ? segments : value}</span>;
 }

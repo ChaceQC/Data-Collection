@@ -1,21 +1,12 @@
-use std::collections::HashMap;
-
 use regex::{Regex, RegexBuilder};
-use thiserror::Error;
 
-use super::content_index::{ContentDocument, MAX_CONTENT_QUERY_CHARS};
+use super::content_index::{ContentDocuments, ContentIndexError, MAX_CONTENT_QUERY_CHARS};
 
 pub(crate) const MAX_REGEX_PROGRAM_BYTES: usize = 64 * 1024;
 const MAX_MATCHES_PER_DOCUMENT: usize = 64;
 const MAX_SNIPPETS_PER_RESULT: usize = 3;
 const SNIPPET_CONTEXT_CHARS: usize = 72;
 const MAX_SNIPPET_CHARS: usize = 240;
-
-#[derive(Debug, Error)]
-pub(crate) enum ContentSearchError {
-    #[error("搜索表达式无效")]
-    InvalidQuery,
-}
 
 #[derive(Clone, Debug, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -46,19 +37,31 @@ struct MatchRange {
     end: usize,
 }
 
+#[cfg(test)]
 pub(crate) fn search(
-    documents: &HashMap<String, ContentDocument>,
+    documents: &ContentDocuments,
     query: &str,
     use_regex: bool,
-) -> Result<Vec<ContentSearchResult>, ContentSearchError> {
+) -> Result<Vec<ContentSearchResult>, ContentIndexError> {
+    search_checked(documents, query, use_regex, &|| Ok(()))
+}
+
+pub(crate) fn search_checked(
+    documents: &ContentDocuments,
+    query: &str,
+    use_regex: bool,
+    check: &dyn Fn() -> Result<(), ContentIndexError>,
+) -> Result<Vec<ContentSearchResult>, ContentIndexError> {
+    check()?;
     let patterns = compile_patterns(query, use_regex)?;
     let mut ordered_documents = documents.values().collect::<Vec<_>>();
     ordered_documents.sort_by(|left, right| left.file_id.cmp(&right.file_id));
 
     let mut results = Vec::new();
     for document in ordered_documents {
+        check()?;
         let Some((ranges, match_count, matches_truncated)) =
-            find_matches(&document.content, &patterns)
+            find_matches(&document.content, &patterns, check)?
         else {
             continue;
         };
@@ -72,13 +75,13 @@ pub(crate) fn search(
     Ok(results)
 }
 
-fn compile_patterns(query: &str, use_regex: bool) -> Result<Vec<Regex>, ContentSearchError> {
+fn compile_patterns(query: &str, use_regex: bool) -> Result<Vec<Regex>, ContentIndexError> {
     let normalized = query.trim();
     if normalized.is_empty()
         || normalized.chars().count() > MAX_CONTENT_QUERY_CHARS
         || normalized.chars().any(char::is_control)
     {
-        return Err(ContentSearchError::InvalidQuery);
+        return Err(ContentIndexError::InvalidQuery);
     }
 
     let expressions = if use_regex {
@@ -98,34 +101,43 @@ fn compile_patterns(query: &str, use_regex: bool) -> Result<Vec<Regex>, ContentS
                 .size_limit(MAX_REGEX_PROGRAM_BYTES)
                 .dfa_size_limit(MAX_REGEX_PROGRAM_BYTES)
                 .build()
-                .map_err(|_| ContentSearchError::InvalidQuery)
+                .map_err(|_| ContentIndexError::InvalidQuery)
         })
         .collect()
 }
 
-fn find_matches(content: &str, patterns: &[Regex]) -> Option<(Vec<MatchRange>, usize, bool)> {
+fn find_matches(
+    content: &str,
+    patterns: &[Regex],
+    check: &dyn Fn() -> Result<(), ContentIndexError>,
+) -> Result<Option<(Vec<MatchRange>, usize, bool)>, ContentIndexError> {
     let mut ranges = Vec::new();
     let mut match_count: usize = 0;
     let mut matches_truncated = false;
 
     for pattern in patterns {
+        check()?;
         let mut pattern_matches = 0;
         for matched in pattern.find_iter(content) {
+            check()?;
+            if matched.start() == matched.end() {
+                continue;
+            }
             pattern_matches += 1;
             match_count = match_count.saturating_add(1);
-            if ranges.len() < MAX_MATCHES_PER_DOCUMENT {
-                ranges.push(MatchRange {
-                    start: content[..matched.start()].chars().count(),
-                    end: content[..matched.end()].chars().count(),
-                });
-            }
-            if pattern_matches >= MAX_MATCHES_PER_DOCUMENT {
+            if pattern_matches > MAX_MATCHES_PER_DOCUMENT {
                 matches_truncated = true;
                 break;
             }
+            if ranges.len() < MAX_MATCHES_PER_DOCUMENT {
+                ranges.push(MatchRange {
+                    start: matched.start(),
+                    end: matched.end(),
+                });
+            }
         }
         if pattern_matches == 0 {
-            return None;
+            return Ok(None);
         }
     }
 
@@ -140,11 +152,22 @@ fn find_matches(content: &str, patterns: &[Regex]) -> Option<(Vec<MatchRange>, u
         }
         merged.push(range);
     }
-    Some((
+    // 字节坐标排序后单次前向换算，避免每个命中反复扫描正文前缀。
+    let mut byte_offset = 0;
+    let mut char_offset = 0;
+    for range in &mut merged {
+        char_offset += content[byte_offset..range.start].chars().count();
+        let start = char_offset;
+        char_offset += content[range.start..range.end].chars().count();
+        byte_offset = range.end;
+        range.start = start;
+        range.end = char_offset;
+    }
+    Ok(Some((
         merged,
         match_count.min(MAX_MATCHES_PER_DOCUMENT),
-        matches_truncated,
-    ))
+        matches_truncated || match_count > MAX_MATCHES_PER_DOCUMENT,
+    )))
 }
 
 fn make_snippets(content: &str, ranges: &[MatchRange]) -> Vec<ContentSnippet> {
@@ -168,13 +191,14 @@ fn make_snippets(content: &str, ranges: &[MatchRange]) -> Vec<ContentSnippet> {
             }
         }
 
-        let prefix = usize::from(start > 0);
-        let suffix = usize::from(end < characters.len());
+        let prefix_text = if start > 0 { "..." } else { "" };
+        let suffix_text = if end < characters.len() { "..." } else { "" };
+        let prefix = prefix_text.chars().count();
         let text = format!(
             "{}{}{}",
-            if prefix > 0 { "..." } else { "" },
+            prefix_text,
             characters[start..end].iter().collect::<String>(),
-            if suffix > 0 { "..." } else { "" },
+            suffix_text,
         );
         let snippet_end = prefix + end.saturating_sub(start);
         let snippet_ranges = ranges
@@ -201,6 +225,39 @@ mod tests {
     use crate::storage::content_index::ContentDocument;
     use std::collections::HashMap;
 
+    #[test]
+    fn snippet_contract_matches_rendered_unicode_fixtures_and_exact_match_cap() {
+        let cases: serde_json::Value =
+            serde_json::from_str(include_str!("../../../shared/content-snippet-cases.json"))
+                .unwrap();
+        for case in cases.as_array().unwrap() {
+            let documents = HashMap::from([(
+                "file-a".to_string(),
+                std::sync::Arc::new(document("file-a", case["content"].as_str().unwrap())),
+            )]);
+            let result = search(
+                &documents,
+                case["query"].as_str().unwrap(),
+                case["useRegex"].as_bool().unwrap(),
+            )
+            .unwrap();
+            let serialized = serde_json::to_value(&result[0]).unwrap();
+            assert_eq!(serialized["snippets"], case["snippets"], "{}", case["name"]);
+            assert_eq!(serialized["matchCount"], case["matchCount"]);
+            assert_eq!(serialized["matchesTruncated"], case["matchesTruncated"]);
+        }
+        for count in [64, 65] {
+            let documents = HashMap::from([(
+                "file-a".to_string(),
+                std::sync::Arc::new(document("file-a", &"中 ".repeat(count))),
+            )]);
+            let results = search(&documents, "中", false).unwrap();
+            assert_eq!(results[0].match_count, 64);
+            assert_eq!(results[0].matches_truncated, count > 64);
+            assert!(search(&documents, "^", true).unwrap().is_empty());
+        }
+    }
+
     fn document(id: &str, content: &str) -> ContentDocument {
         ContentDocument {
             file_id: id.to_string(),
@@ -216,7 +273,7 @@ mod tests {
     fn searches_plain_text_as_case_insensitive_terms_and_returns_ranges() {
         let documents = HashMap::from([(
             String::from("file-a"),
-            document("file-a", "标题\nRust 本地检索"),
+            std::sync::Arc::new(document("file-a", "标题\nRust 本地检索")),
         )]);
         let results = search(&documents, "rust 检索", false).expect("query should work");
         assert_eq!(results.len(), 1);
@@ -228,7 +285,7 @@ mod tests {
     fn supports_linear_time_regular_expressions_and_rejects_invalid_queries() {
         let documents = HashMap::from([(
             String::from("file-a"),
-            document("file-a", "编号 A-1024\n编号 B-2048"),
+            std::sync::Arc::new(document("file-a", "编号 A-1024\n编号 B-2048")),
         )]);
         let results = search(&documents, r"[A-Z]-\d+", true).expect("regex should work");
         assert_eq!(results[0].match_count, 2);

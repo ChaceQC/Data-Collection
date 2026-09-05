@@ -14,12 +14,24 @@ pub fn content_index_status(
 }
 
 #[tauri::command]
-pub fn search_content(
+pub async fn search_content(
+    request_id: String,
     query: String,
     use_regex: bool,
     state: State<'_, storage::content_index::ContentIndexState>,
 ) -> Result<ContentSearchResponse, CommandError> {
-    super::search_content_impl(query, use_regex, state)
+    super::search_content_impl(request_id, query, use_regex, state).await
+}
+
+#[tauri::command]
+pub fn cancel_content_search(
+    request_id: String,
+    state: State<'_, storage::content_index::ContentIndexState>,
+) -> Result<(), CommandError> {
+    state
+        .queries
+        .cancel(&request_id)
+        .map_err(super::content_index_error)
 }
 
 #[tauri::command]
@@ -42,12 +54,12 @@ pub async fn rebuild_content_index(
 }
 
 #[tauri::command]
-pub fn clear_content_index(
+pub async fn clear_content_index(
     state: State<'_, AppState>,
     content_state: State<'_, storage::content_index::ContentIndexState>,
     app: AppHandle,
 ) -> Result<storage::content_index::ContentIndexStatus, CommandError> {
-    super::clear_content_index_impl(state, content_state, app)
+    super::clear_content_index_impl(state, content_state, app).await
 }
 
 #[tauri::command]

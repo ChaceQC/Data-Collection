@@ -219,6 +219,12 @@
           "markdownDescription": "Enables the cancel_content_index command without any pre-configured scope."
         },
         {
+          "description": "Enables the cancel_content_search command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-cancel-content-search",
+          "markdownDescription": "Enables the cancel_content_search command without any pre-configured scope."
+        },
+        {
           "description": "Enables the cancel_preview_task command without any pre-configured scope.",
           "type": "string",
           "const": "allow-cancel-preview-task",
@@ -553,6 +559,12 @@
           "type": "string",
           "const": "deny-cancel-content-index",
           "markdownDescription": "Denies the cancel_content_index command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the cancel_content_search command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-cancel-content-search",
+          "markdownDescription": "Denies the cancel_content_search command without any pre-configured scope."
         },
         {
           "description": "Denies the cancel_preview_task command without any pre-configured scope.",

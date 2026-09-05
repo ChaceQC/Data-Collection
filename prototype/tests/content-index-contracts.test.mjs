@@ -13,12 +13,14 @@ const status = {
   totalBytes: 128,
   failedCount: 0,
   sourceRevision: 4,
+  cacheRevision: 1,
   lastError: null,
 };
 
 test("validates content index status, snippets, and regex search results without paths", () => {
   assert.equal(parseContentIndexStatus(status).indexedCount, 2);
   const response = parseContentSearchResponse({
+    requestId: "search-a",
     status,
     results: [{
       fileId: "file-a",
@@ -29,6 +31,7 @@ test("validates content index status, snippets, and regex search results without
   });
   assert.equal(response.results[0].snippets[0].ranges[0].end, 5);
   assert.throws(() => parseContentSearchResponse({
+    requestId: "search-a",
     status,
     results: [{ fileId: "C:\\secret", matchCount: 1, matchesTruncated: false, snippets: [] }],
   }), TypeError);

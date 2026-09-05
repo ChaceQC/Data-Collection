@@ -119,7 +119,7 @@ export function SettingsPanel({
       <section className="settings-section" aria-labelledby="settings-content-index-title">
         <h3 id="settings-content-index-title">正文索引</h3>
         <div className="content-index-settings-status" role="status" aria-live="polite">
-          <strong>{getContentIndexStateLabel(contentIndexStatus?.state)}</strong>
+          <strong>{getContentIndexStateLabel(contentIndexRebuilding ? "indexing" : contentIndexStatus?.state)}</strong>
           <span>{contentIndexStatus ? `${contentIndexStatus.indexedCount} 项 · ${formatByteLimit(contentIndexStatus.totalBytes)}` : "正在读取状态"}</span>
           {contentIndexStatus?.failedCount > 0 && <span>跳过 {contentIndexStatus.failedCount} 项</span>}
           {contentIndexStatus?.lastError && <span className="settings-error-text">{contentIndexStatus.lastError}</span>}
@@ -132,7 +132,7 @@ export function SettingsPanel({
           )}
           <button type="button" className="dialog-button dialog-button-secondary" disabled={!onClearContentIndex || contentIndexRebuilding || contentIndexClearing} onClick={onClearContentIndex}><TrashSimple size={16} weight="regular" aria-hidden="true" /><span>{contentIndexClearing ? "清除中..." : "清除正文索引"}</span></button>
         </div>
-        <p className="settings-hint">只索引已登记的纯文本和 Markdown，内容保存在本机；单文件和总大小受安全上限限制。</p>
+        <p className="settings-hint">清除仅删除本机正文缓存；下次启动或资料变更后自动更新，原文件不受影响。</p>
       </section>
     </Dialog>
   );

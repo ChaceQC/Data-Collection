@@ -3,7 +3,7 @@ export type PreviewStatus = "idle" | "loading" | "ready" | "unsupported" | "miss
 export type FloatingOpenAction = "locate" | "preview";
 export type IpcCommand =
   | "load_file_index" | "list_directory" | "reveal_directory_child" | "index_paths" | "import_folders_recursive" | "refresh_index"
-  | "content_index_status" | "search_content" | "search_metadata" | "rebuild_content_index" | "clear_content_index" | "cancel_content_index" | "get_index_recovery"
+  | "content_index_status" | "search_content" | "cancel_content_search" | "search_metadata" | "rebuild_content_index" | "clear_content_index" | "cancel_content_index" | "get_index_recovery"
   | "reset_index_recovery" | "export_index_diagnostic" | "reposition_file" | "set_favorite"
   | "remove_index_entry" | "copy_indexed_file" | "open_indexed_file" | "reveal_indexed_file"
   | "rename_indexed_file" | "delete_original_file" | "set_entry_tags" | "set_entry_group"
@@ -138,6 +138,7 @@ export interface ContentIndexStatus {
   totalBytes: number;
   failedCount: number;
   sourceRevision: number;
+  cacheRevision: number;
   lastError: string | null;
 }
 
@@ -159,8 +160,15 @@ export interface ContentSearchResult {
 }
 
 export interface ContentSearchResponse {
+  requestId: string;
   status: ContentIndexStatus;
   results: ContentSearchResult[];
+}
+
+export interface ContentSearchRequest {
+  requestId: string;
+  query: string;
+  useRegex: boolean;
 }
 
 export type MetadataSearchField = "name" | "type" | "status" | "location" | "tag" | "group";

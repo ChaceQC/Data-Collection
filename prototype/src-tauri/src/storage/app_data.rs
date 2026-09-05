@@ -21,7 +21,7 @@ impl AppDataFile {
     const fn max_bytes(self) -> u64 {
         match self {
             Self::Index => 64 * 1024 * 1024,
-            Self::ContentIndex => 72 * 1024 * 1024,
+            Self::ContentIndex => super::content_limits::MAX_CONTENT_INDEX_FILE_BYTES,
             Self::Settings => 64 * 1024,
             Self::OperationHistory => 16 * 1024 * 1024,
             Self::FloatingPlacement => 64 * 1024,

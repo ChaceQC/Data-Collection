@@ -11,6 +11,7 @@ fn main() {
         "refresh_index",
         "content_index_status",
         "search_content",
+        "cancel_content_search",
         "search_metadata",
         "rebuild_content_index",
         "clear_content_index",

@@ -17,6 +17,8 @@ use self::app_data::{AppDataError, AppDataFile};
 
 pub(crate) mod app_data;
 pub(crate) mod content_index;
+pub(crate) mod content_limits;
+pub(crate) mod content_query;
 pub(crate) mod content_search;
 pub(crate) mod file_actions;
 pub(crate) mod floating_ball;
