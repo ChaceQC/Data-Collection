@@ -134,19 +134,45 @@ pub(crate) fn rename_file(
     ensure_directory(parent)?;
     ensure_target_is_available(target)?;
     ensure_regular_file_matches(source, expected)?;
-    fs::rename(source, target).map_err(|_| FileOperationError::RenameFailed)
+    rename_without_replace(source, target).map_err(|_| FileOperationError::RenameFailed)
 }
 
 pub(crate) fn restore_renamed_file(source: &Path, target: &Path, expected: &Metadata) -> bool {
+    let Some(parent) = target.parent() else {
+        return false;
+    };
     if ensure_regular_file_matches(source, expected).is_err()
-        || fs::symlink_metadata(target).is_ok()
+        || validate_directory_path(&parent.to_string_lossy()).is_err()
+        || ensure_target_is_available(target).is_err()
     {
         return false;
     }
     if ensure_regular_file_matches(source, expected).is_err() {
         return false;
     }
-    fs::rename(source, target).is_ok()
+    rename_without_replace(source, target).is_ok()
+}
+
+#[cfg(windows)]
+fn rename_without_replace(source: &Path, target: &Path) -> io::Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+    let source: Vec<u16> = source.as_os_str().encode_wide().chain(Some(0)).collect();
+    let target: Vec<u16> = target.as_os_str().encode_wide().chain(Some(0)).collect();
+    // MoveFileW 不允许覆盖目标，即使目标在前置检查后才被创建。
+    if unsafe {
+        windows_sys::Win32::Storage::FileSystem::MoveFileW(source.as_ptr(), target.as_ptr())
+    } == 0
+    {
+        Err(io::Error::last_os_error())
+    } else {
+        Ok(())
+    }
+}
+
+#[cfg(not(windows))]
+fn rename_without_replace(source: &Path, target: &Path) -> io::Result<()> {
+    fs::hard_link(source, target)?;
+    fs::remove_file(source)
 }
 
 pub(crate) fn delete_to_recycle_bin(

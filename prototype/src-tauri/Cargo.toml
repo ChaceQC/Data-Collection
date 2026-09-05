@@ -1,6 +1,6 @@
 [package]
 name = "local-material-workbench"
-version = "0.3.41"
+version = "0.3.42"
 description = "本地资料工作台 Tauri 桌面应用"
 authors = ["Local Material Workbench"]
 edition = "2021"
@@ -29,6 +29,7 @@ unicode-normalization = "0.1.24"
 trash = "5.2.6"
 windows-sys = { version = "0.61.2", features = [
     "Win32_Foundation",
+    "Win32_Storage_FileSystem",
     "Win32_System_DataExchange",
     "Win32_System_Memory",
     "Win32_System_Ole",

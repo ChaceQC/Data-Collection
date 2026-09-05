@@ -18,6 +18,7 @@ use self::app_data::{AppDataError, AppDataFile};
 pub(crate) mod app_data;
 pub(crate) mod content_index;
 pub(crate) mod content_search;
+pub(crate) mod file_actions;
 pub(crate) mod floating_ball;
 pub(crate) mod floating_files;
 pub(crate) mod index_mutations;
@@ -82,12 +83,21 @@ pub enum StorageError {
     InvalidPreviewStatus,
     #[error("预览结果已过期，请重新打开资料")]
     PreviewRevisionConflict,
+    #[error("该资料正在执行文件操作，请稍后重试")]
+    FileBusy,
+    #[error("资料来源已改变，请刷新索引后重试")]
+    SourceChanged,
+    #[error("资料已恢复或已重新定位，请刷新索引")]
+    RepositionNotNeeded,
+    #[error("所选路径类型不匹配，请按原资料选择文件或文件夹")]
+    RepositionKindMismatch,
 }
 
 #[derive(Debug, Default)]
 pub struct AppState {
     index_path: Mutex<Option<PathBuf>>,
     mutation_lock: Mutex<()>,
+    active_file_actions: Mutex<HashSet<String>>,
     pending_operations_path: Mutex<Option<PathBuf>>,
     snapshot: RwLock<IndexStateData>,
 }
@@ -156,6 +166,8 @@ pub(crate) struct PendingOperation {
     path: String,
     state: String,
     created_at: i64,
+    #[serde(default)]
+    source: Option<pending_operations::SourceSnapshot>,
 }
 
 #[derive(Clone, Debug)]
@@ -171,6 +183,8 @@ pub struct IndexRecoveryStatus {
     pub issue: String,
     pub backup_created: bool,
     pub pending_operations: usize,
+    pub index_blocked: bool,
+    pub pending_file_ids: Vec<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -411,7 +425,11 @@ impl AppState {
             Some((file_id, source_revision)),
             None,
             |entries, _groups| {
-                if !validate_source() {
+                if !entries
+                    .iter()
+                    .any(|entry| entry.id == file_id && !entry.invalid)
+                    || !validate_source()
+                {
                     return Err(StorageError::PreviewRevisionConflict);
                 }
                 let (changed, entry) = record_preview_outcome(entries, file_id, status, opened_at)?;
@@ -451,10 +469,7 @@ impl AppState {
         let index_path = self.index_path()?;
         let current = self.state_snapshot()?;
         if expected_source.is_some_and(|(id, expected)| {
-            !current
-                .entries
-                .iter()
-                .any(|entry| entry.id == id && !entry.invalid)
+            !current.entries.iter().any(|entry| entry.id == id)
                 || current.source_revisions.get(id).copied().unwrap_or(0) != expected
         }) {
             return Err(StorageError::PreviewRevisionConflict);
@@ -625,6 +640,14 @@ impl AppState {
 
     pub fn reset_index_recovery(&self) -> Result<IndexSnapshot, StorageError> {
         let _guard = self.mutation_lock.lock().map_err(|_| StorageError::State)?;
+        if !self
+            .active_file_actions
+            .lock()
+            .map_err(|_| StorageError::State)?
+            .is_empty()
+        {
+            return Err(StorageError::FileBusy);
+        }
         let index_path = self.index_path()?;
         let current = self.state_snapshot()?;
         let mut next = current.clone();
@@ -640,6 +663,10 @@ impl AppState {
             &next.undo_log,
             next.revision,
         )?;
+        self.replace_state(next.clone())?;
+        // 空索引先落盘；日志清理失败时保留已保存状态，重启按无对应条目收敛。
+        save_pending_operations(&self.pending_operations_path()?, &[])?;
+        next.pending_operations.clear();
         self.replace_state(next.clone())?;
         Ok(next.public_snapshot())
     }
@@ -664,6 +691,8 @@ impl AppState {
             issue: "没有待处理的索引恢复问题".to_string(),
             backup_created: false,
             pending_operations: 0,
+            index_blocked: false,
+            pending_file_ids: Vec::new(),
         });
         let diagnostic = serde_json::json!({
             "format": "local-material-workbench-diagnostic",
@@ -682,15 +711,33 @@ impl AppState {
         let current = self.state_snapshot()?;
         let mut next = current.clone();
         let mut resolved_ids = Vec::new();
+        if current.recovery.is_some() {
+            return Ok(false);
+        }
+        let active = self
+            .active_file_actions
+            .lock()
+            .map_err(|_| StorageError::State)?;
         for operation in &current.pending_operations {
-            if operation.operation != "delete-original" || operation.state != "physical-complete" {
+            if active.contains(&operation.file_id) {
                 continue;
             }
-            if !path_exists(&operation.path) {
-                next.entries.retain(|entry| entry.id != operation.file_id);
-                resolved_ids.push(operation.file_id.clone());
+            let entry = next
+                .entries
+                .iter()
+                .find(|entry| entry.id == operation.file_id);
+            match pending_operations::decide(operation, entry) {
+                pending_operations::RecoveryDecision::Keep => {}
+                pending_operations::RecoveryDecision::Resolve => {
+                    resolved_ids.push(operation.file_id.clone())
+                }
+                pending_operations::RecoveryDecision::RemoveEntry => {
+                    next.entries.retain(|entry| entry.id != operation.file_id);
+                    resolved_ids.push(operation.file_id.clone());
+                }
             }
         }
+        drop(active);
         let changed = next.entries != current.entries;
         if changed {
             next.revision = current.revision.saturating_add(1);
@@ -703,6 +750,10 @@ impl AppState {
             )?;
         }
         if !resolved_ids.is_empty() {
+            // 索引已提交时先发布。日志清理失败可重复恢复，不反写旧索引。
+            if changed {
+                self.replace_state(next.clone())?;
+            }
             let resolved_id_set = resolved_ids
                 .iter()
                 .map(String::as_str)
@@ -710,19 +761,12 @@ impl AppState {
             next.pending_operations
                 .retain(|operation| !resolved_id_set.contains(operation.file_id.as_str()));
             let pending_path = self.pending_operations_path()?;
-            if let Err(error) = save_pending_operations(&pending_path, &next.pending_operations) {
-                if changed && save_index_state(&index_path, &current).is_err() {
-                    let mut persisted = next;
-                    persisted.pending_operations = current.pending_operations;
-                    self.replace_state(persisted)?;
-                }
-                return Err(error);
-            }
+            save_pending_operations(&pending_path, &next.pending_operations)?;
         }
         if changed || !resolved_ids.is_empty() {
             self.replace_state(next)?;
         }
-        Ok(changed)
+        Ok(changed || !resolved_ids.is_empty())
     }
 
     pub fn prepare_delete(&self, file_id: &str, path: &Path) -> Result<(), StorageError> {
@@ -737,14 +781,23 @@ impl AppState {
             })
             .cloned()
             .ok_or(StorageError::EntryNotFound)?;
-        next.pending_operations
-            .retain(|operation| operation.file_id != entry.id);
+        if next
+            .pending_operations
+            .iter()
+            .any(|operation| operation.file_id == entry.id)
+        {
+            return Err(StorageError::Recovery);
+        }
+        let (_, metadata) = crate::filesystem::operations::validate_indexed_file(&entry)
+            .map_err(|_| StorageError::SourceChanged)?;
+        let source = pending_operations::SourceSnapshot::capture(&entry, &metadata)?;
         next.pending_operations.push(PendingOperation {
             file_id: entry.id,
             operation: "delete-original".to_string(),
             path: path.to_string_lossy().into_owned(),
             state: "prepared".to_string(),
             created_at: current_timestamp_millis(),
+            source: Some(source),
         });
         let pending_path = self.pending_operations_path()?;
         save_pending_operations(&pending_path, &next.pending_operations)?;
@@ -869,16 +922,6 @@ fn save_index_document(
     };
     let encoded = serde_json::to_vec_pretty(&document).map_err(|_| StorageError::Write)?;
     app_data::write(path, AppDataFile::Index, &encoded).map_err(|_| StorageError::Write)
-}
-
-fn save_index_state(path: &Path, state: &IndexStateData) -> Result<(), StorageError> {
-    save_index_document(
-        path,
-        &state.entries,
-        &state.groups,
-        &state.undo_log,
-        state.revision,
-    )
 }
 
 pub fn sort_entries(entries: &mut [IndexEntry]) {
@@ -1705,61 +1748,15 @@ const MAX_TIMESTAMP_SECONDS: i64 = 4_102_444_800;
 const MAX_TIMESTAMP_MILLIS: i64 = MAX_TIMESTAMP_SECONDS.saturating_mul(1_000);
 const MAX_INDEXED_SIZE_BYTES: u64 = 1_u64 << 50;
 
-fn path_exists(path: &str) -> bool {
-    fs::symlink_metadata(path).is_ok()
-}
-
 fn load_pending_operations(path: &Path) -> Result<Vec<PendingOperation>, StorageError> {
-    let Some(bytes) =
-        app_data::read(path, AppDataFile::PendingOperations).map_err(map_app_data_read_error)?
-    else {
-        return Ok(Vec::new());
-    };
-    let document =
-        serde_json::from_slice::<PendingDocument>(&bytes).map_err(|_| StorageError::Corrupt)?;
-    if document.version != 1 {
-        return Err(StorageError::UnsupportedVersion);
-    }
-    if document.operations.len() > MAX_PENDING_OPERATIONS
-        || document.operations.iter().any(|operation| {
-            !is_valid_opaque_id(&operation.file_id)
-                || operation.operation != "delete-original"
-                || !matches!(operation.state.as_str(), "prepared" | "physical-complete")
-                || operation.path.trim().is_empty()
-                || operation.path.len() > crate::filesystem::recursive_import::MAX_PATH_BYTES
-                || !(1..=MAX_TIMESTAMP_MILLIS).contains(&operation.created_at)
-        })
-    {
-        return Err(StorageError::Corrupt);
-    }
-    Ok(document.operations)
+    pending_operations::load(path)
 }
 
 fn save_pending_operations(
     path: &Path,
     operations: &[PendingOperation],
 ) -> Result<(), StorageError> {
-    if operations.len() > MAX_PENDING_OPERATIONS
-        || operations.iter().any(|operation| {
-            !is_valid_opaque_id(&operation.file_id)
-                || operation.operation != "delete-original"
-                || !matches!(operation.state.as_str(), "prepared" | "physical-complete")
-                || operation.path.trim().is_empty()
-                || operation.path.len() > crate::filesystem::recursive_import::MAX_PATH_BYTES
-                || !(1..=MAX_TIMESTAMP_MILLIS).contains(&operation.created_at)
-        })
-    {
-        return Err(StorageError::Write);
-    }
-    if operations.is_empty() {
-        return app_data::remove(path).map_err(|_| StorageError::Write);
-    }
-    let document = PendingDocument {
-        version: 1,
-        operations: operations.to_vec(),
-    };
-    let encoded = serde_json::to_vec_pretty(&document).map_err(|_| StorageError::Write)?;
-    app_data::write(path, AppDataFile::PendingOperations, &encoded).map_err(|_| StorageError::Write)
+    pending_operations::save(path, operations)
 }
 
 fn backup_file(path: &Path, file_kind: AppDataFile) -> bool {

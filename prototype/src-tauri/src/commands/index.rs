@@ -69,9 +69,7 @@ pub async fn reposition_file(
     state: State<'_, AppState>,
     app: AppHandle,
 ) -> Result<IndexMutationResult, CommandError> {
-    super::reposition_file_impl(file_id, new_path, state, app)
-        .await
-        .map_err(legacy_command_error)
+    super::reposition_file_impl(file_id, new_path, state, app).await
 }
 
 #[tauri::command]

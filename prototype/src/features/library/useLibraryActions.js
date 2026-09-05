@@ -8,6 +8,7 @@ import { libraryRepository } from "./libraryRepository.js";
 import { createLibraryBatchActions } from "./useLibraryBatchActions.js";
 import { createFloatingHandoff } from "./useFloatingHandoff.js";
 import { createLibraryFileActions } from "./useLibraryFileActions.js";
+import { useLibraryReposition } from "./useLibraryReposition.js";
 import { createLibraryHistoryActions } from "./useLibraryHistoryActions.js";
 import { createLibraryImportActions } from "./useLibraryImportActions.js";
 import { createLibraryMutationActions } from "./useLibraryMutationActions.js";
@@ -35,6 +36,7 @@ import {
 
 export function useLibraryActions({
   isTauriRuntime,
+  navigationContext,
   files,
   setFiles,
   settings,
@@ -73,8 +75,10 @@ export function useLibraryActions({
   const [groupBusy, setGroupBusy] = useState(false);
   const folderInputRef = useRef(null);
   const fileInputRef = useRef(null);
-  const repositionInputRef = useRef(null);
-  const repositionTargetIdRef = useRef(null);
+  const { openRepositionPicker } = useLibraryReposition({
+    files, navigationContext, isTauriRuntime, fileActions, reloadIndexPreservingState,
+    invalidateDirectoryRequest, setPreviewEntryId, setSelectedId, setDirectoryError, showToast,
+  });
   const busyFileIdRef = useRef("");
   const batchBusyRef = useRef(false);
   const activeBatchOperationIdRef = useRef("");
@@ -218,11 +222,15 @@ export function useLibraryActions({
     setBusyFileId(fileId);
     await releasePreviewForAction(fileId);
     try {
-      if (isTauriRuntime) await mutationActions.removeIndexEntry(fileId);
-      const updatedFiles = files.filter((item) => item.id !== fileId);
-      setFiles(updatedFiles);
+      if (isTauriRuntime) {
+        const result = await mutationActions.removeIndexEntry(fileId);
+        if (!await reloadIndexPreservingState(result.revision)) throw new Error("记录已移除，但界面同步失败，请刷新核对");
+      } else {
+        const updatedFiles = files.filter((item) => item.id !== fileId);
+        setFiles(updatedFiles);
+        setSelectedId((currentId) => currentId === fileId ? getNextSelection(updatedFiles, "") : currentId);
+      }
       setDirectoryView(null);
-      setSelectedId((currentId) => currentId === fileId ? getNextSelection(updatedFiles, "") : currentId);
       setPendingAction(null);
       operationReporter?.finishOperation(operationId, { status: "success", totalCount: 1, successCount: 1 });
       showToast("已从资料库移除，原文件未改变");
@@ -250,7 +258,7 @@ export function useLibraryActions({
     try {
       if (isTauriRuntime) {
         const result = await mutationActions.renameIndexedFile(fileId, renameName);
-        if (result.entry) setFiles((current) => current.map((item) => item.id === fileId ? result.entry : item));
+        if (!await reloadIndexPreservingState(result.revision)) throw new Error("重命名已保存，但界面同步失败，请刷新");
       } else {
         setFiles((current) => current.map((item) => {
           if (item.id !== fileId) return item;
@@ -263,8 +271,11 @@ export function useLibraryActions({
       operationReporter?.finishOperation(operationId, { status: "success", totalCount: 1, successCount: 1 });
       showToast("文件已重命名");
     } catch (error) {
-      operationReporter?.failOperation(operationId, "重命名失败，原文件未改变");
-      showActionError(error, "重命名失败，原文件未改变");
+      const message = getOperationError(error, "重命名结果未确认，请刷新后检查资料路径");
+      if (error.code === "partial-success") operationReporter?.finishOperation(operationId, { status: "partial-success", totalCount: 1, message });
+      else operationReporter?.failOperation(operationId, message);
+      if (isTauriRuntime && error.state !== "unchanged") await reloadIndexPreservingState();
+      showActionError(error, "重命名结果未确认，请刷新后检查资料路径");
     } finally {
       finishBusy();
     }
@@ -403,13 +414,12 @@ export function useLibraryActions({
     setBusyFileId(fileId);
     await releasePreviewForAction(fileId);
     try {
-      await fileActions.deleteOriginal(fileId);
-      const updatedFiles = files.filter((item) => item.id !== fileId);
-      setFiles(updatedFiles);
-      setSelectedId((currentId) => currentId === fileId ? getNextSelection(updatedFiles, "") : currentId);
+      const result = await fileActions.deleteOriginal(fileId);
+      if (!await reloadIndexPreservingState(result.revision)) throw new Error("原文件已处理，但界面同步失败，请刷新");
       setPendingAction(null);
       showToast("原文件已移入回收站");
     } catch (error) {
+      await reloadIndexPreservingState();
       showActionError(error, "删除原文件失败，索引和原文件状态未确认");
     } finally {
       finishBusy();
@@ -907,11 +917,10 @@ export function useLibraryActions({
       return;
     }
     try {
-      const selected = await open({ directory: mode === "folder" || mode === "reposition", multiple: mode !== "reposition", title: mode === "folder" ? "选择资料文件夹" : "选择资料文件" });
+      const selected = await open({ directory: mode === "folder", multiple: true, title: mode === "folder" ? "选择资料文件夹" : "选择资料文件" });
       const paths = selected ? (Array.isArray(selected) ? selected : [selected]) : [];
       if (!paths.length) return;
-      if (mode === "reposition") await repositionRealPath(paths[0]);
-      else if (mode === "folder") requestFolderImport(paths);
+      if (mode === "folder") requestFolderImport(paths);
       else await indexRealPaths(paths);
     } catch (error) {
       showActionError(error, "无法打开文件选择器，请重试");
@@ -931,39 +940,6 @@ export function useLibraryActions({
 
   function handleDragLeave(event) {
     if (event.currentTarget === event.target) setDragActive(false);
-  }
-
-  async function repositionRealPath(newPath) {
-    const fileId = repositionTargetIdRef.current;
-    if (!fileId) return;
-    setPreviewEntryId(null);
-    try {
-      const result = await fileActions.reposition(fileId, newPath);
-      invalidateDirectoryRequest();
-      if (result.entry) setFiles((current) => current.map((item) => item.id === fileId ? result.entry : item));
-      setDirectoryError?.(null);
-      setSelectedId(fileId);
-      showToast("路径已更新");
-    } catch (error) {
-      showActionError(error, "重新定位失败，请选择可访问的文件");
-    }
-  }
-
-  function openRepositionPicker(file) {
-    repositionTargetIdRef.current = file.id;
-    if (isTauriRuntime) void choosePaths("reposition");
-    else repositionInputRef.current?.click();
-  }
-
-  function repositionInvalidPath(fileList) {
-    const pickedFile = Array.from(fileList || {})[0];
-    const targetId = repositionTargetIdRef.current;
-    if (!pickedFile) return;
-    const kind = getFileKind(pickedFile.name);
-    setFiles((current) => current.map((file) => file.id === targetId ? { ...file, name: pickedFile.name, kind, type: getFileType(pickedFile.name, kind), status: "已登记", invalid: false, modified: "刚刚" } : file));
-    setDirectoryError?.(null);
-    setSelectedId(targetId);
-    showToast("路径已更新");
   }
 
   async function openFromFloating(payload) {
@@ -1047,8 +1023,6 @@ export function useLibraryActions({
     openFromFloating,
     openRepositionPicker,
     pendingAction,
-    repositionInputRef,
-    repositionInvalidPath,
     renameName,
     renameValidation,
     requestDelete,

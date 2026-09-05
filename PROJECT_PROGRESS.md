@@ -2,6 +2,43 @@
 
 ## 2026-09-05
 
+### 阶段 B：文件操作一致性与删除恢复（0.3.42，代码和定向回归完成，交付收口中）
+
+#### 已完成
+
+- 从本地 `dev` 的 `99837ee` 创建独立分支 `codex/phase-0.3.42-file-recovery`，实现当前计划 R03-R05。
+- 重定位按文件/目录打开选择器，绑定条目与请求身份，取消和迟到结果不提交；提交时复核来源修订、失效状态、当前路径和目标类型，排序后返回稳定 ID；前端在 runtime validator 核对响应 ID，再通过阶段 A 的 revision 同步入口应用结果。
+- 重命名在实际文件操作后合并当前记录，只更新来源字段，保留并发收藏、标签、分组、添加时间、最近记录、最近打开和预览状态。同一资料的重命名/删除/重定位互斥，其他资料不受此锁阻塞；Windows 不覆盖式改名防止回滚覆盖新建文件，回滚失败返回真实 partial-success / unknown。
+- 删除日志从 v1 升级至 v2，保存受控来源快照。prepared 的来源一致时结束意图，缺失/冲突/未知时保留核对信息；physical-complete 只清理仍对应原来源的记录；已重定位条目和原路径新文件不被删除。活跃操作不被恢复线程提前清理。
+- 恢复先提交索引，再清理日志；清理失败保留已提交索引和可重试日志。显式重建展示影响范围，依次清空索引与 pending，第二步失败后可重启收敛。v1 先备份再迁移，缺少来源快照的旧日志保留人工核对状态。
+- 公开恢复契约增加 `indexBlocked` 和 `pendingFileIds`，同步 Rust、JS runtime validator、`.d.ts` 与界面。恢复提示提供刷新、资料核对、诊断和确认重建入口，不把 pending 一律提示为索引损坏。
+- 五个版本文件统一为 `0.3.42`；新增 Windows `MoveFileW` 所需的现有 windows-sys feature，无新增依赖包。两份 README、计划和 `docs/file-operation-recovery.md` 已同步。
+
+#### 验证
+
+- 按用户“完成后尽量减少测试”的补充要求，只执行本阶段定向检查，不执行完整前端/Rust 测试组合，不为数量补测无关模块。
+- `node --test tests/library-file-actions.test.mjs tests/ipc-contracts.test.mjs tests/operation-model.test.mjs`：19 项通过。
+- Rust `storage::file_actions::tests` 4 项、`storage::pending_operations::tests` 4 项、`filesystem::operations::tests` 4 项通过。覆盖排序后 ID、类型/重复/无效路径、可控屏障并发、回滚冲突、两种日志状态的恢复矩阵、prepare/mark/index/clear 失败窗口、旧日志备份、重建与重复恢复；仅操作隔离合成资料，不调用真实回收站。
+- `cargo check --locked`、`cargo check --tests --locked`、最终 `cargo fmt --all -- --check` 和严格 clippy 通过；安装包与 loader 证据待交付记录补齐。
+- Edge 在 1280x720 与 720x800 视口完成合成 pending 状态、核对入口、重建影响范围及取消的布局快速检查。该页面使用受控 IPC 替身，只作为界面证据；临时服务 `49342` 与浏览器已关闭，端口已释放。
+
+#### 进行中与下一步
+
+- 最终源码、格式与五个版本入口已核对；提交源码后运行 `npm.cmd run tauri:build`，记录 NSIS 时间、大小、SHA-256、源码提交和 loader，再本地快进合入 `dev` 并删除当前阶段分支。
+- 阶段 C 未开始；阶段 B 原生验收待用户完成。此时尚未执行 push、Tag、Release 或上传。
+
+#### 阻塞与风险
+
+- Windows 11/Tauri/WebView2 选择器、回收站、占用文件、安装升级与重启的真实验收由用户执行；自动回归和浏览器布局检查不替代原生验收。
+- v2 pending 不向旧版 `0.3.41` 回写 v1；回退前需在当前候选完成日志核对与清理。安装包仍不签名、不内置 WebView2 Runtime，DOC 仍依赖目标机 LibreOffice；既有 `xlsx@0.18.5` 风险不变。
+
+#### 涉及模块
+
+- Rust `storage/file_actions.rs`、`storage/pending_operations.rs`、共享状态、文件 command 与 `filesystem/operations.rs`。
+- 前端重定位 Hook、资料库操作、Repository、索引控制器、App 恢复提示及 IPC 契约；定向回归、五个版本文件和交付文档。
+
+## 2026-09-05
+
 ### 阶段 A：预览与界面异步状态闭环（0.3.41，开发侧收口及用户原生验收已完成）
 
 #### 已完成

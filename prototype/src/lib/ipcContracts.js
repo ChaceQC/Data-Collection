@@ -30,6 +30,9 @@ const MAX_METADATA_SEARCH_RANGES = 64;
 
 const OPERATION_MESSAGES = Object.freeze({
   "entry-not-found": "资料已不存在，请刷新索引",
+  "file-busy": "该资料正在执行文件操作，请稍后重试",
+  "reposition-not-needed": "资料已恢复或已重新定位，请刷新索引",
+  "reposition-kind-mismatch": "所选路径类型不匹配，请按原资料选择文件或文件夹",
   "invalid-id": "资料标识无效，请重新选择资料",
   "source-missing": "原文件已不存在，请先刷新或移除索引记录",
   "source-changed": "原文件在操作前发生变化，请刷新索引后重试",
@@ -77,6 +80,14 @@ export class IpcContractError extends Error {
     this.name = "IpcContractError";
     this.command = command;
   }
+}
+
+export function parseTargetMutationResult(value, fileId, command) {
+  const result = parseMutationResult(value, command);
+  if (result.entry?.id !== fileId || result.changedIds.some((id) => id !== fileId)) {
+    throw new IpcContractError("文件操作返回的资料标识不匹配", command);
+  }
+  return result;
 }
 
 export function isDesktopRuntime() {
@@ -667,7 +678,10 @@ function normalizeRelativePath(value) {
 
 function parseRecovery(value, command) {
   const source = record(value, command);
-  return { ...source, required: boolean(source.required, command, "required"), issue: string(source.issue, command, "issue"), backupCreated: boolean(source.backupCreated, command, "backupCreated"), pendingOperations: nonNegativeInteger(source.pendingOperations, command, "pendingOperations") };
+  const pendingOperations = nonNegativeInteger(source.pendingOperations, command, "pendingOperations");
+  const pendingFileIds = source.pendingFileIds == null ? [] : array(source.pendingFileIds, command).map((id) => assertOpaqueId(id, "pendingFileId"));
+  if (pendingFileIds.length > 500 || (source.pendingFileIds != null && pendingFileIds.length !== pendingOperations)) throw contractError(command, "待核对操作数量不匹配");
+  return { ...source, required: boolean(source.required, command, "required"), issue: string(source.issue, command, "issue"), backupCreated: boolean(source.backupCreated, command, "backupCreated"), pendingOperations, pendingFileIds, indexBlocked: source.indexBlocked == null ? pendingOperations === 0 : boolean(source.indexBlocked, command, "indexBlocked") };
 }
 
 function parseContentSnippet(value, command) {

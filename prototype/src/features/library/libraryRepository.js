@@ -13,6 +13,7 @@ import {
   parseIndexRefreshResult,
   parseIndexSnapshot,
   parseMutationResult,
+  parseTargetMutationResult,
 } from "../../lib/ipcContracts.js";
 
 export const libraryRepository = Object.freeze({
@@ -59,7 +60,7 @@ export const libraryRepository = Object.freeze({
     return invokeCommand("export_index_diagnostic", { destination });
   },
   repositionFile(fileId, newPath) {
-    return invokeCommand("reposition_file", { fileId, newPath }, parseMutationResult);
+    return invokeCommand("reposition_file", { fileId, newPath }, (value, command) => parseTargetMutationResult(value, fileId, command));
   },
   setFavorite(fileId, favorite) {
     return invokeCommand("set_favorite", { fileId, favorite }, parseMutationResult);
@@ -77,7 +78,7 @@ export const libraryRepository = Object.freeze({
     return invokeCommand("reveal_indexed_file", { fileId }, (value, command) => parseNamedResult(value, command));
   },
   renameIndexedFile(fileId, newName) {
-    return invokeCommand("rename_indexed_file", { fileId, newName }, parseMutationResult);
+    return invokeCommand("rename_indexed_file", { fileId, newName }, (value, command) => parseTargetMutationResult(value, fileId, command));
   },
   deleteOriginalFile(fileId) {
     return invokeCommand("delete_original_file", { fileId }, parseMutationResult);

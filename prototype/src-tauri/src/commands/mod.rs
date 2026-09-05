@@ -342,6 +342,10 @@ pub(crate) fn legacy_command_error(error: String) -> CommandError {
 pub(crate) fn structured_storage_error(error: StorageError) -> CommandError {
     let (code, retryable, state) = match &error {
         StorageError::InvalidId => ("invalid-id", false, "unchanged"),
+        StorageError::FileBusy => ("file-busy", true, "unchanged"),
+        StorageError::SourceChanged => ("source-changed", true, "unchanged"),
+        StorageError::RepositionNotNeeded => ("reposition-not-needed", false, "unchanged"),
+        StorageError::RepositionKindMismatch => ("reposition-kind-mismatch", false, "unchanged"),
         StorageError::EntryNotFound => ("entry-not-found", false, "unchanged"),
         StorageError::DuplicateEntry => ("duplicate-entry", false, "unchanged"),
         StorageError::DuplicateGroup => ("duplicate-group", false, "unchanged"),
@@ -708,61 +712,24 @@ fn append_recursive_skip_reason(reasons: &mut Vec<String>, reason: &str) {
 pub(crate) async fn reposition_file_impl(
     file_id: String,
     new_path: String,
-    state: State<'_, AppState>,
+    _state: State<'_, AppState>,
     app: AppHandle,
-) -> Result<IndexMutationResult, String> {
-    let replacement =
-        tauri::async_runtime::spawn_blocking(move || filesystem::index_selected_path(&new_path))
-            .await
-            .map_err(|_| "重新定位任务未完成，请重试".to_string())?
-            .map_err(|error| error.to_string())?;
-
-    let repository = IndexRepository::new(state.inner());
-    let outcome = repository
-        .update_entries_with(|entries| {
-            let position = entries
-                .iter()
-                .position(|entry| entry.id == file_id)
-                .ok_or(StorageError::EntryNotFound)?;
-            if !entries[position].invalid {
-                return Err(StorageError::InvalidId);
-            }
-            let expects_folder = entries[position].kind == "folder";
-            if expects_folder != (replacement.kind == "folder") {
-                return Err(StorageError::InvalidId);
-            }
-            if entries.iter().enumerate().any(|(index, entry)| {
-                index != position && filesystem::same_path(&entry.path, &replacement.path)
-            }) {
-                return Err(StorageError::DuplicateEntry);
-            }
-
-            let id = entries[position].id.clone();
-            let favorite = entries[position].favorite;
-            let added_at = entries[position].added_at;
-            let preview_status = entries[position].preview_status.clone();
-            let last_recorded_at = entries[position].last_recorded_at;
-            let last_opened_at = entries[position].last_opened_at;
-            let tags = entries[position].tags.clone();
-            let group_id = entries[position].group_id.clone();
-            let mut replacement = replacement;
-            replacement.id = id;
-            replacement.favorite = favorite;
-            replacement.added_at = added_at;
-            replacement.preview_status = preview_status;
-            replacement.last_recorded_at = last_recorded_at;
-            replacement.last_opened_at = last_opened_at;
-            replacement.tags = tags;
-            replacement.group_id = group_id;
-            entries[position] = replacement;
-            storage::sort_entries(entries);
-            Ok((true, Some(entries[position].clone())))
-        })
-        .map_err(|error| match error {
-            StorageError::InvalidId if file_id.trim().is_empty() => "资料 ID 不能为空".to_string(),
-            StorageError::InvalidId => "重新定位的文件类型不匹配，请选择相同类型的路径".to_string(),
-            other => storage_message(other),
-        })?;
+) -> Result<IndexMutationResult, CommandError> {
+    let worker_app = app.clone();
+    let id = file_id.clone();
+    let outcome = tauri::async_runtime::spawn_blocking(move || {
+        storage::file_actions::reposition(&worker_app.state::<AppState>(), &id, &new_path)
+            .map_err(library::file_action_error)
+    })
+    .await
+    .map_err(|_| {
+        command_error(
+            "task-failed",
+            "重新定位任务未完成，请刷新索引",
+            true,
+            "unknown",
+        )
+    })??;
     emit_index_changed(&app, outcome.revision, vec![file_id.clone()], "reposition");
     Ok(IndexMutationResult {
         revision: outcome.revision,
@@ -912,7 +879,16 @@ pub(crate) fn reset_index_recovery_impl(
     app: AppHandle,
 ) -> Result<IndexSnapshot, String> {
     let repository = IndexRepository::new(state.inner());
-    let snapshot = repository.reset_index_recovery().map_err(storage_message)?;
+    let previous_revision = repository.snapshot().map_err(storage_message)?.revision;
+    let snapshot = repository.reset_index_recovery().map_err(|error| {
+        if let Ok(current) = repository.snapshot() {
+            if current.revision > previous_revision && current.entries.is_empty() {
+                emit_index_changed(&app, current.revision, Vec::new(), "recovery");
+                return "空索引已保存，但待核对操作清理未完成，请刷新后重试".to_string();
+            }
+        }
+        storage_message(error)
+    })?;
     emit_index_changed(&app, snapshot.revision, Vec::new(), "recovery");
     Ok(snapshot)
 }

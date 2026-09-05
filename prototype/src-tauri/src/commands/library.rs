@@ -1,7 +1,4 @@
-use std::{
-    collections::{HashMap, HashSet},
-    path::PathBuf,
-};
+use std::collections::{HashMap, HashSet};
 
 use serde::Serialize;
 use tauri::{AppHandle, Manager, State};
@@ -783,88 +780,28 @@ pub async fn rename_indexed_file(
     state: State<'_, AppState>,
     app: AppHandle,
 ) -> Result<IndexMutationResult, CommandError> {
-    if file_id.trim().is_empty() {
-        return Err(structured_storage_error(StorageError::InvalidId));
-    }
-    let repository = IndexRepository::new(state.inner());
-    let entry = find_entry(&repository, &file_id)?;
-    if entry.kind == "folder" {
-        return Err(command_error(
-            "folder-not-supported",
-            "暂时只支持重命名普通文件",
-            false,
-            "unchanged",
-        ));
-    }
-    let operation = tauri::async_runtime::spawn_blocking(move || {
-        let (source, source_metadata) =
-            operations::validate_indexed_file(&entry).map_err(operation_error)?;
-        let target = operations::validate_new_name(&source, &new_name).map_err(operation_error)?;
-        operations::rename_file(&source, &target, &source_metadata).map_err(operation_error)?;
-        let mut replacement = match filesystem::index_selected_path(&target.to_string_lossy()) {
-            Ok(replacement) => replacement,
-            Err(_) => {
-                let _ = operations::restore_renamed_file(&target, &source, &source_metadata);
-                return Err(command_error(
-                    "metadata-failed",
-                    "文件已重命名，但无法读取新文件元数据",
-                    true,
-                    "unchanged",
-                ));
-            }
-        };
-        replacement.id = entry.id.clone();
-        replacement.favorite = entry.favorite;
-        replacement.added_at = entry.added_at;
-        replacement.preview_status = entry.preview_status.clone();
-        replacement.last_recorded_at = entry.last_recorded_at;
-        replacement.last_opened_at = entry.last_opened_at;
-        replacement.tags = entry.tags.clone();
-        replacement.group_id = entry.group_id.clone();
-        Ok::<(PathBuf, PathBuf, IndexEntry, std::fs::Metadata), CommandError>((
-            source,
-            target,
-            replacement,
-            source_metadata,
-        ))
+    let worker_app = app.clone();
+    let id = file_id.clone();
+    let outcome = tauri::async_runtime::spawn_blocking(move || {
+        storage::file_actions::rename(&worker_app.state::<AppState>(), &id, &new_name)
+            .map_err(file_action_error)
     })
     .await
-    .map_err(|_| command_error("task-failed", "重命名任务未完成，请重试", true, "unchanged"))??;
-    let (source, target, replacement, source_metadata) = operation;
-    let outcome = repository.update_entries_with(|entries| {
-        let current = entries
-            .iter_mut()
-            .find(|entry| entry.id == file_id)
-            .ok_or(StorageError::EntryNotFound)?;
-        if !filesystem::same_path(&current.path, &source.to_string_lossy()) {
-            return Err(StorageError::EntryNotFound);
-        }
-        *current = replacement.clone();
-        storage::sort_entries(entries);
-        Ok((true, Some(replacement.clone())))
-    });
-    match outcome {
-        Ok(outcome) => {
-            super::emit_index_changed(&app, outcome.revision, vec![file_id.clone()], "rename");
-            Ok(IndexMutationResult {
-                revision: outcome.revision,
-                changed_ids: vec![file_id],
-                entry: outcome.value,
-            })
-        }
-        Err(error) => {
-            if operations::restore_renamed_file(&target, &source, &source_metadata) {
-                Err(structured_storage_error(error))
-            } else {
-                Err(command_error(
-                    "partial-success",
-                    "文件已重命名，但索引未同步且无法自动回滚，请手动检查",
-                    false,
-                    "unknown",
-                ))
-            }
-        }
-    }
+    .map_err(|_| {
+        command_error(
+            "task-failed",
+            "重命名结果未确认，请刷新后检查资料路径",
+            true,
+            "unknown",
+        )
+    })??;
+    let _ = state;
+    super::emit_index_changed(&app, outcome.revision, vec![file_id.clone()], "rename");
+    Ok(IndexMutationResult {
+        revision: outcome.revision,
+        changed_ids: vec![file_id],
+        entry: outcome.value,
+    })
 }
 
 #[tauri::command]
@@ -877,6 +814,9 @@ pub async fn delete_original_file(
         return Err(structured_storage_error(StorageError::InvalidId));
     }
     let repository = IndexRepository::new(state.inner());
+    let guard = state
+        .begin_file_action(&file_id)
+        .map_err(structured_storage_error)?;
     let entry = find_entry(&repository, &file_id)?;
     if entry.kind == "folder" {
         return Err(command_error(
@@ -905,23 +845,40 @@ pub async fn delete_original_file(
     .await
     .map_err(|_| command_error("task-failed", "删除任务未完成，请重试", true, "unknown"))?;
     if let Err(error) = delete_result {
-        let _ = repository.clear_pending_delete(&file_id);
-        return Err(error);
+        drop(guard);
+        let _ = repository.reconcile_pending_operations();
+        super::emit_index_changed(
+            &app,
+            state.snapshot().map_err(structured_storage_error)?.revision,
+            vec![file_id],
+            "recovery",
+        );
+        return Err(command_error(&error.code, error.message, true, "unknown"));
     }
-    repository
-        .mark_delete_complete(&file_id)
-        .map_err(|error| command_error("partial-success", error.to_string(), false, "unknown"))?;
+    repository.mark_delete_complete(&file_id).map_err(|_| {
+        command_error(
+            "partial-success",
+            "原文件已处理，但删除结果未能保存，请刷新并核对资料",
+            true,
+            "unknown",
+        )
+    })?;
 
     match repository.update_entries_with(|entries| {
+        if !matches!(std::fs::symlink_metadata(&entry.path), Err(error) if error.kind() == std::io::ErrorKind::NotFound) {
+            return Err(StorageError::SourceChanged);
+        }
         let position = entries
             .iter()
-            .position(|entry| entry.id == file_id)
-            .ok_or(StorageError::EntryNotFound)?;
+            .position(|current| current.id == file_id && current.added_at == entry.added_at
+                && filesystem::same_path(&current.path, &entry.path))
+            .ok_or(StorageError::SourceChanged)?;
         entries.remove(position);
         Ok((true, ()))
     }) {
         Ok(outcome) => {
             let revision = outcome.revision;
+            super::emit_index_changed(&app, revision, vec![file_id.clone()], "delete-original");
             if repository.clear_pending_delete(&file_id).is_err() {
                 return Err(command_error(
                     "partial-success",
@@ -930,7 +887,6 @@ pub async fn delete_original_file(
                     "unknown",
                 ));
             }
-            super::emit_index_changed(&app, revision, vec![file_id.clone()], "delete-original");
             Ok(IndexMutationResult {
                 revision,
                 changed_ids: vec![file_id],
@@ -957,6 +913,23 @@ fn find_entry(repository: &IndexRepository<'_>, file_id: &str) -> Result<IndexEn
         .into_iter()
         .find(|entry| entry.id == file_id)
         .ok_or_else(|| structured_storage_error(StorageError::EntryNotFound))
+}
+
+pub(super) fn file_action_error(error: storage::file_actions::FileActionError) -> CommandError {
+    use storage::file_actions::FileActionError;
+    match error {
+        FileActionError::Storage(StorageError::PreviewRevisionConflict) => {
+            structured_storage_error(StorageError::SourceChanged)
+        }
+        FileActionError::Storage(error) => structured_storage_error(error),
+        FileActionError::Operation(error) => operation_error(error),
+        FileActionError::InvalidPath => {
+            command_error("destination-invalid", error.to_string(), true, "unchanged")
+        }
+        FileActionError::Partial => {
+            command_error("partial-success", error.to_string(), true, "unknown")
+        }
+    }
 }
 
 fn operation_error(error: operations::FileOperationError) -> CommandError {

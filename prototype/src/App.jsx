@@ -5,6 +5,7 @@ import {
   BatchRemoveDialog,
   DeleteOriginalDialog,
   GroupManagerDialog,
+  LibraryActionDialog,
   RenameDialog,
   RemoveIndexDialog,
 } from "./features/library/LibraryActions";
@@ -207,6 +208,7 @@ function App() {
   });
   const actions = useLibraryActions({
     isTauriRuntime: IS_TAURI_RUNTIME,
+    navigationContext: JSON.stringify([navigation.activeNav, navigation.directoryView?.contextKey, navigation.selectedId, navigation.previewEntryId]),
     files: index.files,
     setFiles: index.setFiles,
     settings: settingsController.settings,
@@ -252,7 +254,7 @@ function App() {
   });
   const { files, groups, indexReady, indexRecovery, indexing, latestRevision, refreshing, refreshError, diagnosticExporting, undoStatus } = index;
   const { activeNav, clearFocusRequest, directoryError, directoryLoading, directoryView, focusRequest, handleRowClick, handleRowKeyDown, openBreadcrumb, previewEntryId, retryDirectory, searchQuery, selectNav, selectedId, setSearchQuery } = navigation;
-  const { addTag, batchBusy, busyFileId, canRetryOperation, choosePaths, closePendingAction, confirmBatchRemove, confirmDelete, confirmFolderImport, confirmGroup, confirmRemove, confirmRename, confirmTags, createGroup, deleteGroup, dragActive, fileInputRef, folderInputRef, groupBusy, groupDraft, handleBatchFavorite, handleBatchGroup, handleBatchTags, handleCancelBatch, handleCancelImport, handleCopy, handleCopyLocation, handleDragLeave, handleDragOver, handleDrop, handleFavorite, handleOpenDefault, handleReveal, handleRetryBatch, handleUndo, openRepositionPicker, pendingAction, recursiveImportProgress, repositionInputRef, repositionInvalidPath, removeTag, renameName, renameGroup, renameValidation, requestBatchRemove, requestDelete, requestEditTags, requestRemove, requestRename, requestSetGroup, retryBatch, retryOperation, setGroupDraft, setRenameName, setTagInput, tagDraft, tagInput } = actions;
+  const { addTag, batchBusy, busyFileId, canRetryOperation, choosePaths, closePendingAction, confirmBatchRemove, confirmDelete, confirmFolderImport, confirmGroup, confirmRemove, confirmRename, confirmTags, createGroup, deleteGroup, dragActive, fileInputRef, folderInputRef, groupBusy, groupDraft, handleBatchFavorite, handleBatchGroup, handleBatchTags, handleCancelBatch, handleCancelImport, handleCopy, handleCopyLocation, handleDragLeave, handleDragOver, handleDrop, handleFavorite, handleOpenDefault, handleReveal, handleRetryBatch, handleUndo, openRepositionPicker, pendingAction, recursiveImportProgress, removeTag, renameName, renameGroup, renameValidation, requestBatchRemove, requestDelete, requestEditTags, requestRemove, requestRename, requestSetGroup, retryBatch, retryOperation, setGroupDraft, setRenameName, setTagInput, tagDraft, tagInput } = actions;
   const { floatingWindowError, floatingWindowRetrying, handleWindowAction, retryFloatingBall } = windowController;
 
   const handlePreviewNavigate = useCallback((nextEntry) => {
@@ -465,14 +467,21 @@ function App() {
           <div className="index-recovery-alert" role="alert" data-tauri-drag-region="false">
             <WarningCircle size={18} weight="fill" aria-hidden="true" />
             <div>
-              <strong>本地索引需要恢复</strong>
-              <span>{indexRecovery.issue}。{indexRecovery.backupCreated ? "原文件已保留备份。" : "原文件备份未能创建。"}请重建空索引后重新导入资料。</span>
+              <strong>{indexRecovery.indexBlocked ? "本地索引需要恢复" : "文件操作需要核对"}</strong>
+              <span>{indexRecovery.issue}{indexRecovery.indexBlocked && (indexRecovery.backupCreated ? "。索引已保留备份。" : "。索引备份未能创建。")}</span>
             </div>
             <div className="index-recovery-actions">
+              <button type="button" onClick={index.handleRefreshIndex} disabled={refreshing}>
+                <ArrowClockwise size={16} aria-hidden="true" />刷新核对
+              </button>
+              {indexRecovery.pendingFileIds?.length > 0 && <select aria-label="选择待核对资料" value="" onChange={(event) => { const id = event.target.value; navigation.focusEntry(id); setDetailsEntryId(id); }}>
+                <option value="" disabled>核对资料 ({indexRecovery.pendingOperations})</option>
+                {indexRecovery.pendingFileIds.map((id) => { const file = files.find((entry) => entry.id === id); return file && <option key={id} value={id}>{file.name}</option>; })}
+              </select>}
               <button type="button" onClick={index.exportIndexDiagnostic} disabled={diagnosticExporting}>
                 {diagnosticExporting ? "导出中..." : "导出诊断"}
               </button>
-              <button type="button" onClick={index.resetIndexRecovery} disabled={refreshing}>
+              <button type="button" onClick={() => index.setResetConfirmationOpen(true)} disabled={refreshing}>
                 {refreshing ? "处理中..." : "重建空索引"}
               </button>
             </div>
@@ -598,6 +607,7 @@ function App() {
       {detailsEntry && <EntryDetailsDialog file={detailsEntry} groups={groups} busy={busyFileId === detailsEntry.id} onClose={() => setDetailsEntryId("")} onFavorite={handleFavorite} onPreview={handleDetailsPreview} onCopyLocation={handleCopyLocation} onReveal={handleReveal} onOpenDefault={handleOpenDefault} onEditTags={handleOpenEditTags} onSetGroup={handleOpenSetGroup} onTagClick={handleTagFilter} />}
 
       {settingsOpen && <SettingsPanel settings={settings} saving={settingsSaving} onCancel={() => setSettingsOpen(false)} onSave={handleSettingsSave} contentIndexStatus={contentIndex.status} contentIndexRebuilding={contentIndex.rebuilding} contentIndexClearing={contentIndex.clearing} onRebuildContentIndex={contentIndex.rebuild} onClearContentIndex={contentIndex.clear} onCancelContentIndex={contentIndex.cancelRebuild} />}
+      {index.resetConfirmationOpen && <LibraryActionDialog title="重建空索引" description={`将清空 ${files.length} 条资料记录、${groups.length} 个分组、收藏、标签、历史字段、撤销记录及 ${indexRecovery?.pendingOperations || 0} 条待核对操作。原文件不会删除，之后需要重新导入资料。`} confirmLabel="确认重建空索引" danger busy={refreshing} onCancel={() => index.setResetConfirmationOpen(false)} onConfirm={() => void index.resetIndexRecovery()} />}
       {pendingAction?.type === "remove" && <RemoveIndexDialog file={pendingAction.file} busy={busyFileId === pendingAction.file.id} onCancel={closePendingAction} onConfirm={() => void confirmRemove()} />}
       {pendingAction?.type === "batch-remove" && <BatchRemoveDialog files={pendingAction.files} busy={batchBusy} onCancel={closePendingAction} onConfirm={() => void confirmBatchRemove()} />}
       {pendingAction?.type === "folder-import" && <ImportFolderDialog folderName={pendingAction.folderName} onCancel={closePendingAction} onConfirm={(mode, policy) => void confirmFolderImport(mode, policy)} />}
@@ -609,7 +619,6 @@ function App() {
 
       <input ref={folderInputRef} className="hidden-input" type="file" multiple webkitdirectory="true" directory="true" onChange={(event) => { actions.addBrowserFiles(event.target.files); event.target.value = ""; }} aria-hidden="true" tabIndex={-1} />
       <input ref={fileInputRef} className="hidden-input" type="file" multiple onChange={(event) => { actions.addBrowserFiles(event.target.files); event.target.value = ""; }} aria-hidden="true" tabIndex={-1} />
-      <input ref={repositionInputRef} className="hidden-input" type="file" onChange={(event) => { repositionInvalidPath(event.target.files); event.target.value = ""; }} aria-hidden="true" tabIndex={-1} />
 
       {toast && <div className="toast" role="status"><CheckCircle size={18} weight="fill" aria-hidden="true" /><span>{toast}</span></div>}
     </div>

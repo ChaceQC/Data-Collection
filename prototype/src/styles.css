@@ -632,7 +632,8 @@ summary:focus-visible,
   overflow-wrap: anywhere;
 }
 
-.index-recovery-alert button {
+.index-recovery-alert button,
+.index-recovery-alert select {
   min-height: 30px;
   flex: 0 0 auto;
   margin-left: auto;
@@ -651,11 +652,24 @@ summary:focus-visible,
   opacity: 0.65;
 }
 
-.index-recovery-actions {
+.index-recovery-alert > .index-recovery-actions {
   display: flex;
-  flex: 0 0 auto;
+  flex: 0 1 auto;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
   gap: 6px;
   margin-left: auto;
+}
+
+.index-recovery-actions select {
+  max-width: 160px;
+}
+
+@media (max-width: 720px) {
+  .index-recovery-alert {
+    flex-wrap: wrap;
+  }
 }
 
 .drop-zone {

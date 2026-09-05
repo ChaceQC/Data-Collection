@@ -24,6 +24,7 @@ export function useIndexController({
   const [refreshing, setRefreshing] = useState(false);
   const [refreshError, setRefreshError] = useState("");
   const [indexRecovery, setIndexRecovery] = useState(null);
+  const [resetConfirmationOpen, setResetConfirmationOpen] = useState(false);
   const [diagnosticExporting, setDiagnosticExporting] = useState(false);
   const [latestRevision, setLatestRevision] = useState(0);
   const latestRevisionRef = useRef(0);
@@ -173,18 +174,20 @@ export function useIndexController({
   }, [files.length, isTauriRuntime, operationReporter, refreshing, reloadIndexPreservingState]);
 
   const resetIndexRecovery = useCallback(async () => {
-    if (!isTauriRuntime || refreshing) return;
+    if (!isTauriRuntime || refreshing || !resetConfirmationOpen) return;
     setRefreshing(true);
     try {
       const snapshot = await libraryRepository.resetIndexRecovery();
       applyIndexSnapshot(snapshot);
+      setResetConfirmationOpen(false);
       showToastRef.current("已建立空索引，请重新导入资料");
     } catch (error) {
+      await reloadIndexPreservingState();
       showToastRef.current(getOperationError(error, "无法重建索引，请重试"));
     } finally {
       setRefreshing(false);
     }
-  }, [applyIndexSnapshot, isTauriRuntime, refreshing]);
+  }, [applyIndexSnapshot, isTauriRuntime, refreshing, reloadIndexPreservingState, resetConfirmationOpen]);
 
   const exportIndexDiagnostic = useCallback(async () => {
     if (!isTauriRuntime || diagnosticExporting) return;
@@ -221,6 +224,8 @@ export function useIndexController({
     undoStatus,
     reloadIndexPreservingState,
     resetIndexRecovery,
+    resetConfirmationOpen,
+    setResetConfirmationOpen,
     setFiles,
     setIndexing,
     handleRefreshIndex,

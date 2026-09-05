@@ -25,6 +25,7 @@ export interface IpcCommandError {
 }
 
 export function parseCommandError(value: unknown, command?: string): IpcCommandError;
+export function parseTargetMutationResult(value: unknown, fileId: string, command: string): { revision: number; changedIds: string[]; entry: IndexEntry };
 
 export interface IndexEntry {
   id: string;
@@ -54,6 +55,8 @@ export interface IndexRecoveryStatus {
   issue: string;
   backupCreated: boolean;
   pendingOperations: number;
+  indexBlocked: boolean;
+  pendingFileIds: string[];
 }
 
 export interface IndexSnapshot {

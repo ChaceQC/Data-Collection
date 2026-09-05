@@ -31,13 +31,15 @@ impl IndexStateData {
                 .recovery
                 .as_ref()
                 .map(|value| value.issue.clone())
-                .unwrap_or_else(|| "存在待同步的文件操作，请刷新索引".to_string()),
+                .unwrap_or_else(|| "删除结果或来源尚待核对。请刷新；仍待核对时检查回收站，再重新定位资料或从资料库移除对应记录".to_string()),
             backup_created: self
                 .recovery
                 .as_ref()
                 .map(|value| value.backup_created)
                 .unwrap_or(false),
             pending_operations: self.pending_operations.len(),
+            index_blocked: self.recovery.is_some(),
+            pending_file_ids: self.pending_operations.iter().map(|operation| operation.file_id.clone()).collect(),
         })
     }
 
