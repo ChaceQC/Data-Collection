@@ -2,6 +2,51 @@
 
 ## 2026-09-05
 
+### 阶段 H：CI、发布门禁和最终回归（0.3.40，代码、门禁、NSIS、本地合并、用户验收和发布已完成）
+
+#### 已完成
+
+- 用户于 2026-09-05 确认阶段 H 的 Windows 11/Tauri/WebView2 原生验收已完成，阶段 H 验收状态已按当前 `PROJECT_PLAN.md` 标记为已完成。
+- 五个版本入口 `prototype/package.json`、`prototype/package-lock.json` 根包、Tauri 配置、`Cargo.toml` 和 `Cargo.lock` 根 package 已统一为 `0.3.40`。
+- `npm.cmd run tauri:build` 已重新生成 `E:\Project\test\prototype\src-tauri\target\release\bundle\nsis\本地资料工作台_0.3.40_x64-setup.exe`；安装包大小 `9003748` bytes，SHA-256 `060305897C63D6FC9C108D2C68CE21A7D55B4700438A905E1C431C4823364AA2`。
+- release 主程序 FileVersion/ProductVersion 均为 `0.3.40`，大小 `36611359` bytes，SHA-256 `0EAD1034241D4FD438BCCB8ABFE3D4924179C95B16703C0E85CE5810929A2218`。
+- `v0.3.40` 发布文档已在 Tag、分支推送和 Release 操作前冻结；GitHub Release 资源为 Windows x64 NSIS 安装包和仅含主程序与 `WebView2Loader.dll` 的便携 ZIP。
+
+#### 进行中
+
+- 无阶段 H 原生验收待办。
+
+#### 用户验收
+
+- 2026-09-05，用户确认阶段 H 的 Windows 11/Tauri/WebView2 原生验收已完成。用户未提供具体 Windows、WebView2、显示器或样本明细，本文不补填这些环境字段。
+
+#### 阻塞与风险
+
+- 浏览器回退、自动测试和安装包构建不能替代 Windows 11/Tauri/WebView2 原生验收；本阶段原生验收已由用户确认完成。
+- 安装包未签名且不内置 WebView2 Runtime，DOC 预览仍依赖目标机 LibreOffice，`xlsx@0.18.5` 的既有审计风险保持不变。
+
+#### 下一步
+
+- 无阶段 H 待办；`v0.3.40` 已作为当前发布基线，下一候选版本待重新规划。
+
+#### 涉及文件
+
+- `PROJECT_PLAN.md`
+- `PROJECT_PROGRESS.md`
+- `README.md`
+- `prototype/README.md`
+
+#### 验证
+
+- `git diff --check`：通过。
+- `npm.cmd run build`：通过，生成 `dist/client/index.html`、`dist/server/index.js` 和 `dist/.openai/hosting.json`。
+- `cargo fmt --check`、`cargo check --locked`、`cargo check --tests --locked`、`cargo test --locked`、`cargo clippy --locked --all-targets --all-features -- -D warnings`：通过；Rust 共 107 项测试通过。
+- `npm.cmd run tauri:build`：通过，生成 `0.3.40` Windows x64 NSIS 候选。
+- `npm.cmd run verify:loader`：通过；`WebView2Loader.dll` 大小 `160320` bytes，SHA-256 `8427B1FC58EC707813E5C0A51EB5D69397BB333250A7B891BE4D3B123F1E0F1C`，确认 Windows x64 且与 release 主程序同目录。
+- GitHub Release [`v0.3.40`](https://github.com/ChaceQC/Data-Collection/releases/tag/v0.3.40) 已发布；发布构建使用 Windows x64 runner 重新生成安装包和便携 ZIP，远端构建产物 hash 与本地候选 hash 分开处理。
+
+## 2026-09-05
+
 ### 阶段 G：模块拆分和 IPC 错误收敛（0.3.39，代码、自动门禁、NSIS、本地合并和用户验收已完成）
 
 #### 已完成

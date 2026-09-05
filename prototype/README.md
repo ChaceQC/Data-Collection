@@ -1,6 +1,6 @@
 # 本地资料工作台原型
 
-这是基于 `AGENT.md` 方案 3“收纳入口”实现的本地资料工作台。当前发布版本为 `v0.3.32`，建立在上一正式发布版本 `v0.3.26` 和历史基线 `v0.3.16` 之上；架构加固阶段 E `0.3.37`、阶段 F `0.3.38` 已完成代码、自动门禁、NSIS、本地合并和用户原生验收，阶段 G `0.3.39` 已完成模块拆分、结构化 IPC 错误、parity 门禁、本地 NSIS 候选、本地合并和用户原生验收，仍为未发布本地候选。阶段 B/C/D 的原生验收、Tag 和 Release 仍按计划记录；浏览器运行时仍只保留安全的原型回退。
+这是基于 `AGENT.md` 方案 3“收纳入口”实现的本地资料工作台。当前发布版本为 `v0.3.40`，建立在上一正式发布版本 `v0.3.32` 和历史基线 `v0.3.16` 之上；架构加固阶段 H `0.3.40` 已完成代码、自动门禁、NSIS、本地合并和 Windows 11/Tauri/WebView2 原生验收，并已发布 GitHub Release。阶段 B/C/D 的原生验收、Tag 和 Release 仍按计划记录；浏览器运行时仍只保留安全的原型回退。
 
 ## 启动
 
@@ -100,7 +100,7 @@ Windows WebView2 使用 `http://preview.localhost/<previewId>` 访问受控资�
 
 PDF 的初始无范围请求返回有界 `206` 响应并带完整 `Content-Range`，客户端明确发起的范围请求继续按单范围分段返回，避免首个请求读取完整 50 MiB 文件。
 
-预览、资料库核心功能、阶段 F 的设置和显式外部操作，以及此前悬浮球阶段 A-F 的实现、自动验证、Windows 11 桌面手工验收和 `v0.3.6` GitHub Release 均已完成。此前计划阶段 A-J 的代码实现、自动验证、浏览器回退检查和用户 Windows 11/Tauri/WebView2 原生验收均已完成，`v0.3.26` 已创建 Tag 并发布 GitHub Release；悬浮球计划阶段 E `0.3.31` 已完成代码候选、自动验证、浏览器回退检查和 NSIS 候选构建，阶段 F Windows 11/Tauri/WebView2 原生验收已由用户完成，五个版本入口已同步到 `0.3.32`，`v0.3.32` 已创建 Tag 并发布 GitHub Release。当前架构加固阶段 E `0.3.37` 已完成用户原生验收，阶段 F `0.3.38` 已完成用户原生验收但仍是未发布本地候选。不把所有格式写成无条件“已支持”，视频编码、LibreOffice 和 WebView2 Runtime 仍按各自外部依赖边界处理。
+预览、资料库核心功能、阶段 F 的设置和显式外部操作，以及此前悬浮球阶段 A-F 的实现、自动验证、Windows 11 桌面手工验收和 `v0.3.6` GitHub Release 均已完成。此前计划阶段 A-J 的代码实现、自动验证、浏览器回退检查和用户 Windows 11/Tauri/WebView2 原生验收均已完成，`v0.3.26` 已创建 Tag 并发布 GitHub Release；悬浮球计划阶段 E `0.3.31` 已完成代码候选、自动验证、浏览器回退检查和 NSIS 候选构建，阶段 F Windows 11/Tauri/WebView2 原生验收已由用户完成，五个版本入口已同步到 `0.3.32`，`v0.3.32` 已创建 Tag 并发布 GitHub Release。当前架构加固阶段 E `0.3.37`、阶段 F `0.3.38`、阶段 G `0.3.39` 和阶段 H `0.3.40` 的代码、门禁、构建和 Windows 11/Tauri/WebView2 原生验收已纳入 `v0.3.40` 发布。不把所有格式写成无条件“已支持”，视频编码、LibreOffice 和 WebView2 Runtime 仍按各自外部依赖边界处理。
 
 依赖审计注意事项：当前公开 `xlsx@0.18.5` 没有可用的 npm 修复版本，并存在已知 Prototype Pollution/ReDoS 报告。应用不打开宏、外部链接或 HTML，限制工作簿大小和展示范围，并在 Worker 中解析以便超时或异常时终止；在替换为有修复的兼容库前，该风险仍需纳入发布判断。
 
@@ -109,7 +109,7 @@ PDF 的初始无范围请求返回有界 `206` 响应并带完整 `Content-Range
 - `index.json` 仍只保存路径和元数据；正文检索使用独立的 `content-index.json`，预览正文、资源会话 ID 和临时 PDF 不写入 `index.json`。
 - SVG、MOV、AVI、MKV 等未登记格式返回 `unsupported`；视频不提供隐藏转码。
 - DOC 预览依赖本机 LibreOffice；当前构建未内置或下载 WebView2 Runtime，也未签名。
-- 当前不提供批量物理复制/重命名/删除或跨任意历史的通用撤销栈；架构加固阶段 G `0.3.39` 的模块拆分、结构化 IPC 错误和 parity 门禁已完成代码实现，Windows 11/Tauri/WebView2 原生回归待用户执行。原阶段 F 的设置和显式外部操作决策记录在 `docs/phase-f-settings-and-external-operations.md`，阶段 G 及后续阶段以 `PROJECT_PLAN.md` 和 `PROJECT_PROGRESS.md` 为准。
+- 当前不提供批量物理复制/重命名/删除或跨任意历史的通用撤销栈；架构加固阶段 G `0.3.39` 的模块拆分、结构化 IPC 错误和 parity 门禁已完成代码实现，阶段 H `0.3.40` 已完成最终回归和 Windows 11/Tauri/WebView2 原生验收并发布。原阶段 F 的设置和显式外部操作决策记录在 `docs/phase-f-settings-and-external-operations.md`，阶段 G 及后续阶段以 `PROJECT_PLAN.md` 和 `PROJECT_PROGRESS.md` 为准。
 - 悬浮球透明置顶窗口、资源管理器真实拖放、位置恢复以及本轮新增的悬停状态机、四边四角几何、跨 DPI 和组合交互均已由用户在 Windows 11 桌面端验收通过；浏览器回退只展示内存演示状态。
 - 浏览器回退不会执行真实文件剪贴板、重命名、原文件删除或外部打开/定位；桌面端复制到剪贴板、资源管理器粘贴、设置持久化和显式外部操作已由用户在 Windows 环境完成手工验收。
 - 解析失败、缺失、权限不足、过大、转换器缺失、取消、超时和暂不支持均保留索引并在模态对话框显示可执行的下一步。
