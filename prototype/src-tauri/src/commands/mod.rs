@@ -1010,6 +1010,13 @@ pub(crate) async fn rebuild_content_index_impl(
     app: AppHandle,
 ) -> Result<ContentIndexRebuildResult, CommandError> {
     let control = batch_state.begin_content_index(&operation_id)?;
+    let epoch = match content_state.begin_change() {
+        Ok(epoch) => epoch,
+        Err(error) => {
+            batch_state.finish(&operation_id);
+            return Err(content_index_error(error));
+        }
+    };
     let snapshot = match state.snapshot() {
         Ok(snapshot) => snapshot,
         Err(error) => {
@@ -1019,13 +1026,6 @@ pub(crate) async fn rebuild_content_index_impl(
     };
     let entries = snapshot.entries;
     let revision = snapshot.revision;
-    let epoch = match content_state.begin_change() {
-        Ok(epoch) => epoch,
-        Err(error) => {
-            batch_state.finish(&operation_id);
-            return Err(content_index_error(error));
-        }
-    };
     let content_for_task = content_state.inner().clone();
     let control_for_task = control.clone();
     let joined = tauri::async_runtime::spawn_blocking(move || {
