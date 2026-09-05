@@ -2,7 +2,7 @@
 
 ## 2026-09-05
 
-### 阶段 B：文件操作一致性与删除恢复（0.3.42，代码和定向回归完成，交付收口中）
+### 阶段 B：文件操作一致性与删除恢复（0.3.42，代码、定向回归与 NSIS 完成，本地 Git 收口中）
 
 #### 已完成
 
@@ -19,12 +19,22 @@
 - 按用户“完成后尽量减少测试”的补充要求，只执行本阶段定向检查，不执行完整前端/Rust 测试组合，不为数量补测无关模块。
 - `node --test tests/library-file-actions.test.mjs tests/ipc-contracts.test.mjs tests/operation-model.test.mjs`：19 项通过。
 - Rust `storage::file_actions::tests` 4 项、`storage::pending_operations::tests` 4 项、`filesystem::operations::tests` 4 项通过。覆盖排序后 ID、类型/重复/无效路径、可控屏障并发、回滚冲突、两种日志状态的恢复矩阵、prepare/mark/index/clear 失败窗口、旧日志备份、重建与重复恢复；仅操作隔离合成资料，不调用真实回收站。
-- `cargo check --locked`、`cargo check --tests --locked`、最终 `cargo fmt --all -- --check` 和严格 clippy 通过；安装包与 loader 证据待交付记录补齐。
+- `cargo check --locked`、`cargo check --tests --locked`、最终 `cargo fmt --all -- --check`、严格 clippy 与 `git diff --check` 通过。
 - Edge 在 1280x720 与 720x800 视口完成合成 pending 状态、核对入口、重建影响范围及取消的布局快速检查。该页面使用受控 IPC 替身，只作为界面证据；临时服务 `49342` 与浏览器已关闭，端口已释放。
+- `npm.cmd run tauri:build` 通过，包含最终源码的前端生产构建、Rust release、Windows x64 NSIS 和 loader 校验；未重复执行单独 build。Sites 的三个构建入口均已生成。
+
+#### 安装包与源码
+
+- 最终打包源码提交：`2cac22352cae7ad8e5e7095ad1b3764b0935bd29`。之后的交付记录只修改文档，不改变源码、依赖、配置或资源。
+- 安装包：`E:\Project\test\prototype\src-tauri\target\release\bundle\nsis\本地资料工作台_0.3.42_x64-setup.exe`；构建时间 `2026-09-05 15:19:43 +08:00`，大小 `9010160` bytes，FileVersion/ProductVersion 均为 `0.3.42`。
+- 安装包 SHA-256：`1697CA4522073E472FE1C045FD14D708153B0701AF7FF86EEC0FDF2D33306CCA`。
+- 主程序：`E:\Project\test\prototype\src-tauri\target\release\local-material-workbench.exe`；大小 `36515527` bytes，FileVersion/ProductVersion 均为 `0.3.42`，SHA-256 `E8FFDADF4D5FFD687E52A1451DCA9228F315371A533849B1A4EDC62BEC0AEB17`。
+- `WebView2Loader.dll`：`160320` bytes，SHA-256 `8427B1FC58EC707813E5C0A51EB5D69397BB333250A7B891BE4D3B123F1E0F1C`，打包脚本已验证 Windows x64 与主程序同目录。
+- `0.3.42` 最终候选和上一 `0.3.41` 候选均保留；安装包、合成夹具及浏览器输出不提交。
 
 #### 进行中与下一步
 
-- 最终源码、格式与五个版本入口已核对；提交源码后运行 `npm.cmd run tauri:build`，记录 NSIS 时间、大小、SHA-256、源码提交和 loader，再本地快进合入 `dev` 并删除当前阶段分支。
+- 本地门禁与打包已通过，正在将阶段分支 `codex/phase-0.3.42-file-recovery` 快进合入 `dev`，随后删除本阶段分支；合并前 `dev` 为 `99837ee3e781cd07eac013b5048d2282afd9a132`。
 - 阶段 C 未开始；阶段 B 原生验收待用户完成。此时尚未执行 push、Tag、Release 或上传。
 
 #### 阻塞与风险
