@@ -2,7 +2,7 @@
 
 ## 2026-09-05
 
-### 阶段 C：正文索引、摘要与搜索执行（0.3.43，开发侧收口及用户原生验收已完成）
+### 阶段 C：正文索引、摘要与搜索执行（0.3.43，开发侧收口、用户原生验收及 GitHub Release 已完成）
 
 #### 已完成
 
@@ -16,7 +16,7 @@
 
 #### 验证
 
-- Rust 正文定向 16 项通过，覆盖源文件与解码边界、缓存保存/重启、旧条目隔离、总容量回收、共享快照、查询取消/排队/超时、清除/重建乱序和写入失败。仍保留阶段 D 的 command 全量测试覆盖待办。
+- Rust 正文定向 16 项通过，覆盖源文件与解码边界、缓存保存/重启、旧条目隔离、总容量回收、共享快照、查询取消/排队/超时、清除/重建乱序和写入失败。command 全量测试覆盖未纳入本计划范围。
 - 前端正文模型、契约、Hook 及真实摘要组件共 9 项通过（清除失败恢复修复后仅重跑受影响的 Hook/契约 5 项）；相关 IPC/预览注册/安全定向组合 23 项通过，命令 parity 为 57 项。
 - `cargo check --locked`、`cargo check --tests --locked`、`cargo fmt --all -- --check`、严格 clippy 与 `git diff --check` 通过。JSON/TOML 结构化核对五个版本文件及两个 lock 根版本均为 `0.3.43`，只输出版本字段。
 - 64 MiB 合成资料的最终 debug 观察：重建 4214 ms、1000 次共享快照获取 38 us、无命中查询 1607 ms、增量保存 2681 ms；测试进程采样峰值工作集 218431488 bytes（约 208 MiB）。该进程同时执行缓存读写与边界回归，不等于正式应用查询峰值，不作为用户设备性能保证。
@@ -29,14 +29,15 @@
 
 - 阶段 C 无开发或原生验收阻塞，用户已确认验收完成；自动测试、Edge、本地构建和用户验收仍分别记录。协作式查询截止不能强制中断单次 regex 调用；未取消的单次调用仍受表达式与单文档上限约束。
 - 实现与安装包证据 `d474aa7` 已经 ancestry 检查后以 `git merge --ff-only` 合入本地 `dev`。本收口记录沿同一阶段分支同步后安全删除该分支，阶段 C 无开发侧实现、检查或打包待办。
-- 验收状态通过独立文档分支 `codex/phase-0.3.43-acceptance` 从本地 `dev` 的 `efcb361` 同步；本次仅登记验收，不改变 `0.3.43` 源码、安装包或发布状态。
-- 下一代码阶段为 D `0.3.44` 的契约、类型、命令测试与自动门禁；本任务只实现阶段 C，不执行 push、Tag、Release 或上传。
+- 验收状态通过独立文档分支 `codex/phase-0.3.43-acceptance` 从本地 `dev` 的 `efcb361` 同步；本次仅登记验收，不改变 `0.3.43` 源码或安装包；发布状态见下方记录。
+- `v0.3.43` 已作为当前发布版本；当前没有阶段 C 之后的执行计划，本次发布流程不执行后续代码阶段。
 
 #### 安装包与源码
 
 - 最终打包源码：`e8b08f127ff2a892966d9ee7e2f190fe95c6e3fc`；该提交之后仅补充交付文档，不改变打包源码、依赖、配置或资源。
 - 安装包：`E:\Project\test\prototype\src-tauri\target\release\bundle\nsis\本地资料工作台_0.3.43_x64-setup.exe`；构建时间 `2026-09-05 16:09:18 +08:00`，大小 `9050302` bytes，FileVersion/ProductVersion 均为 `0.3.43`。
 - 安装包 SHA-256：`81669427911CB211B9376E91F0BB59AA9EAC7B95E7315024BDE79947287FACE5`。
+- GitHub Release [`v0.3.43`](https://github.com/ChaceQC/Data-Collection/releases/tag/v0.3.43) 已发布，包含 `本地资料工作台_0.3.43_x64-setup.exe` 和 `本地资料工作台_0.3.43_x64-portable.zip`；发布构建使用 Windows x64 runner，远端构建产物 hash 与本地候选 hash 分开处理。
 - release 主程序：`E:\Project\test\prototype\src-tauri\target\release\local-material-workbench.exe`；大小 `36880630` bytes，FileVersion/ProductVersion 均为 `0.3.43`，SHA-256 `5A7455E99263BFC6F7861CBE5A519647CAEC7D37CA6EE8475883493997087EEF`。
 - `WebView2Loader.dll` 大小 `160320` bytes，SHA-256 `8427B1FC58EC707813E5C0A51EB5D69397BB333250A7B891BE4D3B123F1E0F1C`，已校验 x64 与主程序同目录。上一 `0.3.42` 安装包保留，所有产物和浏览器输出均未提交。
 - 阶段起点 `dev` 为 `008ca291baba261db2f446682a5475f3a1feb680`；`main` 保持 `03298ae613284b70254db27555a87761ff6036e3`。独立阶段分支的实现提交为 `d59471d` 和 `e8b08f1`；含证据的 `d474aa7` 已快进合入本地 `dev`，后续收口仅修改文档，沿用 `e8b08f1` 对应的最终安装包。
