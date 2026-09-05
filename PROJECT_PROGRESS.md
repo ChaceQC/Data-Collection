@@ -2,7 +2,7 @@
 
 ## 2026-09-05
 
-### 阶段 A：预览与界面异步状态闭环（0.3.41，代码与自动回归完成，打包和 Git 收口进行中）
+### 阶段 A：预览与界面异步状态闭环（0.3.41，开发侧收口完成，原生验收待用户完成）
 
 #### 已完成
 
@@ -23,10 +23,22 @@
 - 使用 JSON/TOML 结构化解析核对 package、npm lock 根包、Tauri、crate 和 Cargo.lock 根包均为 `0.3.41`，只输出版本字段。
 - Edge 自动检查通过：主界面、浏览器回退预览和 Escape；实际 `PdfPreviewer` 用 `2099093` 字节合成 PDF 完成第二页绘制，普通 PDF 和转换 PDF 两种内容类型合计 4 次 Range 请求，截图与 canvas 非空像素检查通过。`2716250` 字节合成 WebM 发起 4 次显式 Range，元数据、播放跳转和资源 404 后错误状态通过；404 为主动失败注入。未调用 LibreOffice 或操作用户真实资料。
 - 浏览器检查使用 `tests/browser/preview-consumers.js` 和项目内合成夹具，可通过 Playwright CLI `run-code --filename` 复现；临时 Vite 服务使用端口 `49341`，检查后浏览器和服务已关闭，端口已确认释放。
+- `cargo fmt --all -- --check` 与 `git diff --check` 通过。
+- `npm.cmd run tauri:build` 通过，已包含最终源码的 Vite 生产构建、Rust release 编译、NSIS 和 loader 检查，未重复运行同一源码的单独 build。`dist/client/index.html`、`dist/server/index.js` 和 `dist/.openai/hosting.json` 均已生成。
 
-#### 进行中
+#### 安装包与 Git
 
-- 本地 NSIS 构建、产物证据和本地提交合并。
+- 最终代码提交：`93a677962939634861a7c10774a01d59b5131069`；此后仅更新交付记录，不改变打包源码、依赖、配置或资源。
+- 安装包：`E:\Project\test\prototype\src-tauri\target\release\bundle\nsis\本地资料工作台_0.3.41_x64-setup.exe`；构建时间 `2026-09-05 14:34:11 +08:00`，大小 `9015734` bytes，FileVersion / ProductVersion 均为 `0.3.41`。
+- 安装包 SHA-256：`EA6BFF586DE379CD502DC58D6C5EF8A99655E74634F2F254DF0D643783ACA753`。
+- 主程序：`E:\Project\test\prototype\src-tauri\target\release\local-material-workbench.exe`；大小 `36449026` bytes，FileVersion / ProductVersion 均为 `0.3.41`，SHA-256 `A44B0735897A1021C8FD80ED1DEA516E1C3C7FF2C3DEC86D0AA42204068C6793`。
+- `WebView2Loader.dll`：`160320` bytes，SHA-256 `8427B1FC58EC707813E5C0A51EB5D69397BB333250A7B891BE4D3B123F1E0F1C`；打包脚本确认 Windows x64 且与主程序同目录。
+- 阶段分支 `codex/phase-0.3.41-preview-state`；`dev` 合并前为 `03298ae613284b70254db27555a87761ff6036e3`。本阶段源码及此交付记录采用 ancestry 检查后的 `git merge --ff-only` 合入本地 `dev`，合并后删除阶段分支；`main` 保持 `03298ae`。最终 `dev` 收口提交通过 `git log -1 dev -- PROJECT_PROGRESS.md` 定位，其打包源码与 `93a6779` 一致。
+- 保留 `0.3.41` 最终安装包及上一 `0.3.40` 候选，构建产物与浏览器输出不提交。
+
+#### 进行中与用户验收
+
+- 无阶段 A 开发侧待办；大 PDF / DOC、快速切换、目录内预览、双窗口操作、关闭重试及安装升级的 Windows 11/Tauri/WebView2 原生验收待用户执行。
 
 #### 阻塞与风险
 
@@ -42,7 +54,7 @@
 
 #### 下一步
 
-- 构建 `0.3.41` NSIS 并记录最终源码、大小、时间和 SHA-256；本地快进合入 `dev`、删除本阶段分支后，再进入阶段 B 的文件操作一致性与删除恢复。
+- 下一阶段为 B `0.3.42`：从更新后的 `dev` 创建独立阶段分支，修复文件 / 目录选择器、稳定 ID 返回、重命名并发元数据保留与 prepared 删除日志恢复；本次未开始阶段 B。
 
 ## 2026-09-05
 
