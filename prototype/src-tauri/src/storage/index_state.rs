@@ -7,6 +7,7 @@ use super::{
     Group, IndexRecoveryStatus, IndexSnapshot, PendingOperation, RecoveryInfo, UndoRecord,
 };
 use crate::filesystem::IndexEntry;
+use std::collections::HashMap;
 
 #[derive(Clone, Debug, Default)]
 pub(crate) struct IndexStateData {
@@ -16,6 +17,7 @@ pub(crate) struct IndexStateData {
     pub(crate) recovery: Option<RecoveryInfo>,
     pub(crate) pending_operations: Vec<PendingOperation>,
     pub(crate) revision: u64,
+    pub(crate) source_revisions: HashMap<String, u64>,
 }
 
 impl IndexStateData {

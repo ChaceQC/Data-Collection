@@ -377,9 +377,22 @@ export function parsePreviewSupport(value, command = "can_preview") {
   return { ...source, supported: boolean(source.supported, command, "supported"), kind: string(source.kind, command, "kind"), status: previewStatus(source.status, command), indexRevision: nonNegativeInteger(source.indexRevision ?? 0, command, "indexRevision"), reason: previewReason(source.reason, command) };
 }
 
+export function makePreviewOutcomeArgs(fileId, status, outcomeToken) {
+  const command = "record_preview_outcome";
+  if (!PREVIEW_STATUSES.includes(status) || status === "idle" || status === "loading") {
+    throw contractError(command, "预览终态无效");
+  }
+  if (typeof outcomeToken !== "string" || !/^outcome-[a-f0-9]{32}$/.test(outcomeToken)) {
+    throw contractError(command, "预览凭证无效");
+  }
+  return { fileId: assertOpaqueId(fileId, "fileId"), status, outcomeToken };
+}
+
 export function parsePreviewResult(value, command = "load_preview") {
   const source = record(value, command);
   const status = previewStatus(source.status, command);
+  if (source.outcomeToken !== null && (typeof source.outcomeToken !== "string"
+    || !/^outcome-[a-f0-9]{32}$/.test(source.outcomeToken))) throw contractError(command, "预览凭证无效");
   const byteLength = nonNegativeInteger(source.byteLength, command, "byteLength");
   const content = source.content == null ? null : parsePreviewContent(source.content, command, byteLength);
   if ((status === "ready") !== Boolean(content)) throw contractError(command, "预览结果内容与状态不一致");

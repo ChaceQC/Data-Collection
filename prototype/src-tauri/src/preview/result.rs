@@ -53,6 +53,7 @@ pub(super) fn result_failure(
 ) -> PreviewResult {
     PreviewResult {
         preview_id,
+        outcome_token: None,
         kind,
         status: failure.status.to_string(),
         index_revision: 0,
@@ -65,6 +66,7 @@ pub(super) fn result_failure(
 pub(super) fn result_cancelled(preview_id: String, kind: String) -> PreviewResult {
     PreviewResult {
         preview_id,
+        outcome_token: None,
         kind,
         status: super::STATUS_CANCELLED.to_string(),
         index_revision: 0,
@@ -82,6 +84,7 @@ pub(super) fn result_ready(
 ) -> PreviewResult {
     PreviewResult {
         preview_id,
+        outcome_token: None,
         kind,
         status: STATUS_READY.to_string(),
         index_revision: 0,

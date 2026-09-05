@@ -8,6 +8,7 @@ import {
   PDF_CANVAS_PIXEL_LIMIT,
 } from "./pdfRenderModel";
 import { UnsupportedPreviewer } from "./UnsupportedPreviewer";
+import { createPdfRangeTransport, PDF_RANGE_CHUNK_BYTES } from "./pdfRangeTransport.js";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl;
 
@@ -30,10 +31,30 @@ export function PdfPreviewer({ content, onFailure, onReady, ...failureActions })
     setDocumentState({ status: "loading", document: null, reason: "" });
     setPage(1);
     setScale(1);
-    const loadingTask = pdfjsLib.getDocument({
+    if (!content.byteLength) {
+      const reason = "PDF 文件为空，请重新选择资料。";
+      setDocumentState({ status: "parse-error", document: null, reason });
+      onFailure?.("parse-error", reason);
+      return undefined;
+    }
+    const range = createPdfRangeTransport({
       url: normalizePreviewResourceUrl(content.resourceUrl),
+      byteLength: content.byteLength,
+      onError: () => {
+        if (cancelled) return;
+        window.clearTimeout(timeoutId);
+        void loadingTask.destroy().catch(() => undefined);
+        const reason = "PDF 分段读取失败，请关闭后重试。";
+        setDocumentState({ status: "parse-error", document: null, reason });
+        onFailure?.("parse-error", reason);
+      },
+    });
+    const loadingTask = pdfjsLib.getDocument({
+      range,
+      rangeChunkSize: PDF_RANGE_CHUNK_BYTES,
       isEvalSupported: false,
-      disableAutoFetch: false,
+      disableStream: true,
+      disableAutoFetch: true,
       cMapUrl: new URL("pdfjs/cmaps/", globalThis.document.baseURI).href,
       cMapPacked: true,
       standardFontDataUrl: new URL("pdfjs/standard_fonts/", globalThis.document.baseURI).href,
@@ -43,6 +64,7 @@ export function PdfPreviewer({ content, onFailure, onReady, ...failureActions })
     const timeoutId = window.setTimeout(() => {
       if (cancelled) return;
       timedOut = true;
+      range.abort();
       void loadingTask.destroy().catch(() => undefined);
       const reason = "PDF 读取超过 30 秒，已终止预览任务，请重试。";
       setDocumentState({ status: "timed-out", document: null, reason });
@@ -77,11 +99,12 @@ export function PdfPreviewer({ content, onFailure, onReady, ...failureActions })
       });
     return () => {
       cancelled = true;
+      range.abort();
       window.clearTimeout(timeoutId);
       void loadingTask.destroy().catch(() => undefined);
       if (loadedDocument) void loadedDocument.destroy().catch(() => undefined);
     };
-  }, [content.resourceUrl]);
+  }, [content.resourceUrl, content.byteLength]);
 
   useEffect(() => {
     const document = documentState.document;
@@ -94,9 +117,17 @@ export function PdfPreviewer({ content, onFailure, onReady, ...failureActions })
     const sequence = renderSequence.current + 1;
     renderSequence.current = sequence;
     async function renderPage() {
+      renderTimeoutId = window.setTimeout(() => {
+        if (cancelled) return;
+        renderTimedOut = true;
+        renderTask?.cancel();
+        const reason = "PDF 页面读取或绘制超过 30 秒，已终止预览任务，请重试。";
+        setDocumentState((current) => ({ ...current, status: "timed-out", reason }));
+        onFailure?.("timed-out", reason);
+      }, PDF_PREVIEW_TIMEOUT_MS);
       try {
         const pdfPage = await document.getPage(page);
-        if (cancelled || renderSequence.current !== sequence) return;
+        if (cancelled || renderTimedOut || renderSequence.current !== sequence) return;
         const viewport = pdfPage.getViewport({ scale });
         const metrics = getPdfCanvasMetrics(viewport, globalThis.devicePixelRatio);
         if (!metrics) {
@@ -113,17 +144,9 @@ export function PdfPreviewer({ content, onFailure, onReady, ...failureActions })
           viewport,
           transform: [metrics.outputScale, 0, 0, metrics.outputScale, 0, 0],
         });
-        renderTimeoutId = window.setTimeout(() => {
-          if (cancelled) return;
-          renderTimedOut = true;
-          renderTask?.cancel();
-          const reason = "PDF 页面绘制超过 30 秒，已终止预览任务，请重试。";
-          setDocumentState((current) => ({ ...current, status: "timed-out", reason }));
-          onFailure?.("timed-out", reason);
-        }, 30_000);
         await renderTask.promise;
         window.clearTimeout(renderTimeoutId);
-        if (cancelled || renderSequence.current !== sequence) return;
+        if (cancelled || renderTimedOut || renderSequence.current !== sequence) return;
         const canvas = canvasRef.current;
         if (!canvas) return;
         canvas.width = metrics.pixelWidth;

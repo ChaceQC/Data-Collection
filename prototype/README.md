@@ -2,6 +2,8 @@
 
 这是基于 `AGENT.md` 方案 3“收纳入口”实现的本地资料工作台。当前发布版本为 `v0.3.40`，建立在上一正式发布版本 `v0.3.32` 和历史基线 `v0.3.16` 之上；架构加固阶段 H `0.3.40` 已完成代码、自动门禁、NSIS、本地合并和 Windows 11/Tauri/WebView2 原生验收，并已发布 GitHub Release。阶段 B/C/D 的原生验收、Tag 和 Release 仍按计划记录；浏览器运行时仍只保留安全的原型回退。
 
+当前开发候选为新计划阶段 A `0.3.41`，修复 R01、R06-R09。目录请求统一按根 ID、相对路径和请求序号失效，索引同步最多三次、重试间隔 250/750 ms，最终失败保留列表并提供手动刷新。阶段 A 原生验收待用户完成，正式发布基线仍为 `v0.3.40`。
+
 ## 启动
 
 ```powershell
@@ -34,7 +36,7 @@ npm.cmd run tauri:build
 - 操作历史保存于同一 Tauri app data 目录的版本 `1` `operation-history.json`，最多保留 100 条导入、刷新、索引整理和撤销记录；记录只包含计数、状态、受控资料 ID、跳过原因和重试参数，不保存正文或完整路径。文件损坏时先备份并回退为空历史，不阻塞应用启动。
 - `0.3.37` 阶段 E 候选为六类 app data 文件统一执行安全父目录、symlink/reparse、原始字节上限、目标类型和原子写入检查；损坏文件只在备份成功后自动修复，备份失败保留原文件。应用通过 `tauri-plugin-single-instance` 聚焦已有实例，第二次启动的路径参数只在 Rust 内复用受控导入流程。
 - 失效路径可以通过用户明确选择的同类型新文件或文件夹重新定位，不会自动移动、复制或删除原文件。
-- `0.3.38` 阶段 F 候选将预览资源绑定到注册时的文件快照，每次资源请求和实际读取前后复核普通文件、canonical 路径、大小与文件身份；PDF/视频首包有界并支持 `Range`，未知资源 ID、任意 query 和文件替换都会被拒绝。
+- 预览资源绑定注册时的文件快照，每次请求和实际读取前后复核普通文件、canonical 路径、大小与文件身份；PDF/视频支持单次最多 1 MiB 的显式 `Range`，未知资源 ID、任意 query、文件替换及释放后的读取都会被拒绝。
 - `0.3.39` 阶段 G 将资料库 action service 按导入、单条 mutation、批量、文件、历史和悬浮球交接拆分；Rust command/storage 按索引、预览、正文、事件、批量、状态、持久化、mutation、undo 和待同步操作划分入口，IPC 错误统一为受限结构化契约，并由 parity 脚本检查五个 command 来源的一致性。
 - 点击普通文件行会打开模态预览对话框；关闭对话框、切换资料、目录返回和窗口退出都会取消当前预览任务，并释放 Worker、资源会话和 DOC 临时目录。
 - 纯文本和 Markdown 使用 Rust 受限读取，支持 UTF-8 BOM、UTF-8 和 GB18030 判断；Markdown 的渲染结果经过 DOMPurify 清理，原文、HTML、JS、JSON 和配置内容都按安全文本显示。
@@ -43,7 +45,7 @@ npm.cmd run tauri:build
 - DOCX 使用可终止的 Web Worker 调用 Mammoth 转为 HTML，再按批次让出事件循环并由 DOMPurify 清理；下载、转换、清理、关闭和快速切换均有取消路径，原始转换 HTML 限制为 8 MiB/50,000 个元素，30 秒超时会显示可重试状态。支持标题、段落、列表、表格和常见内嵌图片；复杂分页、字体、批注、目录和高级排版可能与原文不同。
 - PDF 使用 PDF.js worker 通过 canvas 分页渲染，内置 CMap/标准字体数据并按设备像素比完成整页绘制后再显示，支持上一页/下一页和缩放；PDF 内容不作为可信 HTML 注入。
 - DOC 通过受控系统探测定位 LibreOffice `soffice.exe`，使用隔离的临时用户 profile 以参数数组转换到应用临时目录中的 PDF，再交给 PDF.js 预览；输出大小、PDF 签名、超时、退出码和临时目录均受控，缺少转换器时返回明确的 `converter-missing` 状态。
-- 预览状态使用索引中的 `previewStatus`：中断的 `loading` 会在启动时恢复为 `idle`，成功渲染才在一次带 revision 校验的 mutation 中写入 `ready` 和 `lastOpenedAt`；失败、取消和超时分别保留对应终态，状态不变时不会递增索引 revision。
+- 预览状态使用索引中的 `previewStatus`：中断的 `loading` 在启动时恢复为 `idle`，成功渲染后凭 Rust 管理的 `outcomeToken` 原子写入 `ready` 和 `lastOpenedAt`。凭证关联文件 ID、文件级内存修订、来源 metadata 和任务身份，最多 64 个、有效期 30 分钟，取消、释放、来源变化或新任务取代后失效；凭证不写入磁盘。无关元数据变更不阻止回写，同一 ready 重试保持幂等，持久化失败有限重试并反馈，预期过期结果静默丢弃。目录临时子项不回写主索引。
  - 浏览器运行时继续使用内存演示数据和 HTML 文件选择器，不触碰真实文件；浏览器中收藏、标签、分组和索引移除只模拟内存状态。
  - 桌面直接导入、悬浮球记录和第二实例路径转发最多接收 256 条路径、单路径 32 KiB、总输入 4 MiB，超限请求在文件扫描前拒绝；递归导入也复用同一套路径字节校验。正文索引达到容量上限时会先按文件 metadata size 判断是否可行，连续 revision 只保留最新待同步快照。阶段 D 未改变索引、正文索引或操作历史格式。阶段 E 的 app data 原始读取上限为 `index.json` 64 MiB、`content-index.json` 72 MiB、设置/位置 64 KiB、操作历史 16 MiB、待同步操作 8 MiB。
 - 资料库视图支持收藏/取消收藏、从索引移除、按名称/类型/状态/位置/标签搜索、按添加时间/修改时间/名称/大小排序和每页 20 条分页；“最近添加”按持久化 `addedAt` 排序并限制为最近 50 条，目录视图不再使用临时 `addedAt` 排序。类型、标签、分组、收藏和失效路径可以组合筛选。
@@ -98,7 +100,9 @@ Windows WebView2 使用 `http://preview.localhost/<previewId>` 访问受控资�
 
 预览结果协议中的资源字段由 Rust 显式序列化为前端使用的 `resourceUrl`、`mediaType`、`byteLength` 和 `supportsRange`，二进制预览适配器通过该字段读取受控资源，不依赖 Rust 默认的 snake_case 字段名。
 
-PDF 的初始无范围请求返回有界 `206` 响应并带完整 `Content-Range`，客户端明确发起的范围请求继续按单范围分段返回，避免首个请求读取完整 50 MiB 文件。
+PDF 使用官方 `PDFDataRangeTransport`，根据真实 `byteLength` 按 64 KiB 块发起受控 Range，大请求再拆为最多 1 MiB 的单请求；DOC 转换得到的 PDF 复用该读取方式。PDF/视频超过 1 MiB 时，无 Range 的 GET 返回 400；较小资源返回完整 200，HEAD 返回真实总长度且无 body。206 的 body、Content-Length 和 Content-Range 保持一致，销毁时中止在途 fetch，视频继续由媒体元素发起 Range。PDF 的 50 MiB、200 页、像素和超时限制保持不变。
+
+阶段 A 新增 `npm.cmd run test:async-state`，以真实 React Hook 和虚拟时钟验证目录导航、索引事件、同步上限及预览结果重试；`test:preview` 包含真实 PDF.js 的小文件、大文件末页、损坏文件和取消回归。`react-test-renderer@19.2.0` 与 `pdf-lib@1.17.1` 仅为项目内开发依赖，分别用于 Hook 挂载和合成无个人信息的 PDF。前者会输出 React 的弃用提示，不作为应用运行时依赖。
 
 预览、资料库核心功能、阶段 F 的设置和显式外部操作，以及此前悬浮球阶段 A-F 的实现、自动验证、Windows 11 桌面手工验收和 `v0.3.6` GitHub Release 均已完成。此前计划阶段 A-J 的代码实现、自动验证、浏览器回退检查和用户 Windows 11/Tauri/WebView2 原生验收均已完成，`v0.3.26` 已创建 Tag 并发布 GitHub Release；悬浮球计划阶段 E `0.3.31` 已完成代码候选、自动验证、浏览器回退检查和 NSIS 候选构建，阶段 F Windows 11/Tauri/WebView2 原生验收已由用户完成，五个版本入口已同步到 `0.3.32`，`v0.3.32` 已创建 Tag 并发布 GitHub Release。当前架构加固阶段 E `0.3.37`、阶段 F `0.3.38`、阶段 G `0.3.39` 和阶段 H `0.3.40` 的代码、门禁、构建和 Windows 11/Tauri/WebView2 原生验收已纳入 `v0.3.40` 发布。不把所有格式写成无条件“已支持”，视频编码、LibreOffice 和 WebView2 Runtime 仍按各自外部依赖边界处理。
 
@@ -121,6 +125,7 @@ PDF 的初始无范围请求返回有界 `206` 响应并带完整 `Content-Range
 npm.cmd run build
 npm.cmd run test:library
 npm.cmd run test:contracts
+npm.cmd run test:async-state
 npm.cmd run test:settings
 npm.cmd run test:operations
 npm.cmd run test:content

@@ -3,6 +3,7 @@ import {
   invokeCommand,
   isDesktopRuntime,
   makeDirectoryTarget,
+  makePreviewOutcomeArgs,
   parseDirectoryEntries,
   parseMutationResult,
   parsePreviewResult,
@@ -68,11 +69,7 @@ export function disposePreview(previewId) {
   return invokeCommand("dispose_preview", { previewId });
 }
 
-export function recordPreviewOutcome(fileId, status, expectedRevision) {
+export function recordPreviewOutcome(fileId, status, outcomeToken) {
   if (!canUsePreviewRuntime() || !fileId) return Promise.resolve(null);
-  return invokeCommand("record_preview_outcome", {
-    fileId,
-    status,
-    expectedRevision,
-  }, parseMutationResult);
+  return invokeCommand("record_preview_outcome", makePreviewOutcomeArgs(fileId, status, outcomeToken), parseMutationResult);
 }

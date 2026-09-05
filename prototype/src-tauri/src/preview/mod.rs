@@ -2,6 +2,7 @@ mod doc;
 mod image;
 mod loaders;
 mod operations;
+pub(crate) mod outcomes;
 mod resource_protocol;
 mod resources;
 mod result;
@@ -44,6 +45,7 @@ const STATUS_TIMED_OUT: &str = "timed-out";
 pub(crate) struct PreviewState {
     resources: resources::PreviewResourceStore,
     tasks: Arc<Mutex<HashMap<String, Arc<AtomicBool>>>>,
+    pub(crate) outcomes: Arc<outcomes::PreviewOutcomes>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -90,6 +92,7 @@ pub(crate) struct PreviewResult {
     pub kind: String,
     pub status: String,
     pub index_revision: u64,
+    pub outcome_token: Option<String>,
     pub content: Option<PreviewContent>,
     pub byte_length: u64,
     pub reason: Option<String>,
@@ -130,6 +133,7 @@ pub(crate) enum PreviewContent {
 }
 
 pub(crate) fn dispose_preview(state: &PreviewState, preview_id: &str) {
+    state.outcomes.dispose(preview_id);
     operations::dispose_preview(state, preview_id);
 }
 
@@ -154,6 +158,7 @@ impl PreviewState {
     }
 
     pub(crate) fn cancel_task(&self, task_id: &str) {
+        self.outcomes.cancel(task_id);
         if let Ok(tasks) = self.tasks.lock() {
             if let Some(flag) = tasks.get(task_id) {
                 flag.store(true, Ordering::Release);
@@ -184,6 +189,7 @@ impl PreviewState {
     }
 
     pub(crate) fn dispose_all(&self) {
+        self.outcomes.clear();
         if let Ok(tasks) = self.tasks.lock() {
             for flag in tasks.values() {
                 flag.store(true, Ordering::Release);

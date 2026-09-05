@@ -19,6 +19,7 @@ import {
   parseFloatingFilesResult,
   parseMetadataSearchResponse,
   parsePreviewResult,
+  makePreviewOutcomeArgs,
   parsePreviewSupport,
 } from "../src/lib/ipcContracts.js";
 
@@ -94,11 +95,12 @@ test("rejects unsafe target components and malformed event payloads", () => {
 });
 
 test("validates preview status and maps structured operation errors", () => {
-  assert.equal(parsePreviewResult({ previewId: "", kind: "text", status: "unsupported", content: null, byteLength: 0 }).status, "unsupported");
+  assert.equal(parsePreviewResult({ previewId: "", outcomeToken: null, kind: "text", status: "unsupported", content: null, byteLength: 0 }).status, "unsupported");
   assert.throws(() => parsePreviewResult({ previewId: "", kind: "text", status: "broken", content: null, byteLength: 0 }), IpcContractError);
   const previewId = `preview-${"a".repeat(32)}`;
   const resource = parsePreviewResult({
     previewId,
+    outcomeToken: `outcome-${"b".repeat(32)}`,
     kind: "image",
     status: "ready",
     indexRevision: 8,
@@ -114,6 +116,14 @@ test("validates preview status and maps structured operation errors", () => {
     },
   });
   assert.equal(resource.indexRevision, 8);
+  assert.equal(resource.outcomeToken, `outcome-${"b".repeat(32)}`);
+  assert.deepEqual(makePreviewOutcomeArgs("file-1", "ready", resource.outcomeToken), {
+    fileId: "file-1", status: "ready", outcomeToken: resource.outcomeToken,
+  });
+  assert.throws(() => makePreviewOutcomeArgs("file-1", "ready", 8), IpcContractError);
+  assert.throws(() => makePreviewOutcomeArgs("file-1", "loading", resource.outcomeToken), IpcContractError);
+  assert.throws(() => parsePreviewResult({ ...resource, outcomeToken: undefined }), IpcContractError);
+  assert.throws(() => parsePreviewResult({ ...resource, outcomeToken: "C:\\secret" }), IpcContractError);
   assert.equal(resource.content.resourceUrl, `preview://localhost/${previewId}`);
   assert.equal(parsePreviewSupport({ supported: false, kind: "text", status: "cancelled", indexRevision: 8, reason: "已取消" }).status, "cancelled");
   assert.throws(() => parsePreviewResult({ previewId, kind: "image", status: "ready", byteLength: 42, content: { type: "resource", resourceUrl: `preview://localhost/${previewId}?path=C:\\secret`, mediaType: "image/png", byteLength: 42, supportsRange: true } }), IpcContractError);

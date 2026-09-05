@@ -351,7 +351,7 @@ pub(crate) fn structured_storage_error(error: StorageError) -> CommandError {
         StorageError::UndoUnavailable => ("undo-unavailable", false, "unchanged"),
         StorageError::UndoConflict => ("undo-conflict", false, "unchanged"),
         StorageError::InvalidPreviewStatus => ("invalid-preview-status", false, "unchanged"),
-        StorageError::PreviewRevisionConflict => ("preview-stale", true, "unchanged"),
+        StorageError::PreviewRevisionConflict => ("preview-stale", false, "unchanged"),
         StorageError::Write => ("storage-write", true, "unchanged"),
         StorageError::Recovery => ("recovery-required", true, "unknown"),
         StorageError::DataDirectory | StorageError::Read | StorageError::State => {
@@ -437,7 +437,7 @@ pub(crate) fn load_file_index_impl(
 pub(crate) async fn list_directory_impl(
     target: DirectoryTarget,
     state: State<'_, AppState>,
-) -> Result<Vec<DirectoryEntry>, String> {
+) -> Result<Vec<DirectoryEntry>, CommandError> {
     let (_root, path) = resolve_directory_target(&state, &target)?;
     let directory_id = target.directory_id;
     let relative_path = target.relative_path;
@@ -455,15 +455,23 @@ pub(crate) async fn list_directory_impl(
         )
     })
     .await
-    .map_err(|_| "目录读取任务未完成，请重试".to_string())?
-    .map_err(|error| error.to_string())
+    .map_err(|_| {
+        command_error(
+            "directory-read",
+            "目录读取任务未完成，请重试".to_string(),
+            true,
+            "unchanged",
+        )
+    })?
+    .map_err(|error| command_error("directory-read", error.to_string(), true, "unchanged"))
 }
 
 pub(crate) async fn reveal_directory_child_impl(
     target: DirectoryTarget,
     state: State<'_, AppState>,
 ) -> Result<library::ExternalOpenResult, String> {
-    let (_root, path) = resolve_registered_directory_child(&state, &target)?;
+    let (_root, path) =
+        resolve_registered_directory_child(&state, &target).map_err(|error| error.message)?;
     let metadata = std::fs::symlink_metadata(&path)
         .map_err(|_| "登记的文件夹子项已失效，请刷新索引".to_string())?;
     if filesystem::is_unsafe_metadata(&metadata) || (!metadata.is_file() && !metadata.is_dir()) {
@@ -767,7 +775,7 @@ pub(crate) async fn can_preview_impl(
     target: PreviewTarget,
     kind: String,
     state: State<'_, AppState>,
-    app: AppHandle,
+    _app: AppHandle,
 ) -> Result<PreviewSupport, String> {
     let (path, _, index_revision) = resolve_preview_target(&state, &target)?;
     let mut support = tauri::async_runtime::spawn_blocking(move || {
@@ -776,19 +784,6 @@ pub(crate) async fn can_preview_impl(
     .await
     .map_err(|_| "预览检查任务未完成，请重试".to_string())?;
     support.index_revision = index_revision;
-    if !support.supported {
-        if let Some(file_id) = target.file_id.as_deref() {
-            if let Ok(outcome) = persist_preview_outcome(
-                state.inner(),
-                &app,
-                file_id,
-                &support.status,
-                index_revision,
-            ) {
-                support.index_revision = outcome.revision;
-            }
-        }
-    }
     Ok(support)
 }
 
@@ -798,12 +793,31 @@ pub(crate) async fn load_preview_impl(
     options: Option<PreviewOptions>,
     index_state: State<'_, AppState>,
     state: State<'_, PreviewState>,
-    app: AppHandle,
+    _app: AppHandle,
 ) -> Result<PreviewResult, String> {
-    let (path, _, index_revision) = resolve_preview_target(&index_state, &target)?;
+    let (mut path, _, index_revision) = resolve_preview_target(&index_state, &target)?;
     let preview_state = state.inner().clone();
     let options = options.unwrap_or_default();
     let (task_id, cancellation) = preview_state.begin_task(options.task_id.clone());
+    let outcome_token = if let Some(file_id) = target.file_id.as_deref() {
+        match state
+            .outcomes
+            .begin(index_state.inner(), file_id, &task_id, &cancellation)
+        {
+            Ok((token, source)) => {
+                path = source;
+                Some(token)
+            }
+            Err(StorageError::PreviewRevisionConflict) => None,
+            Err(error) => {
+                state.cancel_task(&task_id);
+                state.finish_task(&task_id, &cancellation);
+                return Err(storage_message(error));
+            }
+        }
+    } else {
+        None
+    };
     let task_id_for_task = task_id.clone();
     let cancellation_for_task = cancellation.clone();
     let join_result = tauri::async_runtime::spawn_blocking(move || {
@@ -821,18 +835,14 @@ pub(crate) async fn load_preview_impl(
     match join_result {
         Ok(mut result) => {
             result.index_revision = index_revision;
-            if result.status != "ready" && result.status != "cancelled" {
-                if let Some(file_id) = target.file_id.as_deref() {
-                    let status = result.status.clone();
-                    if let Ok(outcome) = persist_preview_outcome(
-                        index_state.inner(),
-                        &app,
-                        file_id,
-                        &status,
-                        index_revision,
-                    ) {
-                        result.index_revision = outcome.revision;
-                    }
+            if let Some(token) = outcome_token {
+                if state.outcomes.attach(&token, &result.preview_id) && !cancellation.is_cancelled()
+                {
+                    result.outcome_token = Some(token);
+                } else {
+                    preview_service::dispose_preview(state.inner(), &result.preview_id);
+                    result.status = "cancelled".to_string();
+                    result.content = None;
                 }
             }
             Ok(result)
@@ -864,13 +874,18 @@ pub(crate) fn cancel_preview_task_impl(
 pub(crate) fn record_preview_outcome_impl(
     file_id: String,
     status: String,
-    expected_revision: u64,
+    outcome_token: String,
     state: State<'_, AppState>,
+    preview_state: State<'_, PreviewState>,
     app: AppHandle,
 ) -> Result<IndexMutationResult, CommandError> {
-    let outcome =
-        persist_preview_outcome(state.inner(), &app, &file_id, &status, expected_revision)
-            .map_err(structured_storage_error)?;
+    let outcome = preview_state
+        .outcomes
+        .record(state.inner(), &file_id, &outcome_token, &status)
+        .map_err(structured_storage_error)?;
+    if outcome.changed {
+        emit_index_changed(&app, outcome.revision, vec![file_id.clone()], "preview");
+    }
     Ok(IndexMutationResult {
         revision: outcome.revision,
         changed_ids: if outcome.changed {
@@ -963,7 +978,7 @@ pub(crate) async fn search_metadata_impl(
         let (_, path) = resolve_directory_target(&state, &directory_target).map_err(|message| {
             command_error(
                 "metadata-search-target-invalid",
-                message,
+                message.message,
                 false,
                 "unchanged",
             )
@@ -1204,12 +1219,13 @@ fn metadata_search_error(error: storage::metadata_search::MetadataSearchError) -
 fn resolve_directory_target(
     state: &AppState,
     target: &DirectoryTarget,
-) -> Result<(IndexEntry, PathBuf), String> {
+) -> Result<(IndexEntry, PathBuf), CommandError> {
     let (root, path) = resolve_registered_directory_child(state, target)?;
-    let metadata =
-        std::fs::symlink_metadata(&path).map_err(|_| "文件夹路径已失效，请刷新索引".to_string())?;
+    let metadata = std::fs::symlink_metadata(&path).map_err(directory_io_error)?;
     if !metadata.is_dir() {
-        return Err("目标不是可访问的登记文件夹".to_string());
+        return Err(directory_target_error(
+            filesystem::PathValidationError::Invalid,
+        ));
     }
     Ok((root, path))
 }
@@ -1217,28 +1233,57 @@ fn resolve_directory_target(
 fn resolve_registered_directory_child(
     state: &AppState,
     target: &DirectoryTarget,
-) -> Result<(IndexEntry, PathBuf), String> {
+) -> Result<(IndexEntry, PathBuf), CommandError> {
     if target.directory_id.trim().is_empty() {
-        return Err(storage_message(StorageError::InvalidId));
+        return Err(structured_storage_error(StorageError::InvalidId));
     }
     let root = state
         .snapshot()
-        .map_err(storage_message)?
+        .map_err(structured_storage_error)?
         .entries
         .into_iter()
         .find(|entry| entry.id == target.directory_id)
-        .ok_or_else(|| storage_message(StorageError::EntryNotFound))?;
+        .ok_or_else(|| directory_target_error(filesystem::PathValidationError::Missing))?;
     if root.kind != "folder" || root.invalid {
-        return Err("登记的文件夹路径已失效，请重新定位或重新导入".to_string());
+        return Err(directory_target_error(
+            filesystem::PathValidationError::Missing,
+        ));
     }
     let path = filesystem::resolve_directory_child(&root.path, &target.relative_path)
-        .map_err(directory_path_message)?;
-    let metadata = std::fs::symlink_metadata(&path)
-        .map_err(|_| "登记的文件夹子项已失效，请刷新索引".to_string())?;
+        .map_err(directory_target_error)?;
+    let metadata = std::fs::symlink_metadata(&path).map_err(directory_io_error)?;
     if filesystem::is_unsafe_metadata(&metadata) || (!metadata.is_file() && !metadata.is_dir()) {
-        return Err("目标不是可访问的登记文件夹子项".to_string());
+        return Err(directory_target_error(
+            filesystem::PathValidationError::Invalid,
+        ));
     }
     Ok((root, path))
+}
+
+fn directory_target_error(error: filesystem::PathValidationError) -> CommandError {
+    let code = match error {
+        filesystem::PathValidationError::Missing => "directory-missing",
+        filesystem::PathValidationError::Invalid => "directory-invalid",
+        filesystem::PathValidationError::PermissionDenied => "directory-permission-denied",
+    };
+    command_error(code, directory_path_message(error), false, "unchanged")
+}
+
+fn directory_io_error(error: std::io::Error) -> CommandError {
+    match error.kind() {
+        std::io::ErrorKind::NotFound => {
+            directory_target_error(filesystem::PathValidationError::Missing)
+        }
+        std::io::ErrorKind::PermissionDenied => {
+            directory_target_error(filesystem::PathValidationError::PermissionDenied)
+        }
+        _ => command_error(
+            "directory-read",
+            "目录读取失败，请重试".to_string(),
+            true,
+            "unchanged",
+        ),
+    }
 }
 
 fn resolve_preview_target(
@@ -1273,7 +1318,8 @@ fn resolve_preview_target(
                     directory_id: directory_id.to_string(),
                     relative_path: target.relative_path.clone(),
                 },
-            )?;
+            )
+            .map_err(|error| error.message)?;
             let Some(info) = filesystem::type_info_for_path(&path) else {
                 return Err("此格式暂不支持预览".to_string());
             };
@@ -1377,23 +1423,6 @@ pub(crate) fn emit_content_index_status<R: Runtime>(
     if let Ok(status) = state.status() {
         let _ = app.emit_to("main", "content-index-changed", status);
     }
-}
-
-pub(crate) fn persist_preview_outcome<R: Runtime>(
-    state: &AppState,
-    app: &AppHandle<R>,
-    file_id: &str,
-    status: &str,
-    expected_revision: u64,
-) -> Result<storage::MutationResult<Option<IndexEntry>>, StorageError> {
-    let repository = IndexRepository::new(state);
-    let opened_at = (status == "ready").then(storage::current_timestamp_millis);
-    let outcome =
-        repository.record_preview_outcome(file_id, status, expected_revision, opened_at)?;
-    if outcome.changed {
-        emit_index_changed(app, outcome.revision, vec![file_id.to_string()], "preview");
-    }
-    Ok(outcome)
 }
 
 pub(crate) fn record_entry_opened<R: Runtime>(

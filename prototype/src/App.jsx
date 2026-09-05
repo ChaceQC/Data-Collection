@@ -193,7 +193,8 @@ function App() {
     initialFiles: INITIAL_FILES,
     setSelectedId: navigation.setSelectedId,
     setPreviewEntryId: navigation.setPreviewEntryId,
-    setDirectoryView: navigation.setDirectoryView,
+    directoryView: navigation.directoryView,
+    refreshDirectory: navigation.refreshDirectory,
     showToast,
     operationReporter: operations,
   });
@@ -219,6 +220,7 @@ function App() {
     focusEntry: navigation.focusEntry,
     resetToLibrary: navigation.resetToLibrary,
     openDirectory: navigation.openDirectory,
+    invalidateDirectoryRequest: navigation.invalidateDirectoryRequest,
     applyIndexSnapshot: index.applyIndexSnapshot,
     reloadIndexPreservingState: index.reloadIndexPreservingState,
     setSelectedIds,
@@ -577,7 +579,7 @@ function App() {
         return previewEntry ? (
           <PreviewPane
             entry={previewEntry}
-            indexRevision={latestRevision}
+            onOutcomeError={showToast}
             navigationEntries={currentEntries}
             directoryView={directoryView}
             onClose={handlePreviewClose}

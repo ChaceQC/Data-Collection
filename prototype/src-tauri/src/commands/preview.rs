@@ -53,9 +53,10 @@ pub fn cancel_preview_task(
 pub fn record_preview_outcome(
     file_id: String,
     status: String,
-    expected_revision: u64,
+    outcome_token: String,
     state: State<'_, AppState>,
+    preview_state: State<'_, PreviewState>,
     app: AppHandle,
 ) -> Result<IndexMutationResult, CommandError> {
-    super::record_preview_outcome_impl(file_id, status, expected_revision, state, app)
+    super::record_preview_outcome_impl(file_id, status, outcome_token, state, preview_state, app)
 }

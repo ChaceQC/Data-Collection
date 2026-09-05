@@ -9,7 +9,6 @@ import {
 } from "@phosphor-icons/react";
 import { Dialog, DialogCloseButton } from "../../components/Dialog.jsx";
 import {
-  canPreview,
   canUsePreviewRuntime,
   cancelPreviewTask,
   createPreviewTaskId,
@@ -32,6 +31,7 @@ import { VideoPreviewer } from "./VideoPreviewer";
 import { SpreadsheetPreviewer } from "./SpreadsheetPreviewer";
 import { OfficePreviewer } from "./OfficePreviewer";
 import { PdfPreviewer } from "./PdfPreviewer";
+import { createPreviewOutcomeReporter } from "./previewOutcomeReporter.js";
 
 function initialState(entry) {
   return { status: "loading", kind: entry?.kind || "other", content: null, reason: "", demoOnly: false };
@@ -53,7 +53,7 @@ function PreviewContent({ result, entryName, failureActions }) {
 
 export function PreviewPane({
   entry,
-  indexRevision = 0,
+  onOutcomeError,
   navigationEntries = [],
   directoryView,
   onClose,
@@ -69,8 +69,9 @@ export function PreviewPane({
   const [result, setResult] = useState(() => initialState(entry));
   const [localRetryNonce, setLocalRetryNonce] = useState(0);
   const requestSequence = useRef(0);
-  const previewRevision = useRef(0);
-  const contentReadyReported = useRef(false);
+  const outcomeReporter = useRef(null);
+  const onOutcomeErrorRef = useRef(onOutcomeError);
+  onOutcomeErrorRef.current = onOutcomeError;
   const activePreviewId = useRef("");
   const activeTaskId = useRef("");
   const definition = getPreviewDefinition(entry);
@@ -91,42 +92,32 @@ export function PreviewPane({
   }, [entry, onRetry, retryNonce]);
 
   const reportContentFailure = useCallback((status, reason) => {
+    if (result.requestId !== requestSequence.current) return;
     setResult((current) => current.status === "ready"
       ? { ...current, status, content: null, reason }
       : current);
     const previewId = activePreviewId.current;
     activePreviewId.current = "";
-    if (previewId) void disposePreview(previewId);
-    if (isIndexEntry && entry?.id && Number.isSafeInteger(previewRevision.current)) {
-      const expectedRevision = previewRevision.current;
-      void recordPreviewOutcome(entry.id, status, expectedRevision)
-        .then((outcome) => {
-          if (outcome && Number.isSafeInteger(outcome.revision)) previewRevision.current = outcome.revision;
-        })
-        .catch(() => undefined);
-    }
-  }, [entry?.id, isIndexEntry]);
+    void Promise.resolve(outcomeReporter.current?.report(status)).finally(() => {
+      if (previewId) void disposePreview(previewId);
+    });
+  }, [result.requestId]);
 
   const reportContentReady = useCallback(() => {
-    if (!isIndexEntry || !entry?.id || contentReadyReported.current) return;
-    contentReadyReported.current = true;
-    const expectedRevision = previewRevision.current;
-    void recordPreviewOutcome(entry.id, "ready", expectedRevision)
-      .then((outcome) => {
-        if (outcome && Number.isSafeInteger(outcome.revision)) previewRevision.current = outcome.revision;
-      })
-      .catch(() => undefined);
-  }, [entry?.id, isIndexEntry]);
+    if (result.requestId === requestSequence.current) void outcomeReporter.current?.report("ready");
+  }, [result.requestId]);
+
+  useEffect(() => {
+    if (result.status === "ready" && result.content?.type === "text") reportContentReady();
+  }, [result, reportContentReady]);
 
   useEffect(() => {
     const requestId = requestSequence.current + 1;
     requestSequence.current = requestId;
     let cancelled = false;
-    previewRevision.current = 0;
-    contentReadyReported.current = false;
+    outcomeReporter.current = null;
     setResult(initialState(entry));
     const browserDemo = !canUsePreviewRuntime();
-    previewRevision.current = isIndexEntry && Number.isSafeInteger(indexRevision) ? indexRevision : 0;
 
     if (browserDemo) {
       setResult({
@@ -144,9 +135,6 @@ export function PreviewPane({
 
     if (!definition || entry.invalid || !entry.id) {
       const terminalStatus = entry.invalid ? "missing" : "unsupported";
-      if (isIndexEntry && entry.id) {
-        void recordPreviewOutcome(entry.id, terminalStatus, previewRevision.current).catch(() => undefined);
-      }
       setResult({
         status: terminalStatus,
         kind: entry.kind || "other",
@@ -166,34 +154,27 @@ export function PreviewPane({
 
     async function requestPreview() {
       try {
-        const support = await canPreview(entry);
-        if (cancelled || requestSequence.current !== requestId) return;
-        if (!support.supported) {
-          previewRevision.current = support.indexRevision || 0;
-          setResult({ ...support, content: null, previewId: "", byteLength: 0, demoOnly: Boolean(support.demoOnly) });
-          return;
-        }
         const taskId = createPreviewTaskId();
         activeTaskId.current = taskId;
-        let loaded;
-        try {
-          loaded = await loadPreview(entry, { taskId });
-        } finally {
-          if (activeTaskId.current === taskId) activeTaskId.current = "";
-        }
+        const loaded = await loadPreview(entry, { taskId });
         if (cancelled || requestSequence.current !== requestId) {
+          void cancelPreviewTask(taskId);
           if (loaded.previewId) void disposePreview(loaded.previewId);
           return;
         }
-        if (loaded.status !== "ready") {
-          if (loaded.previewId) void disposePreview(loaded.previewId);
-          setResult({ ...loaded, demoOnly: Boolean(loaded.demoOnly) });
-          return;
+        if (isIndexEntry && loaded.outcomeToken) {
+          outcomeReporter.current = createPreviewOutcomeReporter({
+            record: (status) => recordPreviewOutcome(entry.id, status, loaded.outcomeToken),
+            onError: () => onOutcomeErrorRef.current?.("预览结果未能保存，请重试预览"),
+          });
         }
-        previewRevision.current = loaded.indexRevision || 0;
         activePreviewId.current = loaded.previewId || "";
-        setResult({ ...loaded, demoOnly: Boolean(loaded.demoOnly) });
-        if (loaded.kind === "text" || loaded.kind === "markdown") reportContentReady();
+        if (loaded.status !== "ready") {
+          void outcomeReporter.current?.report(loaded.status);
+          setResult({ ...loaded, requestId, demoOnly: Boolean(loaded.demoOnly) });
+          return;
+        }
+        setResult({ ...loaded, requestId, demoOnly: Boolean(loaded.demoOnly) });
       } catch {
         if (cancelled || requestSequence.current !== requestId) return;
         setResult({
@@ -210,6 +191,8 @@ export function PreviewPane({
     return () => {
       cancelled = true;
       requestSequence.current += 1;
+      outcomeReporter.current?.cancel();
+      outcomeReporter.current = null;
       const previewId = activePreviewId.current;
       activePreviewId.current = "";
       const taskId = activeTaskId.current;
@@ -217,7 +200,7 @@ export function PreviewPane({
       if (taskId) void cancelPreviewTask(taskId);
       if (previewId) void disposePreview(previewId);
     };
-  }, [definition, effectiveRetryNonce, entry?.id, entry?.invalid, entry?.kind, entry?.name, entry?.path, reportContentReady]);
+  }, [definition, effectiveRetryNonce, entry?.id, entry?.invalid, entry?.kind, entry?.name, entry?.path, isIndexEntry]);
 
   const isReady = result.status === "ready" && result.content;
   const failureActions = {

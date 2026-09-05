@@ -300,6 +300,7 @@ impl AppState {
             recovery,
             pending_operations,
             revision,
+            source_revisions: HashMap::new(),
         };
         Ok(())
     }
@@ -333,9 +334,53 @@ impl AppState {
             .map(|state| state.clone())
     }
 
-    fn replace_state(&self, state: IndexStateData) -> Result<(), StorageError> {
-        *self.snapshot.write().map_err(|_| StorageError::State)? = state;
+    fn replace_state(&self, mut state: IndexStateData) -> Result<(), StorageError> {
+        let mut current = self.snapshot.write().map_err(|_| StorageError::State)?;
+        let previous = current
+            .entries
+            .iter()
+            .map(|entry| (entry.id.as_str(), entry))
+            .collect::<HashMap<_, _>>();
+        state.source_revisions = state
+            .entries
+            .iter()
+            .map(|entry| {
+                let unchanged = previous.get(entry.id.as_str()).is_some_and(|old| {
+                    old.path == entry.path
+                        && old.name == entry.name
+                        && old.kind == entry.kind
+                        && old.invalid == entry.invalid
+                        && old.size == entry.size
+                        && old.modified_at == entry.modified_at
+                });
+                let revision = if unchanged {
+                    current
+                        .source_revisions
+                        .get(&entry.id)
+                        .copied()
+                        .unwrap_or(0)
+                } else {
+                    state.revision
+                };
+                (entry.id.clone(), revision)
+            })
+            .collect();
+        *current = state;
         Ok(())
+    }
+
+    pub(crate) fn preview_source(&self, file_id: &str) -> Result<(IndexEntry, u64), StorageError> {
+        let snapshot = self.snapshot.read().map_err(|_| StorageError::State)?;
+        let entry = snapshot
+            .entries
+            .iter()
+            .find(|entry| entry.id == file_id)
+            .filter(|entry| entry.kind != "folder" && !entry.invalid)
+            .ok_or(StorageError::EntryNotFound)?;
+        Ok((
+            entry.clone(),
+            snapshot.source_revisions.get(file_id).copied().unwrap_or(0),
+        ))
     }
 
     #[cfg(test)]
@@ -354,17 +399,25 @@ impl AppState {
         self.update_index_with(|entries, _groups| mutation(entries))
     }
 
-    pub fn record_preview_outcome(
+    pub(crate) fn record_preview_outcome(
         &self,
         file_id: &str,
         status: &str,
-        expected_revision: u64,
+        source_revision: u64,
         opened_at: Option<i64>,
+        validate_source: impl FnOnce() -> bool,
     ) -> Result<MutationResult<Option<IndexEntry>>, StorageError> {
-        self.update_index_internal(Some(expected_revision), None, |entries, _groups| {
-            let (changed, entry) = record_preview_outcome(entries, file_id, status, opened_at)?;
-            Ok((changed, Some(entry)))
-        })
+        self.update_index_internal(
+            Some((file_id, source_revision)),
+            None,
+            |entries, _groups| {
+                if !validate_source() {
+                    return Err(StorageError::PreviewRevisionConflict);
+                }
+                let (changed, entry) = record_preview_outcome(entries, file_id, status, opened_at)?;
+                Ok((changed, Some(entry)))
+            },
+        )
     }
 
     pub fn update_index_with<F, T>(&self, mutation: F) -> Result<MutationResult<T>, StorageError>
@@ -387,7 +440,7 @@ impl AppState {
 
     fn update_index_internal<F, T>(
         &self,
-        expected_revision: Option<u64>,
+        expected_source: Option<(&str, u64)>,
         undo_operation: Option<&str>,
         mutation: F,
     ) -> Result<MutationResult<T>, StorageError>
@@ -397,7 +450,13 @@ impl AppState {
         let _guard = self.mutation_lock.lock().map_err(|_| StorageError::State)?;
         let index_path = self.index_path()?;
         let current = self.state_snapshot()?;
-        if expected_revision.is_some_and(|expected| expected != current.revision) {
+        if expected_source.is_some_and(|(id, expected)| {
+            !current
+                .entries
+                .iter()
+                .any(|entry| entry.id == id && !entry.invalid)
+                || current.source_revisions.get(id).copied().unwrap_or(0) != expected
+        }) {
             return Err(StorageError::PreviewRevisionConflict);
         }
         let mut next = current.clone();
@@ -1916,16 +1975,23 @@ mod tests {
             })
             .expect("entry should be saved");
         let outcome = state
-            .record_preview_outcome("过期预览.txt", "ready", 1, Some(2_000))
+            .record_preview_outcome("过期预览.txt", "ready", 1, Some(2_000), || true)
             .expect("preview outcome should be saved");
         assert_eq!(outcome.revision, 2);
         assert_eq!(outcome.value.as_ref().unwrap().preview_status, "ready");
+        state
+            .update_entries_with(|entries| {
+                entries[0].path = "C:\\资料\\relocated.txt".to_string();
+                entries[0].name = "relocated.txt".to_string();
+                Ok((true, ()))
+            })
+            .expect("source should change");
         assert!(matches!(
-            state.record_preview_outcome("过期预览.txt", "parse-error", 1, None),
+            state.record_preview_outcome("过期预览.txt", "parse-error", 1, None, || true),
             Err(StorageError::PreviewRevisionConflict)
         ));
         let snapshot = state.snapshot().expect("snapshot should remain readable");
-        assert_eq!(snapshot.revision, 2);
+        assert_eq!(snapshot.revision, 3);
         assert_eq!(snapshot.entries[0].preview_status, "ready");
         let _ = fs::remove_file(index_path);
     }

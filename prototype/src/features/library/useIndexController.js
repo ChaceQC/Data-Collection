@@ -4,6 +4,7 @@ import { getOperationError } from "../../lib/ipcContracts.js";
 import { createOperationId } from "../operations/operationModel.js";
 import { getIndexSnapshotDecision } from "./libraryModel.js";
 import { libraryRepository } from "./libraryRepository.js";
+import { canRetrySync, INDEX_SYNC_RETRY_DELAYS, waitForSyncRetry } from "./indexSyncPolicy.js";
 
 export function useIndexController({
   isTauriRuntime,
@@ -11,7 +12,7 @@ export function useIndexController({
   setSelectedId,
   setPreviewEntryId,
   directoryView,
-  setDirectoryView,
+  refreshDirectory,
   showToast,
   operationReporter,
 }) {
@@ -28,10 +29,13 @@ export function useIndexController({
   const latestRevisionRef = useRef(0);
   const reloadPromiseRef = useRef(null);
   const requestedRevisionRef = useRef(0);
+  const syncAbortRef = useRef(null);
+  const refreshDirectoryRef = useRef(refreshDirectory);
   const directoryViewRef = useRef(directoryView);
   const showToastRef = useRef(showToast);
 
   directoryViewRef.current = directoryView;
+  refreshDirectoryRef.current = refreshDirectory;
   showToastRef.current = showToast;
 
   const applyIndexSnapshot = useCallback((snapshot) => {
@@ -46,61 +50,72 @@ export function useIndexController({
     setGroups(Array.isArray(snapshot?.groups) ? snapshot.groups : []);
     setUndoStatus(snapshot?.undo || null);
     setIndexRecovery(snapshot?.recovery || null);
-    const currentDirectoryEntries = directoryViewRef.current?.entries || [];
+    const root = directoryViewRef.current?.trail?.[0];
+    const rootEntry = root && loadedFiles.find((entry) => entry.id === (root.directoryId || root.id));
+    const currentDirectoryEntries = rootEntry && !rootEntry.invalid
+      && (!root.path || root.path === rootEntry.path) ? directoryViewRef.current.entries : [];
     setSelectedId((currentId) => loadedFiles.some((file) => file.id === currentId)
       || currentDirectoryEntries.some((file) => file.id === currentId)
       ? currentId
       : loadedFiles[0]?.id || "");
     setPreviewEntryId((currentId) => currentId && (
-      loadedFiles.some((file) => file.id === currentId)
-      || directoryViewRef.current?.entries?.some((file) => file.id === currentId)
+      loadedFiles.some((file) => file.id === currentId && !file.invalid)
+      || currentDirectoryEntries.some((file) => file.id === currentId && !file.invalid)
     ) ? currentId : null);
     return true;
   }, [setPreviewEntryId, setSelectedId]);
 
-  const reloadIndexPreservingState = useCallback(async (requiredRevision = 0) => {
+  const reloadIndexPreservingState = useCallback(async (requiredRevision = 0, { restart = false } = {}) => {
+    if (!Number.isSafeInteger(requiredRevision) || requiredRevision < 0) return false;
+    if (restart) {
+      syncAbortRef.current?.abort();
+      reloadPromiseRef.current = null;
+    }
     requestedRevisionRef.current = Math.max(
       requestedRevisionRef.current,
       Number.isSafeInteger(requiredRevision) ? requiredRevision : 0,
     );
     if (reloadPromiseRef.current) return reloadPromiseRef.current;
+    const controller = new AbortController();
+    syncAbortRef.current = controller;
     reloadPromiseRef.current = (async () => {
       try {
-        while (true) {
-          const snapshot = await libraryRepository.loadIndex();
-          if (getIndexSnapshotDecision(
-            latestRevisionRef.current,
-            snapshot.revision,
-            requestedRevisionRef.current,
-          ) === "accept") {
-            applyIndexSnapshot(snapshot);
-            const activeDirectory = directoryViewRef.current;
-            const folder = activeDirectory?.trail?.at(-1);
-            if (folder) {
-              try {
-                const entries = await libraryRepository.listDirectory(
-                  folder.directoryId || folder.id,
-                  Array.isArray(folder.relativePath) ? folder.relativePath : [],
-                );
-                setDirectoryView((current) => current === activeDirectory ? { ...current, entries } : current);
-              } catch {
-                setDirectoryView(null);
-                setPreviewEntryId(null);
-              }
+        for (let attempt = 0; attempt <= INDEX_SYNC_RETRY_DELAYS.length; attempt += 1) {
+          if (controller.signal.aborted) return false;
+          try {
+            const snapshot = await libraryRepository.loadIndex();
+            if (controller.signal.aborted) return false;
+            if (getIndexSnapshotDecision(latestRevisionRef.current, snapshot.revision, requestedRevisionRef.current) !== "accept") {
+              throw new Error("stale-index-snapshot");
             }
+            applyIndexSnapshot(snapshot);
+            await refreshDirectoryRef.current?.(snapshot, controller.signal);
+            if (controller.signal.aborted) return false;
+            if (requestedRevisionRef.current <= latestRevisionRef.current) {
+              setRefreshError("");
+              return true;
+            }
+          } catch (error) {
+            if (!canRetrySync(error)) break;
           }
-          if (requestedRevisionRef.current <= latestRevisionRef.current) break;
+          if (attempt < INDEX_SYNC_RETRY_DELAYS.length) {
+            await waitForSyncRetry(INDEX_SYNC_RETRY_DELAYS[attempt], controller.signal);
+          }
         }
-      } catch {
-        showToastRef.current("无法同步本地资料索引，请重试");
+        if (!controller.signal.aborted) {
+          const message = "无法同步本地资料索引，请手动刷新重试";
+          setRefreshError(message);
+          showToastRef.current(message);
+        }
+        return false;
       } finally {
-        const needsAnotherReload = requestedRevisionRef.current > latestRevisionRef.current;
-        reloadPromiseRef.current = null;
-        if (needsAnotherReload) void reloadIndexPreservingState();
+        if (syncAbortRef.current === controller) reloadPromiseRef.current = null;
       }
     })();
     return reloadPromiseRef.current;
-  }, [applyIndexSnapshot, setDirectoryView, setPreviewEntryId]);
+  }, [applyIndexSnapshot]);
+
+  useEffect(() => () => syncAbortRef.current?.abort(), []);
 
   useEffect(() => {
     if (!isTauriRuntime) return undefined;
@@ -129,8 +144,9 @@ export function useIndexController({
     setRefreshError("");
     try {
       const result = await libraryRepository.refreshIndex();
-      if (result.changedCount || result.recoveredCount || result.revision > latestRevisionRef.current) {
-        await reloadIndexPreservingState(result.revision);
+      if (!await reloadIndexPreservingState(result.revision, { restart: true })) {
+        operationReporter?.failOperation(operationId, "索引已刷新，但界面同步失败，请重试");
+        return;
       }
       const message = result.changedCount
         ? `已刷新 ${result.changedCount} 项${result.invalidCount ? `，失效路径 ${result.invalidCount} 项` : ""}`

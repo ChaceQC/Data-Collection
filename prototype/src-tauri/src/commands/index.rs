@@ -26,9 +26,7 @@ pub async fn list_directory(
     target: DirectoryTarget,
     state: State<'_, AppState>,
 ) -> Result<Vec<DirectoryEntry>, CommandError> {
-    super::list_directory_impl(target, state)
-        .await
-        .map_err(legacy_command_error)
+    super::list_directory_impl(target, state).await
 }
 
 #[tauri::command]

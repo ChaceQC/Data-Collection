@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { libraryRepository } from "./libraryRepository.js";
 import { getRecentEntries, getRecentOpenedEntries } from "./libraryModel.js";
 
@@ -6,7 +6,7 @@ export function useLibraryNavigation({ filesRef, initialSelectedId = "", showToa
   const [activeNav, setActiveNav] = useState("library");
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedId, setSelectedId] = useState(initialSelectedId);
-  const [directoryView, setDirectoryView] = useState(null);
+  const [directoryView, updateDirectoryView] = useState(null);
   const [directoryLoading, setDirectoryLoading] = useState(false);
   const [directoryError, setDirectoryError] = useState(null);
   const [previewEntryId, setPreviewEntryId] = useState(null);
@@ -14,11 +14,26 @@ export function useLibraryNavigation({ filesRef, initialSelectedId = "", showToa
   const directoryLoadingRef = useRef(false);
   const directoryRequestRef = useRef(0);
   const focusRequestRef = useRef(0);
+  const directoryViewRef = useRef(null);
+
+  const invalidateDirectoryRequest = useCallback(() => {
+    directoryRequestRef.current += 1;
+    directoryLoadingRef.current = false;
+    setDirectoryLoading(false);
+  }, []);
+  const setDirectoryView = useCallback((value) => {
+    invalidateDirectoryRequest();
+    const next = typeof value === "function" ? value(directoryViewRef.current) : value;
+    directoryViewRef.current = next;
+    updateDirectoryView(next);
+  }, [invalidateDirectoryRequest]);
+  useEffect(() => () => { directoryRequestRef.current += 1; }, []);
 
   async function openDirectory(folder, trail) {
     const directoryId = folder.directoryId || folder.id;
     const relativePath = Array.isArray(folder.relativePath) ? folder.relativePath : [];
-    if (!directoryId || folder.invalid || directoryLoadingRef.current) return false;
+    if (!directoryId || folder.invalid) return false;
+    const contextKey = JSON.stringify([directoryId, relativePath]);
     const requestId = ++directoryRequestRef.current;
     clearSelection?.();
     setPreviewEntryId(null);
@@ -28,12 +43,15 @@ export function useLibraryNavigation({ filesRef, initialSelectedId = "", showToa
     try {
       const entries = await libraryRepository.listDirectory(directoryId, relativePath);
       if (requestId !== directoryRequestRef.current) return false;
-      setDirectoryView({ entries, trail });
+      const view = { entries, trail, contextKey };
+      directoryViewRef.current = view;
+      updateDirectoryView(view);
       setSelectedId(entries[0]?.id || folder.id);
       return true;
     } catch {
       if (requestId !== directoryRequestRef.current) return false;
-      setDirectoryView(null);
+      directoryViewRef.current = null;
+      updateDirectoryView(null);
       setDirectoryError({
         message: "无法读取文件夹内容，请检查路径和访问权限。",
         folder,
@@ -48,6 +66,42 @@ export function useLibraryNavigation({ filesRef, initialSelectedId = "", showToa
       }
     }
   }
+
+  const refreshDirectory = useCallback(async (snapshot, signal) => {
+    const view = directoryViewRef.current;
+    if (!view) return;
+    const root = view.trail[0];
+    const registeredRoot = snapshot.entries.find((entry) => entry.id === (root.directoryId || root.id));
+    if (!registeredRoot || registeredRoot.invalid || (root.path && root.path !== registeredRoot.path)) {
+      setDirectoryView(null);
+      setPreviewEntryId(null);
+      setDirectoryError(null);
+      return;
+    }
+    // 导航中的请求拥有视图，不让索引事件抢占正在打开的新目录。
+    if (directoryLoadingRef.current) return;
+    const requestId = ++directoryRequestRef.current;
+    const folder = view.trail.at(-1);
+    try {
+      const entries = await libraryRepository.listDirectory(folder.directoryId || folder.id, folder.relativePath || []);
+      if (signal?.aborted || requestId !== directoryRequestRef.current || directoryViewRef.current !== view) return;
+      const next = { ...view, entries };
+      directoryViewRef.current = next;
+      updateDirectoryView(next);
+      setSelectedId((id) => entries.some((entry) => entry.id === id) ? id : entries[0]?.id || folder.id);
+      setPreviewEntryId((id) => entries.some((entry) => entry.id === id && !entry.invalid) ? id : null);
+      setDirectoryError(null);
+    } catch (error) {
+      if (signal?.aborted || requestId !== directoryRequestRef.current || directoryViewRef.current !== view) return;
+      if (["directory-missing", "directory-invalid"].includes(error?.code)) {
+        setDirectoryView(null);
+        setPreviewEntryId(null);
+        setDirectoryError({ message: "目录已失效，请重新选择或定位。", folder, trail: view.trail, retryable: false });
+      }
+      // 暂时读取失败保留已有目录与预览，刷新错误由同步调用方反馈。
+      throw error;
+    }
+  }, [setDirectoryView]);
 
   function openFolder(folder) {
     setSelectedId(folder?.id || "");
@@ -177,6 +231,8 @@ export function useLibraryNavigation({ filesRef, initialSelectedId = "", showToa
     openDirectory,
     openFolder,
     resetToLibrary,
+    refreshDirectory,
+    invalidateDirectoryRequest,
     retryDirectory,
     previewEntryId,
     searchQuery,
@@ -184,6 +240,7 @@ export function useLibraryNavigation({ filesRef, initialSelectedId = "", showToa
     selectedId,
     setActiveNav,
     setDirectoryView,
+    setDirectoryError,
     setDirectoryLoading,
     setPreviewEntryId,
     setSearchQuery,

@@ -2,6 +2,50 @@
 
 ## 2026-09-05
 
+### 阶段 A：预览与界面异步状态闭环（0.3.41，代码与自动回归完成，打包和 Git 收口进行中）
+
+#### 已完成
+
+- 从本地 `dev` 的 `03298ae` 创建 `codex/phase-0.3.41-preview-state`，按新计划修复 R01、R06-R09。
+- PDF 接入官方 `PDFDataRangeTransport`，真实长度驱动 64 KiB 分段，单请求上限 1 MiB；大 PDF/视频的无 Range GET 返回明确 400，HEAD、尾部范围、越界、多范围、文件快照复核和释放语义保持可诊断。DOC 转换 PDF 使用同一渲染器。
+- App 传入真实 `directoryView`，导航、返回、面包屑、重新定位和目录同步统一使旧请求失效；索引事件保留有效目录子项与预览，目标移除或明确失效时关闭对应预览。目录读取区分失效目标与暂时失败。
+- 索引同步一轮最多三次，重试间隔 250/750 ms，合并在途最大 revision，拒绝过期快照与不可重试错误；取消和卸载阻止旧回调，失败保留列表并反馈，调用方不再无条件报告同步成功。
+- 新增 Rust 内存预览凭证，关联文件 ID、来源 metadata、文件级修订和任务，容量 64、有效期 30 分钟。无关收藏、标签和分组变更不影响回写，来源替换、重新定位、重命名、移除、新任务、取消、释放、过期和退出使旧凭证失效；同一 ready 的持久化重试幂等。
+- `load_preview` 返回 `outcomeToken`，`record_preview_outcome` 改为凭证参数，Rust、前端 API、runtime validator、`.d.ts` 与测试同步。保留 `index.json` v5 和其他磁盘格式，临时凭证不持久化，无需数据迁移；权限命令集合仍为 56 个。
+- 五个版本文件统一为 `0.3.41`；新增项目内开发依赖 `react-test-renderer@19.2.0` 和 `pdf-lib@1.17.1`，分别运行真实 Hook 回归和生成合成 PDF。
+
+#### 验证
+
+- `npm.cmd run test:async-state`：8 项通过，含真实 Hook 的读取中导航、迟到成功/失败、目录子项保留/移除、失效目录、虚拟重试间隔、乱序 revision、手动恢复和卸载；预览上报覆盖持久化重试、幂等、终态顺序、过期与取消。
+- `npm.cmd run test:preview`：20 项通过；真实 PDF.js 读取小 PDF 和超过 2 MiB、末页对象/xref 位于 1 MiB 之后的有效 PDF。截断旧首包时失败，新 transport 可读取末页文字，损坏、错误响应和中止路径通过。
+- `npm.cmd run test:contracts` 20 项、`test:library` 27 项、`test:floating-ball` 30 项通过；`test:parity` 的 56 个 command 一致性检查通过。
+- `cargo check --locked`、`cargo check --tests --locked`、`cargo test --locked --lib`、严格 clippy 通过。Rust 111 项通过；本次修改共享索引状态发布中的文件级修订，因此执行完整 Rust 领域测试。全 command 测试覆盖仍按阶段 D 待办，不将本次领域测试写为 command 全覆盖。
+- 使用 JSON/TOML 结构化解析核对 package、npm lock 根包、Tauri、crate 和 Cargo.lock 根包均为 `0.3.41`，只输出版本字段。
+- Edge 自动检查通过：主界面、浏览器回退预览和 Escape；实际 `PdfPreviewer` 用 `2099093` 字节合成 PDF 完成第二页绘制，普通 PDF 和转换 PDF 两种内容类型合计 4 次 Range 请求，截图与 canvas 非空像素检查通过。`2716250` 字节合成 WebM 发起 4 次显式 Range，元数据、播放跳转和资源 404 后错误状态通过；404 为主动失败注入。未调用 LibreOffice 或操作用户真实资料。
+- 浏览器检查使用 `tests/browser/preview-consumers.js` 和项目内合成夹具，可通过 Playwright CLI `run-code --filename` 复现；临时 Vite 服务使用端口 `49341`，检查后浏览器和服务已关闭，端口已确认释放。
+
+#### 进行中
+
+- 本地 NSIS 构建、产物证据和本地提交合并。
+
+#### 阻塞与风险
+
+- Windows 11/Tauri/WebView2 原生验收待用户执行，浏览器合成数据检查和构建不能替代。安装包仍未签名、不内置 WebView2 Runtime；实际 DOC 转换依赖目标机 LibreOffice。
+- `xlsx@0.18.5` 的既有风险保持不变；React Hook 测试依赖输出弃用提示，PDF.js 在 Node 输出现代构建提示，均不等于浏览器或原生运行失败。
+- 本阶段未执行远端 CI、push、Tag 或 Release，发布基线保持 `v0.3.40`。
+
+#### 涉及模块
+
+- `prototype/src/features/preview/`、`prototype/src/features/library/`、`prototype/src/App.jsx`、`prototype/src/lib/ipcContracts.*`。
+- `prototype/src-tauri/src/preview/`、`prototype/src-tauri/src/storage/`、`prototype/src-tauri/src/commands/`、五个版本文件。
+- `prototype/tests/`、两份 README、`PROJECT_PLAN.md` 和本进度。
+
+#### 下一步
+
+- 构建 `0.3.41` NSIS 并记录最终源码、大小、时间和 SHA-256；本地快进合入 `dev`、删除本阶段分支后，再进入阶段 B 的文件操作一致性与删除恢复。
+
+## 2026-09-05
+
 ### 新一轮缺陷修复与职责迁移计划（规划已完成，代码阶段未开始）
 
 #### 已完成

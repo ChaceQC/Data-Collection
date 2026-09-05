@@ -47,6 +47,7 @@ export function useLibraryActions({
   focusEntry,
   resetToLibrary,
   openDirectory,
+  invalidateDirectoryRequest,
   applyIndexSnapshot,
   reloadIndexPreservingState,
   setSelectedIds,
@@ -306,7 +307,7 @@ export function useLibraryActions({
       if (isTauriRuntime) {
         const result = await mutationActions.setEntryTags(fileId, tags);
         if (result.entry) setFiles((current) => current.map((item) => item.id === fileId ? result.entry : item));
-        await reloadIndexPreservingState(result.revision);
+        if (!await reloadIndexPreservingState(result.revision)) throw new Error("资料已保存，但界面同步失败，请刷新");
       } else {
         setFiles((current) => current.map((item) => item.id === fileId ? { ...item, tags } : item));
       }
@@ -334,7 +335,7 @@ export function useLibraryActions({
       if (isTauriRuntime) {
         const result = await mutationActions.setEntryGroup(fileId, groupDraft || null);
         if (result.entry) setFiles((current) => current.map((item) => item.id === fileId ? result.entry : item));
-        await reloadIndexPreservingState(result.revision);
+        if (!await reloadIndexPreservingState(result.revision)) throw new Error("资料已保存，但界面同步失败，请刷新");
       } else {
         setFiles((current) => current.map((item) => item.id === fileId ? { ...item, groupId: groupDraft || null } : item));
       }
@@ -502,7 +503,9 @@ export function useLibraryActions({
       const successIds = (result.results || []).filter((item) => item.status === "success").map((item) => item.id);
       const retryIds = (result.results || []).filter(isRetryableBatchItem).map((item) => item.id);
       setRetryBatch(retryIds.length ? { operationId, operation, request, fileIds: retryIds, action, successPrefix, fallback, removeSuccessful } : null);
-      if (result.changedIds?.length || result.revision > 0) await reloadIndexPreservingState(result.revision);
+      if ((result.changedIds?.length || result.revision > 0) && !await reloadIndexPreservingState(result.revision)) {
+        throw new Error("操作已提交，但界面同步失败，请刷新");
+      }
       if (removeSuccessful) setSelectedIds((current) => current.filter((id) => !successIds.includes(id)));
       const summary = summarizeBatchResult(result);
       const details = [`成功 ${summary.success} 项`];
@@ -612,7 +615,7 @@ export function useLibraryActions({
     setBatchBusy(true);
     try {
       const result = await historyActions.undoLast();
-      await reloadIndexPreservingState(result.revision);
+      if (!await reloadIndexPreservingState(result.revision)) throw new Error("撤销已提交，但界面同步失败，请刷新");
       operationReporter?.finishOperation(operationId, {
         status: "success",
         totalCount: result.changedIds.length,
@@ -646,7 +649,7 @@ export function useLibraryActions({
     setGroupBusy(true);
     try {
       const result = await mutationActions.createGroup(normalized);
-      await reloadIndexPreservingState(result.revision);
+      if (!await reloadIndexPreservingState(result.revision)) throw new Error("分组已保存，但界面同步失败，请刷新");
       operationReporter?.finishOperation(operationId, { status: "success", totalCount: 1, successCount: 1 });
       showToast(`已创建分组“${normalized}”`);
       return true;
@@ -673,7 +676,7 @@ export function useLibraryActions({
     setGroupBusy(true);
     try {
       const result = await mutationActions.renameGroup(groupId, normalized);
-      await reloadIndexPreservingState(result.revision);
+      if (!await reloadIndexPreservingState(result.revision)) throw new Error("分组已保存，但界面同步失败，请刷新");
       operationReporter?.finishOperation(operationId, { status: "success", totalCount: 1, successCount: 1 });
       showToast(`分组已重命名为“${normalized}”`);
       return true;
@@ -695,7 +698,7 @@ export function useLibraryActions({
     setGroupBusy(true);
     try {
       const result = await mutationActions.deleteGroup(groupId);
-      await reloadIndexPreservingState(result.revision);
+      if (!await reloadIndexPreservingState(result.revision)) throw new Error("分组已删除，但界面同步失败，请刷新");
       operationReporter?.finishOperation(operationId, { status: "success", totalCount: 1, successCount: 1 });
       showToast("分组已删除，资料记录和原文件未改变");
       return true;
@@ -936,6 +939,7 @@ export function useLibraryActions({
     setPreviewEntryId(null);
     try {
       const result = await fileActions.reposition(fileId, newPath);
+      invalidateDirectoryRequest();
       if (result.entry) setFiles((current) => current.map((item) => item.id === fileId ? result.entry : item));
       setDirectoryError?.(null);
       setSelectedId(fileId);

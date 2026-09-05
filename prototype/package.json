@@ -1,6 +1,6 @@
 {
   "name": "local-material-workbench",
-  "version": "0.3.40",
+  "version": "0.3.41",
   "private": true,
   "type": "module",
   "scripts": {
@@ -9,10 +9,11 @@
     "preview": "vite preview",
     "test:library": "node --test tests/library-model.test.mjs tests/library-overlay.test.mjs tests/keyboard-model.test.mjs tests/recursive-import-model.test.mjs tests/floating-library-actions.test.mjs tests/library-action-services.test.mjs",
     "test:contracts": "node --test tests/ipc-contracts.test.mjs tests/library-controller.test.mjs",
+    "test:async-state": "node --test tests/library-async-hooks.test.mjs tests/preview-outcome-reporter.test.mjs",
     "test:content": "node --test tests/content-search-model.test.mjs tests/content-index-contracts.test.mjs",
     "test:settings": "node --test tests/settings-model.test.mjs",
     "test:operations": "node --test tests/operation-model.test.mjs",
-    "test:preview": "node --test tests/preview-registry.test.mjs tests/preview-security.test.mjs tests/pdf-render-model.test.mjs tests/docx-preview-model.test.mjs",
+    "test:preview": "node --test tests/preview-registry.test.mjs tests/preview-security.test.mjs tests/pdf-render-model.test.mjs tests/docx-preview-model.test.mjs tests/pdf-range-transport.test.mjs",
     "test:floating-ball": "node --test tests/floating-ball-*.test.mjs tests/floating-library-model.test.mjs tests/floating-library-actions.test.mjs",
     "test:tray": "node --test tests/tray-model.test.mjs",
     "test:parity": "node scripts/check-ipc-parity.mjs",
@@ -37,6 +38,8 @@
   "devDependencies": {
     "@tauri-apps/cli": "2.11.4",
     "@vitejs/plugin-react": "5.0.4",
+    "pdf-lib": "1.17.1",
+    "react-test-renderer": "19.2.0",
     "vite": "6.4.3"
   }
 }

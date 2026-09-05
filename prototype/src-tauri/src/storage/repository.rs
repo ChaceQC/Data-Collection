@@ -34,17 +34,6 @@ impl<'a> IndexRepository<'a> {
         self.state.update_entries_with(mutation)
     }
 
-    pub fn record_preview_outcome(
-        &self,
-        file_id: &str,
-        status: &str,
-        expected_revision: u64,
-        opened_at: Option<i64>,
-    ) -> Result<MutationResult<Option<IndexEntry>>, StorageError> {
-        self.state
-            .record_preview_outcome(file_id, status, expected_revision, opened_at)
-    }
-
     pub fn update_index_with_undo<F, T>(
         &self,
         operation: &str,

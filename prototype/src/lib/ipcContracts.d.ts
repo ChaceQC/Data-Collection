@@ -322,6 +322,7 @@ export interface AppSettings {
 }
 
 export interface PreviewResult {
+  outcomeToken: string | null;
   previewId: string;
   kind: EntryKind;
   status: PreviewStatus;
@@ -330,6 +331,14 @@ export interface PreviewResult {
   byteLength: number;
   reason: string | null;
 }
+
+export interface PreviewOutcomeArgs {
+  fileId: string;
+  status: Exclude<PreviewStatus, "idle" | "loading">;
+  outcomeToken: string;
+}
+
+export function makePreviewOutcomeArgs(fileId: string, status: PreviewOutcomeArgs["status"], outcomeToken: string): PreviewOutcomeArgs;
 
 export interface PreviewSupport {
   supported: boolean;

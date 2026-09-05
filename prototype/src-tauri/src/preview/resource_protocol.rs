@@ -81,13 +81,21 @@ impl PreviewResourceStore {
         }
 
         let byte_length = resource.byte_length;
-        let requested_range = request.headers().get("range").map(|value| {
-            value
-                .to_str()
-                .ok()
-                .and_then(|value| parse_range(value, byte_length))
-        });
-        if request.headers().contains_key("range") && requested_range.flatten().is_none() {
+        let requested_range = request
+            .headers()
+            .get("range")
+            .filter(|_| request.method() == Method::GET)
+            .map(|value| {
+                value
+                    .to_str()
+                    .ok()
+                    .and_then(|value| parse_range(value, byte_length))
+            });
+        if request.method() == Method::GET
+            && request.headers().contains_key("range")
+            && (requested_range.flatten().is_none()
+                || request.headers().get_all("range").iter().count() != 1)
+        {
             return response(StatusCode::RANGE_NOT_SATISFIABLE, Vec::new())
                 .header("Content-Range", format!("bytes */{byte_length}"))
                 .header("Accept-Ranges", "bytes")
@@ -96,17 +104,15 @@ impl PreviewResourceStore {
 
         let (range, status) = match requested_range.flatten() {
             Some(range) => (clamp_range(range, byte_length), StatusCode::PARTIAL_CONTENT),
-            None if resource.supports_range
+            None if request.method() == Method::GET
+                && resource.supports_range
                 && is_large_stream_resource(&resource.media_type)
                 && byte_length > MAX_PROTOCOL_CHUNK_BYTES =>
             {
-                (
-                    ByteRange {
-                        start: 0,
-                        end: MAX_PROTOCOL_CHUNK_BYTES - 1,
-                    },
-                    StatusCode::PARTIAL_CONTENT,
-                )
+                return response(StatusCode::BAD_REQUEST, Vec::new())
+                    .header("Accept-Ranges", "bytes")
+                    .header("Content-Length", "0")
+                    .finish();
             }
             None => (
                 ByteRange {
@@ -153,6 +159,15 @@ impl PreviewResourceStore {
             }
             Err(_) => return response(StatusCode::INTERNAL_SERVER_ERROR, Vec::new()).finish(),
         };
+        // dispose 与读取可并发，释放后不再交付已经读取的内容。
+        if !self
+            .sessions
+            .lock()
+            .ok()
+            .is_some_and(|sessions| sessions.contains_key(preview_id))
+        {
+            return response(StatusCode::NOT_FOUND, Vec::new()).finish();
+        }
         builder.with_body(body)
     }
 }
@@ -242,7 +257,9 @@ fn read_range(
         .read_to_end(&mut body)
         .map_err(ReadRangeError::Io)?;
     let current_metadata = fs::symlink_metadata(path).map_err(ReadRangeError::Io)?;
-    if !filesystem::same_file_snapshot(expected_metadata, &current_metadata) {
+    if body.len() as u64 != length
+        || !filesystem::same_file_snapshot(expected_metadata, &current_metadata)
+    {
         return Err(ReadRangeError::Changed);
     }
     Ok(body)
@@ -403,7 +420,7 @@ mod tests {
     }
 
     #[test]
-    fn serves_a_bounded_pdf_chunk_when_the_initial_request_has_no_range() {
+    fn requires_explicit_ranges_for_large_pdf_and_video_and_keeps_head_complete() {
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map(|duration| duration.as_nanos())
@@ -432,12 +449,47 @@ mod tests {
             .body(Vec::new())
             .expect("request should be valid");
         let response = store.handle_request(&request);
-        assert_eq!(response.status(), 206);
-        assert_eq!(
-            response.body().len(),
-            super::MAX_PROTOCOL_CHUNK_BYTES as usize
-        );
-        let expected_content_length = super::MAX_PROTOCOL_CHUNK_BYTES.to_string();
+        assert_eq!(response.status(), 400);
+        assert!(response.body().is_empty());
+        for media_type in ["application/pdf", "video/mp4"] {
+            store
+                .sessions
+                .lock()
+                .unwrap()
+                .get_mut(&preview_id)
+                .unwrap()
+                .media_type = media_type.to_string();
+            assert_eq!(store.handle_request(&request).status(), 400);
+            for (range, expected_status, expected_length) in [
+                ("bytes=0-", 206, super::MAX_PROTOCOL_CHUNK_BYTES as usize),
+                ("bytes=-1", 206, 1),
+                ("bytes=1048576-", 206, 1),
+                ("bytes=1048577-", 416, 0),
+                ("bytes=0-1,4-5", 416, 0),
+            ] {
+                let mut ranged = request.clone();
+                ranged.headers_mut().insert("range", range.parse().unwrap());
+                let response = store.handle_request(&ranged);
+                assert_eq!(response.status(), expected_status);
+                assert_eq!(response.body().len(), expected_length);
+                if expected_status == 206 {
+                    assert_eq!(
+                        response.headers()["Content-Length"],
+                        expected_length.to_string()
+                    );
+                    assert!(response.headers()["Content-Range"]
+                        .to_str()
+                        .unwrap()
+                        .ends_with("/1048577"));
+                }
+            }
+        }
+        let mut head = request.clone();
+        *head.method_mut() = Method::HEAD;
+        let response = store.handle_request(&head);
+        assert_eq!(response.status(), 200);
+        assert_eq!(response.body().len(), 0);
+        let expected_content_length = bytes.len().to_string();
         assert_eq!(
             response
                 .headers()
@@ -447,19 +499,7 @@ mod tests {
                 .unwrap(),
             expected_content_length.as_str()
         );
-        assert_eq!(
-            response
-                .headers()
-                .get("Content-Range")
-                .unwrap()
-                .to_str()
-                .unwrap(),
-            format!(
-                "bytes 0-{}/{}",
-                super::MAX_PROTOCOL_CHUNK_BYTES - 1,
-                bytes.len()
-            )
-        );
+        assert!(!response.headers().contains_key("Content-Range"));
 
         store.dispose(&preview_id);
         let _ = fs::remove_file(path);

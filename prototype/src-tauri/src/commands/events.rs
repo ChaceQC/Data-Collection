@@ -6,6 +6,6 @@
 #![allow(unused_imports)]
 
 pub(crate) use super::{
-    emit_content_index_status, emit_index_changed, persist_preview_outcome, record_entry_opened,
+    emit_content_index_status, emit_index_changed, record_entry_opened,
     schedule_content_index_sync, IndexChangedEvent,
 };
