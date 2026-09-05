@@ -2,7 +2,7 @@
 
 ## 2026-09-05
 
-### 阶段 G：模块拆分和 IPC 错误收敛（0.3.39，代码、自动门禁、NSIS、本地合并已完成）
+### 阶段 G：模块拆分和 IPC 错误收敛（0.3.39，代码、自动门禁、NSIS、本地合并和用户验收已完成）
 
 #### 已完成
 
@@ -16,17 +16,21 @@
 
 #### 进行中
 
-- 无；代码、自动验证、版本同步、NSIS 候选、阶段提交和本地快进合并均已完成，当前等待用户原生回归。
+- 无；阶段 G 的代码、自动验证、版本同步、NSIS 候选、本地快进合并和用户原生验收均已完成。
+
+#### 用户验收
+
+- 2026-09-05，用户确认阶段 G 的 Windows 11/Tauri/WebView2 原生验收已完成。用户未提供具体 Windows、WebView2、显示器或样本明细，本文不补填这些环境字段。
 
 #### 阻塞与风险
 
-- 浏览器回退、Rust 自动测试和安装包构建不能替代 Windows 11/Tauri/WebView2 原生回归；用户仍需确认主窗口、悬浮球、托盘、预览、设置、文件操作和重启流程与 `0.3.38` 无行为回退。
+- 浏览器回退、Rust 自动测试和安装包构建不能替代 Windows 11/Tauri/WebView2 原生验收；本阶段原生验收已由用户确认完成，后续阶段若改动主窗口、悬浮球、托盘、预览、设置、文件操作或重启流程仍需重新验收。
 - 安装包不签名且不内置 WebView2 Runtime，DOC 预览仍依赖目标机 LibreOffice，`xlsx@0.18.5` 的既有审计风险保持不变。
-- 尚未创建 Tag、推送分支或 GitHub Release；这些动作需要单独明确授权。
+- 尚未创建 Tag、推送分支或 GitHub Release；这些动作需要单独明确授权，`0.3.39` 仍是未发布本地候选。
 
 #### 下一步
 
-- 等待用户在 Windows 11/Tauri/WebView2 安装 `0.3.39` 候选后执行原生回归，并把验收结果单独记录，不把自动化证据写成原生通过。
+- 无阶段 G 实现待办；如需发布 `0.3.39`，下一步需取得单独授权后执行 Tag、远程同步和 Release 流程。
 
 #### 涉及文件
 
@@ -54,7 +58,7 @@
 - `cargo fmt --all -- --check`、`cargo check --locked`、`cargo clippy --locked --all-targets --all-features -- -D warnings`：通过。
 - `npm.cmd run tauri:build`：通过，生成 `E:\Project\test\prototype\src-tauri\target\release\bundle\nsis\本地资料工作台_0.3.39_x64-setup.exe`，大小 `9001275` bytes，SHA-256 `859522874940AF275AB788CF25F2C95052AAF365CF41B995E140E42BA1D93030`；release 主程序大小 `36609728` bytes，SHA-256 `3B6AE1263D8430DF4B410062E0250EB11F5213F3B404C010CBDE7EF1E7F5DC43`。
 - `npm.cmd run verify:loader`：通过；`WebView2Loader.dll` 大小 `160320` bytes，SHA-256 `8427B1FC58EC707813E5C0A51EB5D69397BB333250A7B891BE4D3B123F1E0F1C`，确认 Windows x64 且与 release 主程序同目录。
-- Windows 11/Tauri/WebView2 原生验收待用户执行；本条记录已包含阶段提交和本地合并事实。
+- Windows 11/Tauri/WebView2 原生验收已由用户确认完成；本条记录已包含阶段提交、本地合并和验收事实。
 
 ## 2026-09-05
 
