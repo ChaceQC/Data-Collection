@@ -1,6 +1,6 @@
 # 正文索引与查询（0.3.43）
 
-阶段 C 修复 R02、R11，并将正文查询放入受控 blocking worker。正式发布基线仍为 v0.3.40；0.3.43 是本地候选，Windows 11/Tauri/WebView2 原生验收待用户完成。
+阶段 C 修复 R02、R11，并将正文查询放入受控 blocking worker。用户已于 2026-09-05 确认 Windows 11/Tauri/WebView2 原生验收完成。正式发布基线仍为 v0.3.40，0.3.43 仍为未发布本地候选；验收登记不改变现有源码和安装包。
 
 ## 缓存边界与兼容
 
@@ -40,3 +40,5 @@
 `prototype/shared/content-snippet-cases.json` 覆盖开头、中间、末尾、多命中、长命中、中文和非 BMP 字符；Rust 比较真实序列化结果，前端使用实际 `SearchHitSummary` 渲染并核对 `<mark>` 内容。`npm.cmd run test:content` 包含模型、契约、真实 Hook 和组件渲染回归。Rust 定向入口为 `cargo test --locked --lib storage::content`。
 
 用户原生验收项目：中文正文检索与高亮、退出重开、超限项提示、清除后重建、取消重建、快速输入与失败恢复。开发侧回归、Edge 合成页面和本地安装包不代替该验收。
+
+2026-09-05，用户回复“已验收”，阶段 C 原生验收已登记完成。用户未提供逐项样本或具体系统/WebView2 版本，因此不额外补填测试环境和样本结果。
