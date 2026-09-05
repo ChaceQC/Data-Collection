@@ -2,11 +2,12 @@
 
 ## 2026-09-05
 
-### 阶段 A：预览与界面异步状态闭环（0.3.41，开发侧收口完成，原生验收待用户完成）
+### 阶段 A：预览与界面异步状态闭环（0.3.41，开发侧收口及用户原生验收已完成）
 
 #### 已完成
 
 - 从本地 `dev` 的 `03298ae` 创建 `codex/phase-0.3.41-preview-state`，按新计划修复 R01、R06-R09。
+- 2026-09-05，用户确认阶段 A 的 Windows 11/Tauri/WebView2 原生验收已完成；计划与两份 README 已同步验收状态。
 - PDF 接入官方 `PDFDataRangeTransport`，真实长度驱动 64 KiB 分段，单请求上限 1 MiB；大 PDF/视频的无 Range GET 返回明确 400，HEAD、尾部范围、越界、多范围、文件快照复核和释放语义保持可诊断。DOC 转换 PDF 使用同一渲染器。
 - App 传入真实 `directoryView`，导航、返回、面包屑、重新定位和目录同步统一使旧请求失效；索引事件保留有效目录子项与预览，目标移除或明确失效时关闭对应预览。目录读取区分失效目标与暂时失败。
 - 索引同步一轮最多三次，重试间隔 250/750 ms，合并在途最大 revision，拒绝过期快照与不可重试错误；取消和卸载阻止旧回调，失败保留列表并反馈，调用方不再无条件报告同步成功。
@@ -25,6 +26,7 @@
 - 浏览器检查使用 `tests/browser/preview-consumers.js` 和项目内合成夹具，可通过 Playwright CLI `run-code --filename` 复现；临时 Vite 服务使用端口 `49341`，检查后浏览器和服务已关闭，端口已确认释放。
 - `cargo fmt --all -- --check` 与 `git diff --check` 通过。
 - `npm.cmd run tauri:build` 通过，已包含最终源码的 Vite 生产构建、Rust release 编译、NSIS 和 loader 检查，未重复运行同一源码的单独 build。`dist/client/index.html`、`dist/server/index.js` 和 `dist/.openai/hosting.json` 均已生成。
+- 本次验收登记仅更新文档，执行状态一致性检查和 `git diff --check`；未重复运行应用测试或重建安装包。
 
 #### 安装包与 Git
 
@@ -33,16 +35,16 @@
 - 安装包 SHA-256：`EA6BFF586DE379CD502DC58D6C5EF8A99655E74634F2F254DF0D643783ACA753`。
 - 主程序：`E:\Project\test\prototype\src-tauri\target\release\local-material-workbench.exe`；大小 `36449026` bytes，FileVersion / ProductVersion 均为 `0.3.41`，SHA-256 `A44B0735897A1021C8FD80ED1DEA516E1C3C7FF2C3DEC86D0AA42204068C6793`。
 - `WebView2Loader.dll`：`160320` bytes，SHA-256 `8427B1FC58EC707813E5C0A51EB5D69397BB333250A7B891BE4D3B123F1E0F1C`；打包脚本确认 Windows x64 且与主程序同目录。
-- 阶段分支 `codex/phase-0.3.41-preview-state`；`dev` 合并前为 `03298ae613284b70254db27555a87761ff6036e3`。本阶段源码及此交付记录采用 ancestry 检查后的 `git merge --ff-only` 合入本地 `dev`，合并后删除阶段分支；`main` 保持 `03298ae`。最终 `dev` 收口提交通过 `git log -1 dev -- PROJECT_PROGRESS.md` 定位，其打包源码与 `93a6779` 一致。
+- 阶段分支 `codex/phase-0.3.41-preview-state`；`dev` 合并前为 `03298ae613284b70254db27555a87761ff6036e3`。本阶段源码及交付记录采用 ancestry 检查后的 `git merge --ff-only` 合入本地 `dev`，合并后删除阶段分支；`main` 保持 `03298ae`。开发侧收口提交为 `1582d04`，其打包源码与 `93a6779` 一致。
 - 保留 `0.3.41` 最终安装包及上一 `0.3.40` 候选，构建产物与浏览器输出不提交。
 
-#### 进行中与用户验收
+#### 用户验收
 
-- 无阶段 A 开发侧待办；大 PDF / DOC、快速切换、目录内预览、双窗口操作、关闭重试及安装升级的 Windows 11/Tauri/WebView2 原生验收待用户执行。
+- 用户于 2026-09-05 确认阶段 A 已验收，阶段 A 的开发侧与原生验收均无待办。用户未提供具体 Windows / WebView2 版本、显示器或样本明细，本文不补填这些环境字段。
 
 #### 阻塞与风险
 
-- Windows 11/Tauri/WebView2 原生验收待用户执行，浏览器合成数据检查和构建不能替代。安装包仍未签名、不内置 WebView2 Runtime；实际 DOC 转换依赖目标机 LibreOffice。
+- Windows 11/Tauri/WebView2 原生验收已由用户确认，自动检查与用户验收分别记录。安装包仍未签名、不内置 WebView2 Runtime；实际 DOC 转换依赖目标机 LibreOffice。
 - `xlsx@0.18.5` 的既有风险保持不变；React Hook 测试依赖输出弃用提示，PDF.js 在 Node 输出现代构建提示，均不等于浏览器或原生运行失败。
 - 本阶段未执行远端 CI、push、Tag 或 Release，发布基线保持 `v0.3.40`。
 
