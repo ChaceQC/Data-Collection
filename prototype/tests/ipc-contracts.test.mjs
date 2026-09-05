@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   IpcContractError,
+  parseCommandError,
   getOperationError,
   parseExternalOpenResult,
   parseFloatingOpenEvent,
@@ -68,6 +69,22 @@ test("validates versioned group metadata and partial batch results", () => {
   });
   assert.equal(result.results[1].status, "skipped");
   assert.throws(() => parseBatchMutationResult({ revision: 6, operation: "batch", changedIds: [], results: [{ id: "file-1", status: "unknown" }] }), IpcContractError);
+});
+
+test("normalizes structured command failures without leaking multiline details", () => {
+  const error = parseCommandError({
+    code: "entry-not-found",
+    message: "资料已不存在，请刷新索引",
+    retryable: false,
+    state: "unchanged",
+  }, "set_favorite");
+  assert.equal(error.code, "entry-not-found");
+  assert.equal(error.retryable, false);
+  assert.equal(error.state, "unchanged");
+  const fallback = parseCommandError({ message: `C:\\secret\\file.txt\nstack` }, "load_file_index");
+  assert.equal(fallback.code, "command-failed");
+  assert.equal(fallback.message, "操作失败，请重试");
+  assert.equal(fallback.state, "unknown");
 });
 
 test("rejects unsafe target components and malformed event payloads", () => {

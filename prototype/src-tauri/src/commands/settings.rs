@@ -2,7 +2,7 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, Runtime, State};
 
 use crate::{
-    commands::command_error,
+    commands::{command_error, legacy_command_error, CommandError},
     storage::settings::{AppSettings, SettingsState, SettingsUpdate},
     windows::{self, FloatingBallState, FloatingWindowStatus},
 };
@@ -16,8 +16,10 @@ pub(crate) struct SettingsChangedEvent {
 }
 
 #[tauri::command]
-pub fn load_settings(state: State<'_, SettingsState>) -> Result<AppSettings, String> {
-    state.snapshot().map_err(|error| error.to_string())
+pub fn load_settings(state: State<'_, SettingsState>) -> Result<AppSettings, CommandError> {
+    state
+        .snapshot()
+        .map_err(|error| legacy_command_error(error.to_string()))
 }
 
 #[tauri::command]

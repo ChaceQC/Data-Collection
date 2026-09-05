@@ -1,5 +1,6 @@
 use tauri::{AppHandle, Emitter, State};
 
+use super::{legacy_command_error, CommandError};
 use crate::windows::{
     self, lifecycle::LifecycleState, tray::TrayState, FloatingBallState, FloatingWindowStatus,
 };
@@ -9,9 +10,9 @@ pub async fn set_floating_window_visible(
     visible: bool,
     state: State<'_, FloatingBallState>,
     app: AppHandle,
-) -> Result<FloatingWindowStatus, String> {
+) -> Result<FloatingWindowStatus, CommandError> {
     if visible {
-        windows::show_floating_ball(&app, &state)?;
+        windows::show_floating_ball(&app, &state).map_err(legacy_command_error)?;
     } else {
         windows::hide_floating_ball(&app, &state);
     }
@@ -23,8 +24,8 @@ pub async fn set_floating_window_visible(
 }
 
 #[tauri::command]
-pub fn show_main_window(app: AppHandle) -> Result<(), String> {
-    windows::lifecycle::show_main_window(&app)
+pub fn show_main_window(app: AppHandle) -> Result<(), CommandError> {
+    windows::lifecycle::show_main_window(&app).map_err(legacy_command_error)
 }
 
 #[tauri::command]
@@ -38,7 +39,7 @@ pub fn exit_app(
     lifecycle: State<'_, LifecycleState>,
     floating: State<'_, FloatingBallState>,
     preview: State<'_, crate::preview::PreviewState>,
-) -> Result<(), String> {
+) -> Result<(), CommandError> {
     windows::lifecycle::request_exit(&app, &lifecycle, &floating, &preview);
     Ok(())
 }

@@ -19,7 +19,6 @@ use super::{
 
 const MAX_BATCH_IDS: usize = 500;
 
-#[tauri::command]
 pub fn cancel_batch_operation(
     operation_id: String,
     state: State<'_, BatchState>,

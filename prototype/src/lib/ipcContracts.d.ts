@@ -16,6 +16,16 @@ export type IpcCommand =
   | "save_floating_placement" | "set_floating_window_visible" | "show_main_window" | "exit_app"
   | "can_preview" | "load_preview" | "dispose_preview" | "cancel_preview_task" | "record_preview_outcome";
 
+export interface IpcCommandError {
+  code: string;
+  message: string;
+  retryable: boolean;
+  state: "unchanged" | "updated" | "partial" | "unknown";
+  command: IpcCommand | string;
+}
+
+export function parseCommandError(value: unknown, command?: string): IpcCommandError;
+
 export interface IndexEntry {
   id: string;
   path?: string;

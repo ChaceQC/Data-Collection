@@ -23,6 +23,7 @@
     "allow-rebuild-content-index",
     "allow-clear-content-index",
     "allow-cancel-content-index",
+    "allow-get-index-recovery",
     "allow-reset-index-recovery",
     "allow-export-index-diagnostic",
     "allow-reposition-file",

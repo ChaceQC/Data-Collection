@@ -86,7 +86,39 @@ export function isDesktopRuntime() {
 export function invokeCommand(command, args, validator = identity) {
   if (!IPC_COMMANDS.includes(command)) return Promise.reject(new IpcContractError("未知的 IPC command", command));
   const request = args === undefined ? invoke(command) : invoke(command, args);
-  return Promise.resolve(request).then((value) => validator(value, command));
+  return Promise.resolve(request)
+    .then((value) => validator(value, command))
+    .catch((error) => {
+      throw parseCommandError(error, command);
+    });
+}
+
+export function parseCommandError(value, command = "ipc") {
+  if (value instanceof IpcContractError) return value;
+  if (typeof value === "string") {
+    return new IpcCommandError("command-failed", safeErrorMessage(value), true, "unknown", command);
+  }
+  if (!isRecord(value)) return new IpcContractError("IPC command 失败", command);
+  const code = typeof value.code === "string" && /^[a-z0-9-]{1,64}$/.test(value.code)
+    ? value.code
+    : "command-failed";
+  const message = safeErrorMessage(value.message);
+  const retryable = typeof value.retryable === "boolean" ? value.retryable : true;
+  const state = ["unchanged", "updated", "partial", "unknown"].includes(value.state)
+    ? value.state
+    : "unknown";
+  return new IpcCommandError(code, message, retryable, state, command);
+}
+
+export class IpcCommandError extends Error {
+  constructor(code, message, retryable, state, command) {
+    super(message);
+    this.name = "IpcCommandError";
+    this.code = code;
+    this.retryable = retryable;
+    this.state = state;
+    this.command = command;
+  }
 }
 
 export function getOperationError(error, fallback) {
@@ -711,6 +743,13 @@ function previewStatus(value, command) {
 
 function contractError(command, message) {
   return new IpcContractError(message, command);
+}
+
+function safeErrorMessage(value) {
+  if (typeof value !== "string" || value.length === 0 || value.length > 180 || /[\r\n]/.test(value)) {
+    return "操作失败，请重试";
+  }
+  return value;
 }
 
 function identity(value) {

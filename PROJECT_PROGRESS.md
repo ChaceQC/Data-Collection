@@ -2,6 +2,62 @@
 
 ## 2026-09-05
 
+### 阶段 G：模块拆分和 IPC 错误收敛（0.3.39，代码候选）
+
+#### 已完成
+
+- 按 `AGENT.md` 和 `PROJECT_PLAN.md` 在独立分支 `codex/phase-0.3.39-module-contracts` 实现阶段 G；保持 `index.json` v5、`content-index.json` v1、`settings.json` v3、操作历史 v1、悬浮球位置 v1 和待同步操作格式不变，不需要数据迁移。
+- 前端新增导入、单条 mutation、批量、文件、历史和悬浮球交接 action service；`useLibraryActions` 通过这些 service 调用既有 repository，保留原有选择、确认、busy、取消、重试和提示语义。
+- Rust command 公开入口拆分为 `commands/index.rs`、`preview.rs`、`content.rs`、`events.rs` 和 `batch.rs`；旧实现保留为兼容层，所有注册到 Tauri 的核心入口统一通过结构化错误边界返回 `code`、`message`、`retryable` 和 `state`。
+- storage 增加 `index_state.rs`、`index_persistence.rs`、`index_mutations.rs`、`undo.rs` 和 `pending_operations.rs` 领域出口；运行时状态与 JSON 持久化、mutation、undo、待同步操作的职责在代码结构中可见，磁盘格式保持不变。
+- `ipcContracts.js` 增加结构化错误解析和单行/长度边界；新增 `scripts/check-ipc-parity.mjs`，检查 JS command 白名单、Rust `generate_handler!`、`build.rs` manifest、两个 capability 和 generated ACL。
+- 五个版本入口已统一为 `0.3.39`，README、原型 README、计划和本进度已同步阶段 G 的候选状态与原生验收边界。
+
+#### 进行中
+
+- 代码、自动验证、版本同步和 NSIS 候选已完成；提交、ancestry 检查和本地 `git merge --ff-only` 合入 `dev` 待执行，随后等待用户原生回归。
+
+#### 阻塞与风险
+
+- 浏览器回退、Rust 自动测试和安装包构建不能替代 Windows 11/Tauri/WebView2 原生回归；用户仍需确认主窗口、悬浮球、托盘、预览、设置、文件操作和重启流程与 `0.3.38` 无行为回退。
+- 安装包不签名且不内置 WebView2 Runtime，DOC 预览仍依赖目标机 LibreOffice，`xlsx@0.18.5` 的既有审计风险保持不变。
+- 尚未创建 Tag、推送分支或 GitHub Release；这些动作需要单独明确授权。
+
+#### 下一步
+
+- 提交阶段 G 代码和文档，执行 ancestry 检查并使用 `git merge --ff-only` 合入 `dev`；合并后复核工作树、版本五根和 parity 结果。
+- 等待用户在 Windows 11/Tauri/WebView2 安装候选后执行原生回归，并把验收结果单独记录，不把自动化证据写成原生通过。
+
+#### 涉及文件
+
+- `prototype/src/features/library/useLibraryActions.js`
+- `prototype/src/features/library/useLibraryImportActions.js`
+- `prototype/src/features/library/useLibraryMutationActions.js`
+- `prototype/src/features/library/useLibraryBatchActions.js`
+- `prototype/src/features/library/useLibraryFileActions.js`
+- `prototype/src/features/library/useLibraryHistoryActions.js`
+- `prototype/src/features/library/useFloatingHandoff.js`
+- `prototype/src-tauri/src/commands/`
+- `prototype/src-tauri/src/storage/`
+- `prototype/src/lib/ipcContracts.js`、`prototype/src/lib/ipcContracts.d.ts`
+- `prototype/scripts/check-ipc-parity.mjs`
+- `prototype/src-tauri/build.rs`
+- `prototype/src-tauri/capabilities/default.json`
+- 五个版本入口、`README.md`、`prototype/README.md`、`PROJECT_PLAN.md`
+
+#### 验证
+
+- `npm.cmd run test:library`：27 项通过。
+- `npm.cmd run test:contracts`：20 项通过，包含结构化 IPC 错误和敏感多行错误降级测试。
+- `npm.cmd run test:parity`：56 个 command 的 JS/Rust/build/capability/generated ACL parity 通过。
+- `npm.cmd run build`：通过，生成 `dist/client/index.html`、`dist/server/index.js` 和 `dist/.openai/hosting.json`。
+- `cargo fmt --all -- --check`、`cargo check --locked`、`cargo clippy --locked --all-targets --all-features -- -D warnings`：通过。
+- `npm.cmd run tauri:build`：通过，生成 `E:\Project\test\prototype\src-tauri\target\release\bundle\nsis\本地资料工作台_0.3.39_x64-setup.exe`，大小 `9001275` bytes，SHA-256 `859522874940AF275AB788CF25F2C95052AAF365CF41B995E140E42BA1D93030`；release 主程序大小 `36609728` bytes，SHA-256 `3B6AE1263D8430DF4B410062E0250EB11F5213F3B404C010CBDE7EF1E7F5DC43`。
+- `npm.cmd run verify:loader`：通过；`WebView2Loader.dll` 大小 `160320` bytes，SHA-256 `8427B1FC58EC707813E5C0A51EB5D69397BB333250A7B891BE4D3B123F1E0F1C`，确认 Windows x64 且与 release 主程序同目录。
+- commit/merge 及 Windows 原生验收待本条记录后续补充。
+
+## 2026-09-05
+
 ### 阶段 F：预览生命周期和状态闭环（0.3.38，代码、自动门禁、NSIS、本地合并和用户验收已完成）
 
 #### 已完成

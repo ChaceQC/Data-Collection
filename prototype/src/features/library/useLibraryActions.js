@@ -1,10 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
-import { getOperationError, normalizeFloatingOpenAction, parseRecursiveImportProgress } from "../../lib/ipcContracts.js";
+import { getOperationError, parseRecursiveImportProgress } from "../../lib/ipcContracts.js";
 import { getFileKind, getFileType } from "../../lib/fileTypes.js";
 import { createOperationId } from "../operations/operationModel.js";
 import { libraryRepository } from "./libraryRepository.js";
+import { createLibraryBatchActions } from "./useLibraryBatchActions.js";
+import { createFloatingHandoff } from "./useFloatingHandoff.js";
+import { createLibraryFileActions } from "./useLibraryFileActions.js";
+import { createLibraryHistoryActions } from "./useLibraryHistoryActions.js";
+import { createLibraryImportActions } from "./useLibraryImportActions.js";
+import { createLibraryMutationActions } from "./useLibraryMutationActions.js";
 import {
   addTagToList,
   createBrowserEntries,
@@ -48,6 +54,12 @@ export function useLibraryActions({
   showToast,
   operationReporter,
 }) {
+  const importActions = useMemo(() => createLibraryImportActions(libraryRepository), []);
+  const mutationActions = useMemo(() => createLibraryMutationActions(libraryRepository), []);
+  const batchActions = useMemo(() => createLibraryBatchActions(libraryRepository), []);
+  const fileActions = useMemo(() => createLibraryFileActions(libraryRepository), []);
+  const historyActions = useMemo(() => createLibraryHistoryActions(libraryRepository), []);
+  const floatingHandoff = useMemo(() => createFloatingHandoff(libraryRepository), []);
   const [busyFileId, setBusyFileId] = useState("");
   const [pendingAction, setPendingAction] = useState(null);
   const [renameName, setRenameName] = useState("");
@@ -145,7 +157,7 @@ export function useLibraryActions({
     setBusyFileId(file.id);
     try {
       if (isTauriRuntime) {
-        const result = await libraryRepository.setFavorite(file.id, favorite);
+        const result = await mutationActions.setFavorite(file.id, favorite);
         if (result.entry) setFiles((current) => current.map((item) => item.id === file.id ? result.entry : item));
       } else {
         setFiles((current) => current.map((item) => item.id === file.id ? { ...item, favorite } : item));
@@ -205,7 +217,7 @@ export function useLibraryActions({
     setBusyFileId(fileId);
     await releasePreviewForAction(fileId);
     try {
-      if (isTauriRuntime) await libraryRepository.removeIndexEntry(fileId);
+      if (isTauriRuntime) await mutationActions.removeIndexEntry(fileId);
       const updatedFiles = files.filter((item) => item.id !== fileId);
       setFiles(updatedFiles);
       setDirectoryView(null);
@@ -236,7 +248,7 @@ export function useLibraryActions({
     await releasePreviewForAction(fileId);
     try {
       if (isTauriRuntime) {
-        const result = await libraryRepository.renameIndexedFile(fileId, renameName);
+        const result = await mutationActions.renameIndexedFile(fileId, renameName);
         if (result.entry) setFiles((current) => current.map((item) => item.id === fileId ? result.entry : item));
       } else {
         setFiles((current) => current.map((item) => {
@@ -292,7 +304,7 @@ export function useLibraryActions({
     setBusyFileId(fileId);
     try {
       if (isTauriRuntime) {
-        const result = await libraryRepository.setEntryTags(fileId, tags);
+        const result = await mutationActions.setEntryTags(fileId, tags);
         if (result.entry) setFiles((current) => current.map((item) => item.id === fileId ? result.entry : item));
         await reloadIndexPreservingState(result.revision);
       } else {
@@ -320,7 +332,7 @@ export function useLibraryActions({
     setBusyFileId(fileId);
     try {
       if (isTauriRuntime) {
-        const result = await libraryRepository.setEntryGroup(fileId, groupDraft || null);
+        const result = await mutationActions.setEntryGroup(fileId, groupDraft || null);
         if (result.entry) setFiles((current) => current.map((item) => item.id === fileId ? result.entry : item));
         await reloadIndexPreservingState(result.revision);
       } else {
@@ -339,11 +351,11 @@ export function useLibraryActions({
   }
 
   async function handleCopy(file) {
-    await runNamedAction(file, libraryRepository.copyIndexedFile, "复制到系统剪贴板", "复制失败，原文件未改变");
+    await runNamedAction(file, fileActions.copy, "复制到系统剪贴板", "复制失败，原文件未改变");
   }
 
   async function handleOpenDefault(file) {
-    await runNamedAction(file, libraryRepository.openIndexedFile, "已请求系统默认程序打开", "无法用默认程序打开，请检查文件关联");
+    await runNamedAction(file, fileActions.openDefault, "已请求系统默认程序打开", "无法用默认程序打开，请检查文件关联");
   }
 
   async function handleReveal(file, directoryView) {
@@ -354,14 +366,14 @@ export function useLibraryActions({
       }
       if (!file.directoryId || !Array.isArray(file.relativePath)) return;
       try {
-        const result = await libraryRepository.revealDirectoryChild(file.directoryId, file.relativePath);
+        const result = await fileActions.revealDirectoryChild(file.directoryId, file.relativePath);
         showToast(`已在资源管理器中定位：${result.name}`);
       } catch (error) {
         showActionError(error, "无法在资源管理器中定位，请检查路径");
       }
       return;
     }
-    await runNamedAction(file, libraryRepository.revealIndexedFile, "已在资源管理器中定位", "无法在资源管理器中定位，请检查路径");
+    await runNamedAction(file, fileActions.reveal, "已在资源管理器中定位", "无法在资源管理器中定位，请检查路径");
   }
 
   async function runNamedAction(file, action, successPrefix, fallback) {
@@ -390,7 +402,7 @@ export function useLibraryActions({
     setBusyFileId(fileId);
     await releasePreviewForAction(fileId);
     try {
-      await libraryRepository.deleteOriginalFile(fileId);
+      await fileActions.deleteOriginal(fileId);
       const updatedFiles = files.filter((item) => item.id !== fileId);
       setFiles(updatedFiles);
       setSelectedId((currentId) => currentId === fileId ? getNextSelection(updatedFiles, "") : currentId);
@@ -422,7 +434,7 @@ export function useLibraryActions({
     setPendingAction(null);
     await runBatchAction({
       fileIds,
-      action: (ids, operationId) => libraryRepository.batchRemoveIndexEntries(ids, operationId),
+      action: (ids, operationId) => batchActions.removeIndexEntries(ids, operationId),
       successPrefix: "批量移除完成",
       fallback: "批量移除失败，请刷新索引确认状态",
       removeSuccessful: true,
@@ -433,7 +445,7 @@ export function useLibraryActions({
   async function handleBatchFavorite(fileIds, favorite) {
     await runBatchAction({
       fileIds,
-      action: (ids, operationId) => libraryRepository.batchSetFavorite(ids, favorite, operationId),
+      action: (ids, operationId) => batchActions.setFavorite(ids, favorite, operationId),
       successPrefix: favorite ? "批量收藏完成" : "批量取消收藏完成",
       fallback: "批量更新收藏失败，请重试",
       operation: "batch-favorite",
@@ -449,7 +461,7 @@ export function useLibraryActions({
     }
     await runBatchAction({
       fileIds,
-      action: (ids, operationId) => libraryRepository.batchUpdateTags(ids, [validation.value], add, operationId),
+      action: (ids, operationId) => batchActions.updateTags(ids, [validation.value], add, operationId),
       successPrefix: add ? "批量添加标签完成" : "批量移除标签完成",
       fallback: "批量更新标签失败，请重试",
       operation: "batch-tags",
@@ -460,7 +472,7 @@ export function useLibraryActions({
   async function handleBatchGroup(fileIds, groupId) {
     await runBatchAction({
       fileIds,
-      action: (ids, operationId) => libraryRepository.batchSetGroup(ids, groupId || null, operationId),
+      action: (ids, operationId) => batchActions.setGroup(ids, groupId || null, operationId),
       successPrefix: groupId ? "批量分组完成" : "已解除所选资料的分组归属",
       fallback: "批量更新分组失败，请重试",
       operation: "batch-group",
@@ -543,7 +555,7 @@ export function useLibraryActions({
     if (record.operation === "batch-favorite" && typeof request.favorite === "boolean") {
       await runBatchAction({
         fileIds: record.retryableIds,
-        action: (ids, operationId) => libraryRepository.batchSetFavorite(ids, request.favorite, operationId),
+        action: (ids, operationId) => batchActions.setFavorite(ids, request.favorite, operationId),
         successPrefix: request.favorite ? "批量收藏完成" : "批量取消收藏完成",
         fallback: "批量更新收藏失败，请重试",
         operation: record.operation,
@@ -552,7 +564,7 @@ export function useLibraryActions({
     } else if (record.operation === "batch-tags" && Array.isArray(request.tags) && typeof request.add === "boolean") {
       await runBatchAction({
         fileIds: record.retryableIds,
-        action: (ids, operationId) => libraryRepository.batchUpdateTags(ids, request.tags, request.add, operationId),
+        action: (ids, operationId) => batchActions.updateTags(ids, request.tags, request.add, operationId),
         successPrefix: request.add ? "批量添加标签完成" : "批量移除标签完成",
         fallback: "批量更新标签失败，请重试",
         operation: record.operation,
@@ -561,7 +573,7 @@ export function useLibraryActions({
     } else if (record.operation === "batch-group" && (request.groupId == null || typeof request.groupId === "string")) {
       await runBatchAction({
         fileIds: record.retryableIds,
-        action: (ids, operationId) => libraryRepository.batchSetGroup(ids, request.groupId, operationId),
+        action: (ids, operationId) => batchActions.setGroup(ids, request.groupId, operationId),
         successPrefix: request.groupId ? "批量分组完成" : "已解除所选资料的分组归属",
         fallback: "批量更新分组失败，请重试",
         operation: record.operation,
@@ -570,7 +582,7 @@ export function useLibraryActions({
     } else if (record.operation === "batch-remove-index") {
       await runBatchAction({
         fileIds: record.retryableIds,
-        action: (ids, operationId) => libraryRepository.batchRemoveIndexEntries(ids, operationId),
+        action: (ids, operationId) => batchActions.removeIndexEntries(ids, operationId),
         successPrefix: "批量移除完成",
         fallback: "批量移除失败，请刷新索引确认状态",
         removeSuccessful: true,
@@ -585,7 +597,7 @@ export function useLibraryActions({
     const operationId = activeBatchOperationIdRef.current;
     if (!isTauriRuntime || !operationId) return;
     try {
-      await libraryRepository.cancelBatchOperation(operationId);
+      await batchActions.cancel(operationId);
       showToast("已请求取消批量操作，正在整理已完成项");
     } catch (error) {
       showActionError(error, "无法取消批量操作，请稍候查看结果");
@@ -599,7 +611,7 @@ export function useLibraryActions({
     batchBusyRef.current = true;
     setBatchBusy(true);
     try {
-      const result = await libraryRepository.undoLast();
+      const result = await historyActions.undoLast();
       await reloadIndexPreservingState(result.revision);
       operationReporter?.finishOperation(operationId, {
         status: "success",
@@ -633,7 +645,7 @@ export function useLibraryActions({
     groupBusyRef.current = true;
     setGroupBusy(true);
     try {
-      const result = await libraryRepository.createGroup(normalized);
+      const result = await mutationActions.createGroup(normalized);
       await reloadIndexPreservingState(result.revision);
       operationReporter?.finishOperation(operationId, { status: "success", totalCount: 1, successCount: 1 });
       showToast(`已创建分组“${normalized}”`);
@@ -660,7 +672,7 @@ export function useLibraryActions({
     groupBusyRef.current = true;
     setGroupBusy(true);
     try {
-      const result = await libraryRepository.renameGroup(groupId, normalized);
+      const result = await mutationActions.renameGroup(groupId, normalized);
       await reloadIndexPreservingState(result.revision);
       operationReporter?.finishOperation(operationId, { status: "success", totalCount: 1, successCount: 1 });
       showToast(`分组已重命名为“${normalized}”`);
@@ -682,7 +694,7 @@ export function useLibraryActions({
     groupBusyRef.current = true;
     setGroupBusy(true);
     try {
-      const result = await libraryRepository.deleteGroup(groupId);
+      const result = await mutationActions.deleteGroup(groupId);
       await reloadIndexPreservingState(result.revision);
       operationReporter?.finishOperation(operationId, { status: "success", totalCount: 1, successCount: 1 });
       showToast("分组已删除，资料记录和原文件未改变");
@@ -725,8 +737,8 @@ export function useLibraryActions({
     indexingRef.current = true;
     setIndexing(true);
     try {
-      const result = await libraryRepository.indexPaths(acceptedPaths);
-      const snapshot = await libraryRepository.loadIndex();
+      const result = await importActions.indexPaths(acceptedPaths);
+      const snapshot = await importActions.loadIndex();
       applyIndexSnapshot(snapshot);
       setDirectoryView(null);
       setPreviewEntryId(null);
@@ -762,7 +774,7 @@ export function useLibraryActions({
     const operationId = activeImportOperationIdRef.current;
     if (!isTauriRuntime || !operationId) return;
     try {
-      await libraryRepository.cancelBatchOperation(operationId);
+      await importActions.cancel(operationId);
       showToast("已请求取消扫描，正在整理已完成项");
     } catch (error) {
       showActionError(error, "无法取消扫描，请稍候查看操作中心");
@@ -808,8 +820,8 @@ export function useLibraryActions({
     indexingRef.current = true;
     setIndexing(true);
     try {
-      const result = await libraryRepository.importFoldersRecursive(paths, operationId, normalizedPolicy);
-      const snapshot = await libraryRepository.loadIndex();
+      const result = await importActions.importFoldersRecursive(paths, operationId, normalizedPolicy);
+      const snapshot = await importActions.loadIndex();
       applyIndexSnapshot(snapshot);
       setDirectoryView(null);
       setPreviewEntryId(null);
@@ -923,7 +935,7 @@ export function useLibraryActions({
     if (!fileId) return;
     setPreviewEntryId(null);
     try {
-      const result = await libraryRepository.repositionFile(fileId, newPath);
+      const result = await fileActions.reposition(fileId, newPath);
       if (result.entry) setFiles((current) => current.map((item) => item.id === fileId ? result.entry : item));
       setDirectoryError?.(null);
       setSelectedId(fileId);
@@ -955,14 +967,14 @@ export function useLibraryActions({
     if (!fileId || !isTauriRuntime) return;
     let action;
     try {
-      action = normalizeFloatingOpenAction(payload?.action);
+      action = floatingHandoff.normalizeAction(payload?.action);
     } catch {
       showToast("悬浮球打开动作无效，请重试");
       return;
     }
     const requestId = ++floatingOpenRequestRef.current;
     try {
-      const snapshot = await libraryRepository.loadIndex();
+      const snapshot = await floatingHandoff.loadIndex();
       if (requestId !== floatingOpenRequestRef.current) return;
       const target = snapshot.entries.find((file) => file.id === fileId);
       applyIndexSnapshot(snapshot);

@@ -7,5 +7,5 @@ commands.allow = ["load_preview"]
 
 [[permission]]
 identifier = "deny-load-preview"
-description = "Denies the load_preview command."
+description = "Denies the load_preview command without any pre-configured scope."
 commands.deny = ["load_preview"]

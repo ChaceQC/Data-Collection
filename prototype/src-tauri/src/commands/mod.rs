@@ -14,13 +14,21 @@ use tauri::{AppHandle, Emitter, Manager, Runtime, State};
 use crate::storage::repository::IndexRepository;
 use crate::{
     filesystem::{self, DirectoryEntry, IndexEntry},
-    preview::{self, PreviewOptions, PreviewResult, PreviewState, PreviewSupport},
+    preview::{
+        self as preview_service, PreviewOptions, PreviewResult, PreviewState, PreviewSupport,
+    },
     storage::{self, AppState, Group, IndexSnapshot, StorageError},
 };
 
+pub(crate) mod batch;
+pub(crate) mod content;
+pub(crate) mod events;
 pub(crate) mod floating_ball;
+pub(crate) mod index;
 pub(crate) mod library;
 pub(crate) mod operation_history;
+#[path = "preview.rs"]
+pub(crate) mod preview_commands;
 pub(crate) mod settings;
 pub(crate) mod window;
 
@@ -320,6 +328,17 @@ pub(crate) fn command_error(
     }
 }
 
+/// 将旧的字符串错误边界收敛为前端可验证的结构化错误。
+/// 只保留短的单行用户提示，避免把路径、堆栈或外部命令参数带入 IPC。
+pub(crate) fn legacy_command_error(error: String) -> CommandError {
+    let message = if error.len() <= 180 && !error.contains(['\r', '\n']) {
+        error
+    } else {
+        "操作失败，请重试".to_string()
+    };
+    command_error("command-failed", message, true, "unknown")
+}
+
 pub(crate) fn structured_storage_error(error: StorageError) -> CommandError {
     let (code, retryable, state) = match &error {
         StorageError::InvalidId => ("invalid-id", false, "unchanged"),
@@ -394,8 +413,7 @@ pub struct PreviewTarget {
     pub relative_path: Vec<String>,
 }
 
-#[tauri::command]
-pub fn load_file_index(
+pub(crate) fn load_file_index_impl(
     state: State<'_, AppState>,
     app: AppHandle,
 ) -> Result<IndexSnapshot, String> {
@@ -416,8 +434,7 @@ pub fn load_file_index(
     Ok(outcome.snapshot)
 }
 
-#[tauri::command]
-pub async fn list_directory(
+pub(crate) async fn list_directory_impl(
     target: DirectoryTarget,
     state: State<'_, AppState>,
 ) -> Result<Vec<DirectoryEntry>, String> {
@@ -442,8 +459,7 @@ pub async fn list_directory(
     .map_err(|error| error.to_string())
 }
 
-#[tauri::command]
-pub async fn reveal_directory_child(
+pub(crate) async fn reveal_directory_child_impl(
     target: DirectoryTarget,
     state: State<'_, AppState>,
 ) -> Result<library::ExternalOpenResult, String> {
@@ -474,8 +490,7 @@ pub async fn reveal_directory_child(
     Ok(library::ExternalOpenResult { name })
 }
 
-#[tauri::command]
-pub async fn index_paths(
+pub(crate) async fn index_paths_command_impl(
     paths: Vec<String>,
     state: State<'_, AppState>,
     app: AppHandle,
@@ -534,8 +549,7 @@ async fn index_paths_impl<R: Runtime>(
     })
 }
 
-#[tauri::command]
-pub async fn import_folders_recursive(
+pub(crate) async fn import_folders_recursive_impl(
     paths: Vec<String>,
     operation_id: String,
     policy: Option<filesystem::recursive_import::RecursiveImportPolicy>,
@@ -683,8 +697,7 @@ fn append_recursive_skip_reason(reasons: &mut Vec<String>, reason: &str) {
     }
 }
 
-#[tauri::command]
-pub async fn reposition_file(
+pub(crate) async fn reposition_file_impl(
     file_id: String,
     new_path: String,
     state: State<'_, AppState>,
@@ -750,8 +763,7 @@ pub async fn reposition_file(
     })
 }
 
-#[tauri::command]
-pub async fn can_preview(
+pub(crate) async fn can_preview_impl(
     target: PreviewTarget,
     kind: String,
     state: State<'_, AppState>,
@@ -759,7 +771,7 @@ pub async fn can_preview(
 ) -> Result<PreviewSupport, String> {
     let (path, _, index_revision) = resolve_preview_target(&state, &target)?;
     let mut support = tauri::async_runtime::spawn_blocking(move || {
-        preview::can_preview(&path.to_string_lossy(), &kind)
+        preview_service::can_preview(&path.to_string_lossy(), &kind)
     })
     .await
     .map_err(|_| "预览检查任务未完成，请重试".to_string())?;
@@ -780,8 +792,7 @@ pub async fn can_preview(
     Ok(support)
 }
 
-#[tauri::command]
-pub async fn load_preview(
+pub(crate) async fn load_preview_impl(
     target: PreviewTarget,
     kind: String,
     options: Option<PreviewOptions>,
@@ -796,7 +807,7 @@ pub async fn load_preview(
     let task_id_for_task = task_id.clone();
     let cancellation_for_task = cancellation.clone();
     let join_result = tauri::async_runtime::spawn_blocking(move || {
-        let result = preview::load_preview_with_cancellation(
+        let result = preview_service::load_preview_with_cancellation(
             &path.to_string_lossy(),
             &kind,
             options,
@@ -834,20 +845,23 @@ pub async fn load_preview(
     }
 }
 
-#[tauri::command]
-pub fn dispose_preview(preview_id: String, state: State<'_, PreviewState>) -> Result<(), String> {
-    preview::dispose_preview(state.inner(), &preview_id);
+pub(crate) fn dispose_preview_impl(
+    preview_id: String,
+    state: State<'_, PreviewState>,
+) -> Result<(), String> {
+    preview_service::dispose_preview(state.inner(), &preview_id);
     Ok(())
 }
 
-#[tauri::command]
-pub fn cancel_preview_task(task_id: String, state: State<'_, PreviewState>) -> Result<(), String> {
+pub(crate) fn cancel_preview_task_impl(
+    task_id: String,
+    state: State<'_, PreviewState>,
+) -> Result<(), String> {
     state.cancel_task(&task_id);
     Ok(())
 }
 
-#[tauri::command]
-pub fn record_preview_outcome(
+pub(crate) fn record_preview_outcome_impl(
     file_id: String,
     status: String,
     expected_revision: u64,
@@ -868,8 +882,7 @@ pub fn record_preview_outcome(
     })
 }
 
-#[tauri::command]
-pub fn get_index_recovery(
+pub(crate) fn get_index_recovery_impl(
     state: State<'_, AppState>,
 ) -> Result<Option<storage::IndexRecoveryStatus>, String> {
     let repository = IndexRepository::new(state.inner());
@@ -879,8 +892,7 @@ pub fn get_index_recovery(
         .map_err(storage_message)
 }
 
-#[tauri::command]
-pub fn reset_index_recovery(
+pub(crate) fn reset_index_recovery_impl(
     state: State<'_, AppState>,
     app: AppHandle,
 ) -> Result<IndexSnapshot, String> {
@@ -890,8 +902,7 @@ pub fn reset_index_recovery(
     Ok(snapshot)
 }
 
-#[tauri::command]
-pub fn export_index_diagnostic(
+pub(crate) fn export_index_diagnostic_impl(
     destination: String,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
@@ -901,8 +912,7 @@ pub fn export_index_diagnostic(
         .map_err(storage_message)
 }
 
-#[tauri::command]
-pub async fn refresh_index(
+pub(crate) async fn refresh_index_impl(
     state: State<'_, AppState>,
     app: AppHandle,
 ) -> Result<IndexRefreshResult, String> {
@@ -919,15 +929,13 @@ pub async fn refresh_index(
     apply_refresh_result(&repository, &app, checked)
 }
 
-#[tauri::command]
-pub fn content_index_status(
+pub(crate) fn content_index_status_impl(
     state: State<'_, storage::content_index::ContentIndexState>,
 ) -> Result<storage::content_index::ContentIndexStatus, CommandError> {
     state.inner().status().map_err(content_index_error)
 }
 
-#[tauri::command]
-pub fn search_content(
+pub(crate) fn search_content_impl(
     query: String,
     use_regex: bool,
     state: State<'_, storage::content_index::ContentIndexState>,
@@ -942,8 +950,7 @@ pub fn search_content(
     })
 }
 
-#[tauri::command]
-pub async fn search_metadata(
+pub(crate) async fn search_metadata_impl(
     query: storage::metadata_search::MetadataSearchQuery,
     state: State<'_, AppState>,
 ) -> Result<storage::metadata_search::MetadataSearchResponse, CommandError> {
@@ -988,8 +995,7 @@ pub async fn search_metadata(
         .map_err(metadata_search_error)
 }
 
-#[tauri::command]
-pub async fn rebuild_content_index(
+pub(crate) async fn rebuild_content_index_impl(
     operation_id: String,
     state: State<'_, AppState>,
     content_state: State<'_, storage::content_index::ContentIndexState>,
@@ -1063,8 +1069,7 @@ pub async fn rebuild_content_index(
     })
 }
 
-#[tauri::command]
-pub fn clear_content_index(
+pub(crate) fn clear_content_index_impl(
     state: State<'_, AppState>,
     content_state: State<'_, storage::content_index::ContentIndexState>,
     app: AppHandle,
@@ -1078,8 +1083,7 @@ pub fn clear_content_index(
     Ok(status)
 }
 
-#[tauri::command]
-pub fn cancel_content_index(
+pub(crate) fn cancel_content_index_impl(
     operation_id: String,
     state: State<'_, BatchState>,
 ) -> Result<(), CommandError> {

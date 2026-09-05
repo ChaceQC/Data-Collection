@@ -537,10 +537,10 @@
           "markdownDescription": "Denies the batch_update_tags command without any pre-configured scope."
         },
         {
-          "description": "Denies the can_preview command.",
+          "description": "Denies the can_preview command without any pre-configured scope.",
           "type": "string",
           "const": "deny-can-preview",
-          "markdownDescription": "Denies the can_preview command."
+          "markdownDescription": "Denies the can_preview command without any pre-configured scope."
         },
         {
           "description": "Denies the cancel_batch_operation command without any pre-configured scope.",
@@ -603,10 +603,10 @@
           "markdownDescription": "Denies the delete_original_file command without any pre-configured scope."
         },
         {
-          "description": "Denies the dispose_preview command.",
+          "description": "Denies the dispose_preview command without any pre-configured scope.",
           "type": "string",
           "const": "deny-dispose-preview",
-          "markdownDescription": "Denies the dispose_preview command."
+          "markdownDescription": "Denies the dispose_preview command without any pre-configured scope."
         },
         {
           "description": "Denies the exit_app command without any pre-configured scope.",
@@ -681,10 +681,10 @@
           "markdownDescription": "Denies the load_operation_history command without any pre-configured scope."
         },
         {
-          "description": "Denies the load_preview command.",
+          "description": "Denies the load_preview command without any pre-configured scope.",
           "type": "string",
           "const": "deny-load-preview",
-          "markdownDescription": "Denies the load_preview command."
+          "markdownDescription": "Denies the load_preview command without any pre-configured scope."
         },
         {
           "description": "Denies the load_settings command without any pre-configured scope.",

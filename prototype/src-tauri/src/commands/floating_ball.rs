@@ -1,7 +1,7 @@
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
 
-use super::{command_error, CommandError};
+use super::{command_error, legacy_command_error, CommandError};
 use crate::{
     filesystem,
     storage::{self, floating_ball::FloatingPlacement, AppState, StorageError},
@@ -71,8 +71,7 @@ struct FloatingOpenEvent {
     action: String,
 }
 
-#[tauri::command]
-pub async fn record_floating_paths(
+async fn record_floating_paths_impl(
     paths: Vec<String>,
     state: State<'_, AppState>,
     app: AppHandle,
@@ -140,8 +139,7 @@ pub async fn record_floating_paths(
     Ok(result)
 }
 
-#[tauri::command]
-pub fn get_floating_recent(
+fn get_floating_recent_impl(
     state: State<'_, AppState>,
     app: AppHandle,
 ) -> Result<FloatingRecentResult, String> {
@@ -153,8 +151,7 @@ pub fn get_floating_recent(
     })
 }
 
-#[tauri::command]
-pub fn open_main_from_floating(
+fn open_main_from_floating_impl(
     file_id: String,
     action: Option<String>,
     state: State<'_, AppState>,
@@ -185,8 +182,7 @@ pub fn open_main_from_floating(
     .map_err(|_| "主窗口无法接收悬浮球操作，请重试".to_string())
 }
 
-#[tauri::command]
-pub fn load_floating_placement(app: AppHandle) -> Result<FloatingPlacement, String> {
+fn load_floating_placement_impl(app: AppHandle) -> Result<FloatingPlacement, String> {
     let areas = windows::monitor::available_work_areas(&app);
     let path = placement_path(&app)?;
     let placement = storage::floating_ball::load_placement(&path)
@@ -195,8 +191,7 @@ pub fn load_floating_placement(app: AppHandle) -> Result<FloatingPlacement, Stri
     Ok(placement)
 }
 
-#[tauri::command]
-pub fn save_floating_placement(
+fn save_floating_placement_impl(
     placement: FloatingPlacement,
     app: AppHandle,
 ) -> Result<FloatingPlacement, String> {
@@ -218,8 +213,7 @@ pub fn floating_window_status(
     state.status(&app)
 }
 
-#[tauri::command]
-pub async fn retry_floating_ball(
+async fn retry_floating_ball_impl(
     state: State<'_, FloatingBallState>,
     app: AppHandle,
 ) -> Result<windows::FloatingWindowStatus, String> {
@@ -250,4 +244,56 @@ fn placement_path<R: tauri::Runtime>(app: &AppHandle<R>) -> Result<std::path::Pa
         .app_data_dir()
         .map(|path| path.join("floating-ball.json"))
         .map_err(|_| "应用数据目录不可用".to_string())
+}
+
+#[tauri::command]
+pub async fn record_floating_paths(
+    paths: Vec<String>,
+    state: State<'_, AppState>,
+    app: AppHandle,
+) -> Result<FloatingRecordResult, CommandError> {
+    record_floating_paths_impl(paths, state, app)
+        .await
+        .map_err(legacy_command_error)
+}
+
+#[tauri::command]
+pub fn get_floating_recent(
+    state: State<'_, AppState>,
+    app: AppHandle,
+) -> Result<FloatingRecentResult, CommandError> {
+    get_floating_recent_impl(state, app).map_err(legacy_command_error)
+}
+
+#[tauri::command]
+pub fn open_main_from_floating(
+    file_id: String,
+    action: Option<String>,
+    state: State<'_, AppState>,
+    app: AppHandle,
+) -> Result<(), CommandError> {
+    open_main_from_floating_impl(file_id, action, state, app).map_err(legacy_command_error)
+}
+
+#[tauri::command]
+pub fn load_floating_placement(app: AppHandle) -> Result<FloatingPlacement, CommandError> {
+    load_floating_placement_impl(app).map_err(legacy_command_error)
+}
+
+#[tauri::command]
+pub fn save_floating_placement(
+    placement: FloatingPlacement,
+    app: AppHandle,
+) -> Result<FloatingPlacement, CommandError> {
+    save_floating_placement_impl(placement, app).map_err(legacy_command_error)
+}
+
+#[tauri::command]
+pub async fn retry_floating_ball(
+    state: State<'_, FloatingBallState>,
+    app: AppHandle,
+) -> Result<windows::FloatingWindowStatus, CommandError> {
+    retry_floating_ball_impl(state, app)
+        .await
+        .map_err(legacy_command_error)
 }

@@ -67,7 +67,7 @@ pub fn run() {
                 .state::<storage::AppState>()
                 .snapshot()
                 .map_err(|error| Error::other(error.to_string()))?;
-            commands::schedule_content_index_sync(
+            commands::events::schedule_content_index_sync(
                 app.handle(),
                 snapshot.revision,
                 snapshot.entries,
@@ -111,22 +111,22 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            commands::load_file_index,
-            commands::list_directory,
-            commands::reveal_directory_child,
-            commands::index_paths,
-            commands::import_folders_recursive,
-            commands::refresh_index,
-            commands::content_index_status,
-            commands::search_content,
-            commands::search_metadata,
-            commands::rebuild_content_index,
-            commands::clear_content_index,
-            commands::cancel_content_index,
-            commands::get_index_recovery,
-            commands::reset_index_recovery,
-            commands::export_index_diagnostic,
-            commands::reposition_file,
+            commands::index::load_file_index,
+            commands::index::list_directory,
+            commands::index::reveal_directory_child,
+            commands::index::index_paths,
+            commands::index::import_folders_recursive,
+            commands::index::refresh_index,
+            commands::content::content_index_status,
+            commands::content::search_content,
+            commands::content::search_metadata,
+            commands::content::rebuild_content_index,
+            commands::content::clear_content_index,
+            commands::content::cancel_content_index,
+            commands::index::get_index_recovery,
+            commands::index::reset_index_recovery,
+            commands::index::export_index_diagnostic,
+            commands::index::reposition_file,
             commands::floating_ball::record_floating_paths,
             commands::floating_ball::get_floating_recent,
             commands::floating_ball::get_floating_files,
@@ -151,7 +151,7 @@ pub fn run() {
             commands::library::batch_remove_index_entries,
             commands::library::batch_update_tags,
             commands::library::batch_set_group,
-            commands::library::cancel_batch_operation,
+            commands::batch::cancel_batch_operation,
             commands::library::undo_last,
             commands::operation_history::load_operation_history,
             commands::operation_history::save_operation_record,
@@ -162,11 +162,11 @@ pub fn run() {
             commands::window::show_main_window,
             commands::window::tray_status,
             commands::window::exit_app,
-            commands::can_preview,
-            commands::load_preview,
-            commands::dispose_preview,
-            commands::cancel_preview_task,
-            commands::record_preview_outcome,
+            commands::preview_commands::can_preview,
+            commands::preview_commands::load_preview,
+            commands::preview_commands::dispose_preview,
+            commands::preview_commands::cancel_preview_task,
+            commands::preview_commands::record_preview_outcome,
         ])
         .build(tauri::generate_context!())
         .map(|app| {

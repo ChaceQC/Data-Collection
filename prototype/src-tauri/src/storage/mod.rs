@@ -20,11 +20,16 @@ pub(crate) mod content_index;
 pub(crate) mod content_search;
 pub(crate) mod floating_ball;
 pub(crate) mod floating_files;
+pub(crate) mod index_mutations;
+pub(crate) mod index_persistence;
+pub(crate) mod index_state;
 pub(crate) mod metadata_search;
 pub(crate) mod operation_history;
+pub(crate) mod pending_operations;
 #[cfg(not(test))]
 pub(crate) mod repository;
 pub(crate) mod settings;
+pub(crate) mod undo;
 
 pub const INDEX_FORMAT_VERSION: u32 = 5;
 const LEGACY_INDEX_FORMAT_VERSION: u32 = 1;
@@ -87,56 +92,7 @@ pub struct AppState {
     snapshot: RwLock<IndexStateData>,
 }
 
-#[derive(Clone, Debug, Default)]
-struct IndexStateData {
-    entries: Vec<IndexEntry>,
-    groups: Vec<Group>,
-    undo_log: Vec<UndoRecord>,
-    recovery: Option<RecoveryInfo>,
-    pending_operations: Vec<PendingOperation>,
-    revision: u64,
-}
-
-impl IndexStateData {
-    fn recovery_status(&self) -> Option<IndexRecoveryStatus> {
-        if self.recovery.is_none() && self.pending_operations.is_empty() {
-            return None;
-        }
-        Some(IndexRecoveryStatus {
-            required: true,
-            issue: self
-                .recovery
-                .as_ref()
-                .map(|value| value.issue.clone())
-                .unwrap_or_else(|| "存在待同步的文件操作，请刷新索引".to_string()),
-            backup_created: self
-                .recovery
-                .as_ref()
-                .map(|value| value.backup_created)
-                .unwrap_or(false),
-            pending_operations: self.pending_operations.len(),
-        })
-    }
-
-    fn public_snapshot(&self) -> IndexSnapshot {
-        let undo = self
-            .undo_log
-            .last()
-            .filter(|record| record.revision == self.revision)
-            .map(|record| UndoStatus {
-                id: record.id.clone(),
-                operation: record.operation.clone(),
-                count: record.entries.len() + record.groups.len(),
-            });
-        IndexSnapshot {
-            entries: self.entries.clone(),
-            groups: self.groups.clone(),
-            revision: self.revision,
-            recovery: self.recovery_status(),
-            undo,
-        }
-    }
-}
+pub(super) use index_state::IndexStateData;
 
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -176,7 +132,7 @@ struct UndoGroupChange {
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct UndoRecord {
+pub(crate) struct UndoRecord {
     id: String,
     operation: String,
     revision: u64,
@@ -194,7 +150,7 @@ struct PendingDocument {
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct PendingOperation {
+pub(crate) struct PendingOperation {
     file_id: String,
     operation: String,
     path: String,
@@ -203,7 +159,7 @@ struct PendingOperation {
 }
 
 #[derive(Clone, Debug)]
-struct RecoveryInfo {
+pub(crate) struct RecoveryInfo {
     issue: String,
     backup_created: bool,
 }

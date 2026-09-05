@@ -7,5 +7,5 @@ commands.allow = ["can_preview"]
 
 [[permission]]
 identifier = "deny-can-preview"
-description = "Denies the can_preview command."
+description = "Denies the can_preview command without any pre-configured scope."
 commands.deny = ["can_preview"]
