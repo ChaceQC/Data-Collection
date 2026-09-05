@@ -2,7 +2,7 @@
 
 ## 2026-09-05
 
-### 阶段 G：模块拆分和 IPC 错误收敛（0.3.39，代码候选）
+### 阶段 G：模块拆分和 IPC 错误收敛（0.3.39，代码、自动门禁、NSIS、本地合并已完成）
 
 #### 已完成
 
@@ -12,10 +12,11 @@
 - storage 增加 `index_state.rs`、`index_persistence.rs`、`index_mutations.rs`、`undo.rs` 和 `pending_operations.rs` 领域出口；运行时状态与 JSON 持久化、mutation、undo、待同步操作的职责在代码结构中可见，磁盘格式保持不变。
 - `ipcContracts.js` 增加结构化错误解析和单行/长度边界；新增 `scripts/check-ipc-parity.mjs`，检查 JS command 白名单、Rust `generate_handler!`、`build.rs` manifest、两个 capability 和 generated ACL。
 - 五个版本入口已统一为 `0.3.39`，README、原型 README、计划和本进度已同步阶段 G 的候选状态与原生验收边界。
+- 阶段提交为 `aa08cae`，已通过 ancestry 检查，并使用 `git merge --ff-only codex/phase-0.3.39-module-contracts` 合入本地 `dev`；阶段分支已删除。
 
 #### 进行中
 
-- 代码、自动验证、版本同步和 NSIS 候选已完成；提交、ancestry 检查和本地 `git merge --ff-only` 合入 `dev` 待执行，随后等待用户原生回归。
+- 无；代码、自动验证、版本同步、NSIS 候选、阶段提交和本地快进合并均已完成，当前等待用户原生回归。
 
 #### 阻塞与风险
 
@@ -25,8 +26,7 @@
 
 #### 下一步
 
-- 提交阶段 G 代码和文档，执行 ancestry 检查并使用 `git merge --ff-only` 合入 `dev`；合并后复核工作树、版本五根和 parity 结果。
-- 等待用户在 Windows 11/Tauri/WebView2 安装候选后执行原生回归，并把验收结果单独记录，不把自动化证据写成原生通过。
+- 等待用户在 Windows 11/Tauri/WebView2 安装 `0.3.39` 候选后执行原生回归，并把验收结果单独记录，不把自动化证据写成原生通过。
 
 #### 涉及文件
 
@@ -54,7 +54,7 @@
 - `cargo fmt --all -- --check`、`cargo check --locked`、`cargo clippy --locked --all-targets --all-features -- -D warnings`：通过。
 - `npm.cmd run tauri:build`：通过，生成 `E:\Project\test\prototype\src-tauri\target\release\bundle\nsis\本地资料工作台_0.3.39_x64-setup.exe`，大小 `9001275` bytes，SHA-256 `859522874940AF275AB788CF25F2C95052AAF365CF41B995E140E42BA1D93030`；release 主程序大小 `36609728` bytes，SHA-256 `3B6AE1263D8430DF4B410062E0250EB11F5213F3B404C010CBDE7EF1E7F5DC43`。
 - `npm.cmd run verify:loader`：通过；`WebView2Loader.dll` 大小 `160320` bytes，SHA-256 `8427B1FC58EC707813E5C0A51EB5D69397BB333250A7B891BE4D3B123F1E0F1C`，确认 Windows x64 且与 release 主程序同目录。
-- commit/merge 及 Windows 原生验收待本条记录后续补充。
+- Windows 11/Tauri/WebView2 原生验收待用户执行；本条记录已包含阶段提交和本地合并事实。
 
 ## 2026-09-05
 
